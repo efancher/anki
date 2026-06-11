@@ -10,6 +10,7 @@ Decks:
   - confusables: vocabulary sharing kanji/readings that are easy to mix up
   - phonetic-families: kanji grouped by repeated reading-bearing components
   - pitch-leeches: leeches with pitch data, if pitch data is supplied
+  - radicals: current-level and next-level radicals
   - all: all of the above
 
 Install:
@@ -28,7 +29,7 @@ With Yomitan pitch dictionary zip/folder:
 
 from __future__ import annotations
 
-VERSION = "2.2.0"
+VERSION = "2.4.1"
 BUILD_DATE = "2026-06-09"
 
 import warnings
@@ -68,12 +69,14 @@ DECK_IDS = {
     "confusables": 2059400113,
     "phonetic-families": 2059400114,
     "pitch-leeches": 2059400115,
+    "radicals": 2059400116,
 }
 
 MODEL_IDS = {
     "item": 1865429012,
     "pair": 1865429013,
     "family": 1865429014,
+    "radical": 1865429015,
 }
 
 DECK_NAMES = {
@@ -82,6 +85,7 @@ DECK_NAMES = {
     "confusables": "WaniKani Confusable Vocabulary",
     "phonetic-families": "WaniKani Phonetic Families",
     "pitch-leeches": "WaniKani Pitch Leeches",
+    "radicals": "WaniKani Current and Next Radicals",
 }
 
 PAIR_RULES = [
@@ -121,9 +125,9 @@ COMMON_CSS = """
   line-height: 1.45;
 }
 .jp { font-size: 42px; margin-top: 12px; }
-.reading { font-size: 26px; margin-top: 4px; }
-.meaning { font-size: 19px; color: #444; margin-bottom: 8px; }
-.meta { font-size: 14px; color: #888; }
+.reading { font-size: 26px; margin-top: 4px; color: #d8d8d8; font-weight: 500; }
+.meaning { font-size: 19px; color: #cfcfcf; margin-bottom: 8px; }
+.meta { font-size: 14px; color: #aaa; }
 .prompt { font-weight: bold; margin-bottom: 16px; }
 .pitch { font-size: 18px; margin: 6px; }
 .synonyms { font-size: 15px; color: #555; }
@@ -135,14 +139,45 @@ COMMON_CSS = """
 .member { margin: 8px 0; border-bottom: 1px solid #ddd; padding-bottom: 8px; }
 .front-members { margin: 12px auto; max-width: 760px; }
 .front-member { display: inline-block; margin: 6px 10px; font-size: 32px; }
-.front-reading { display: block; font-size: 18px; color: #555; }
+.front-reading { display: block; font-size: 18px; color: #d8d8d8; font-weight: 500; }
 
 .pair-front-item { margin: 10px auto; }
-.relationship-question { font-size: 16px; color: #666; margin-bottom: 10px; }
+.relationship-question { font-size: 16px; color: #bbb; margin-bottom: 10px; }
 .relationship { font-size: 22px; margin: 12px; font-weight: bold; }
 .pair-arrow { font-size: 28px; margin: 4px; }
 .pair-back-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 700px) { .pair-back-grid { display: block; } }
+
+/* Anki desktop/mobile night mode readability */
+.nightMode .reading,
+.card.nightMode .reading,
+.night_mode .reading {
+  color: #f0f0f0;
+  font-weight: 600;
+}
+
+.nightMode .front-reading,
+.card.nightMode .front-reading,
+.night_mode .front-reading {
+  color: #eeeeee;
+  font-weight: 600;
+}
+
+.nightMode .meaning,
+.card.nightMode .meaning,
+.night_mode .meaning {
+  color: #dddddd;
+}
+
+.nightMode .meta,
+.card.nightMode .meta,
+.night_mode .meta,
+.nightMode .relationship-question,
+.card.nightMode .relationship-question,
+.night_mode .relationship-question {
+  color: #c8c8c8;
+}
+
 """
 
 
@@ -437,6 +472,43 @@ def item_html(subject: dict, assignment_index: Dict[int, dict], review_index: Di
     """
 
 
+
+def make_radical_model() -> genanki.Model:
+    return genanki.Model(
+        MODEL_IDS["radical"],
+        "WK Update-Safe Radical Model v1",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Radical"},
+            {"name": "Meaning"},
+            {"name": "Level"},
+            {"name": "Status"},
+            {"name": "KanjiPreview"},
+            {"name": "Notes"},
+        ],
+        templates=[
+            {
+                "name": "Radical Meaning",
+                "qfmt": """
+                <div class='prompt'>Radical meaning?</div>
+                <div class='jp'>{{Radical}}</div>
+                <div class='meta'>{{Status}} · WK Level {{Level}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class='meaning'>{{Meaning}}</div>
+                <h3>Used in / upcoming kanji</h3>
+                <div class='family-members'>{{KanjiPreview}}</div>
+                <div class='notes'>{{Notes}}</div>
+                """,
+            }
+        ],
+        css=COMMON_CSS,
+    )
+
+
+
 def make_item_model() -> genanki.Model:
     return genanki.Model(MODEL_IDS["item"], "WK Update-Safe Item Model v2", fields=[
         {"name": "GuidKey"}, {"name": "Expression"}, {"name": "Reading"}, {"name": "Meaning"}, {"name": "ItemHtml"}, {"name": "Mnemonic"}, {"name": "Confusables"}, {"name": "Pitch"}, {"name": "PitchPattern"}, {"name": "Notes"}], templates=[
@@ -722,6 +794,64 @@ def make_family_model() -> genanki.Model:
     )
 
 
+
+def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
+    max_level = min(args.max_level, 60)
+    return [
+        s for s in subjects
+        if s.get("object") == "radical"
+        and int(s["data"].get("level", 999)) <= max_level
+    ]
+
+
+def current_wk_level(subjects: Sequence[dict], assignment_index: Dict[int, dict]) -> int:
+    levels = []
+    for subject in subjects:
+        assignment = assignment_index.get(subject["id"])
+        if assignment and assignment["data"].get("unlocked_at"):
+            levels.append(int(subject["data"].get("level") or 0))
+    return max(levels) if levels else 1
+
+
+def selected_radical_levels(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> Tuple[int, int]:
+    if args.radical_current_level:
+        current = args.radical_current_level
+    else:
+        current = current_wk_level(subjects, assignment_index)
+    next_level = min(current + 1, 60)
+    return current, next_level
+
+
+def kanji_using_radical(kanji_items: Sequence[dict], radical: dict, max_level: int = 60, limit: int = 12) -> List[dict]:
+    radical_id = radical["id"]
+    matches = []
+    for kanji in kanji_items:
+        component_ids = kanji["data"].get("component_subject_ids") or []
+        if radical_id in component_ids and int(kanji["data"].get("level") or 999) <= max_level:
+            matches.append(kanji)
+    return sorted(matches, key=lambda k: (k["data"].get("level", 999), k["data"].get("characters") or ""))[:limit]
+
+
+def radical_is_learned(radical: dict, assignment_index: Dict[int, dict]) -> bool:
+    assignment = assignment_index.get(radical["id"])
+    return bool(assignment and assignment["data"].get("started_at"))
+
+
+def radical_priority(radical: dict, current_level: int, next_level: int) -> str:
+    level = int(radical["data"].get("level") or 999)
+    if level == current_level or level == next_level:
+        return "priority-high"
+    return "priority-medium"
+
+
+def radical_display(radical: dict) -> str:
+    chars = radical["data"].get("characters")
+    if chars:
+        return chars
+    # Some WK radicals are images rather than Unicode characters.
+    return radical["data"].get("slug") or "radical"
+
+
 def vocab_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
     return [s for s in subjects if s.get("object") == "vocabulary" and passes_progress_filter(s, assignment_index, args)]
 
@@ -815,6 +945,49 @@ def write_pitch_template(vocab_items: Sequence[dict], path: str) -> None:
     print(f"Wrote pitch CSV template: {path}")
 
 
+
+def priority_for_item(subject: dict, review_index: Dict[int, dict], kind: str) -> str:
+    """Return priority-high/medium/low tag for single-item cards."""
+    total = incorrect_total(subject, review_index)
+    streak = current_streak_min(subject, review_index)
+
+    if kind in {"leech", "pitch-leech"}:
+        if total >= 8 or streak <= 1:
+            return "priority-high"
+        if total >= 4:
+            return "priority-medium"
+        return "priority-low"
+
+    return "priority-medium"
+
+
+def priority_for_pair(left: dict, right: dict, relationship: str, review_index: Dict[int, dict]) -> str:
+    """Return priority-high/medium/low tag for contrast cards."""
+    total = incorrect_total(left, review_index) + incorrect_total(right, review_index)
+    rel = relationship.lower()
+
+    if any(x in rel for x in ["intransitive", "causative", "potential", "move"]):
+        if total >= 3:
+            return "priority-high"
+        return "priority-medium"
+
+    if total >= 6:
+        return "priority-high"
+    if total >= 2:
+        return "priority-medium"
+    return "priority-low"
+
+
+def priority_for_confusable_group(group: List[dict], review_index: Dict[int, dict]) -> str:
+    total = sum(incorrect_total(i, review_index) for i in group)
+    if total >= 8:
+        return "priority-high"
+    if total >= 3:
+        return "priority-medium"
+    return "priority-low"
+
+
+
 def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusables_html: str = "") -> None:
     data = subject["data"]
     expr = data.get("characters") or ""
@@ -826,8 +999,73 @@ def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusa
         item_html(subject, indexes["assignments"], indexes["reviews"], indexes["studies"], pitch_index),
         html.escape(strip_html(data.get("meaning_mnemonic"))), confusables_html,
         html.escape(str(pitch.get("pitch") or "")), html.escape(str(pitch.get("pattern") or "")), ""],
-        tags=["wanikani", kind, f"wk-level-{data.get('level', 0)}"], guid=guid)
+        tags=[
+            "wanikani",
+            kind,
+            priority_for_item(subject, indexes["reviews"], kind),
+            f"wk-level-{data.get('level', 0)}",
+        ], guid=guid)
     deck.add_note(note)
+
+
+
+def build_radical_deck(radicals: List[dict], kanji_items: List[dict], indexes: dict, args: argparse.Namespace, output_dir: Path) -> Path:
+    current_level, next_level = selected_radical_levels(radicals + kanji_items, indexes["assignments"], args)
+    selected = [
+        r for r in radicals
+        if int(r["data"].get("level") or 999) in {current_level, next_level}
+    ]
+
+    deck = genanki.Deck(DECK_IDS["radicals"], DECK_NAMES["radicals"])
+    model = make_radical_model()
+
+    for radical in sorted(selected, key=lambda r: (r["data"].get("level", 999), radical_display(r))):
+        data = radical["data"]
+        level = int(data.get("level") or 0)
+        status = "current-level" if level == current_level else "next-level"
+        if radical_is_learned(radical, indexes["assignments"]):
+            status += " · started"
+
+        meanings = html.escape("; ".join(primary_meanings(radical)))
+        radical_text = html.escape(radical_display(radical))
+        preview_kanji = kanji_using_radical(kanji_items, radical, max_level=min(level + 3, 60), limit=12)
+        if preview_kanji:
+            kanji_html = "".join(
+                f"<div class='member'><span class='jp'>{html.escape(k['data'].get('characters') or '')}</span> "
+                f"<span class='reading'>{html.escape('、'.join(primary_readings(k)))}</span> "
+                f"<span class='meaning'>{html.escape('; '.join(primary_meanings(k)))}</span> "
+                f"<span class='meta'>WK Level {k['data'].get('level', '?')}</span></div>"
+                for k in preview_kanji
+            )
+        else:
+            kanji_html = "<div class='meta'>No kanji preview found in current cached WaniKani subjects.</div>"
+
+        note = genanki.Note(
+            model=model,
+            fields=[
+                stable_guid("radical", radical["id"], current_level, next_level),
+                radical_text,
+                meanings,
+                str(level),
+                html.escape(status),
+                kanji_html,
+                "Preview deck for current and next WaniKani level radicals.",
+            ],
+            tags=[
+                "wanikani",
+                "radical",
+                status.split()[0],
+                radical_priority(radical, current_level, next_level),
+                f"wk-level-{level}",
+            ],
+            guid=stable_guid("radical", radical["id"], current_level, next_level),
+        )
+        deck.add_note(note)
+
+    out = output_dir / "wk_radicals_current_next.apkg"
+    genanki.Package(deck).write_to_file(str(out))
+    return out
+
 
 
 def build_leech_deck(items, indexes, pitch_index, output_dir: Path) -> Path:
@@ -892,7 +1130,13 @@ def build_pair_deck(pairs: List[Tuple[dict, dict]], indexes: dict, pitch_index: 
                 examples,
                 explanation,
             ],
-            tags=["wanikani", "verb-pair", "contrast", re.sub(r"[^A-Za-z0-9_-]+", "-", relationship.lower())],
+            tags=[
+                "wanikani",
+                "verb-pair",
+                "contrast",
+                priority_for_pair(left, right, relationship, indexes["reviews"]),
+                re.sub(r"[^A-Za-z0-9_-]+", "-", relationship.lower()),
+            ],
             guid=guid,
         )
         deck.add_note(note)
@@ -926,7 +1170,11 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path) -> Pa
                 f"<div class='family-members'>{members}</div>",
                 "These items share kanji or visual/reading cues, so drill the contrast rather than memorizing each in isolation.",
             ],
-            tags=["wanikani", "confusable"],
+            tags=[
+                "wanikani",
+                "confusable",
+                priority_for_confusable_group(group, indexes["reviews"]),
+            ],
             guid=guid,
         )
         deck.add_note(note)
@@ -959,7 +1207,7 @@ def build_phonetic_family_deck(families, output_dir: Path) -> Path:
                 f"<div class='family-members'>{''.join(rows)}</div>",
                 "This is a practical WaniKani reading-pattern card. Treat it as a useful heuristic, not a formal etymology claim.",
             ],
-            tags=["wanikani", "phonetic-family", f"reading-{reading}"],
+            tags=["wanikani", "phonetic-family", "priority-low", f"reading-{reading}"],
             guid=guid,
         )
         deck.add_note(note)
@@ -968,16 +1216,64 @@ def build_phonetic_family_deck(families, output_dir: Path) -> Path:
     return out
 
 
+
+def write_filtered_deck_suggestions(output_dir: Path) -> Path:
+    path = output_dir / "anki_filtered_decks.txt"
+    path.write_text(
+        """Suggested Anki filtered decks
+
+1. WK Daily Priority
+Search:
+(tag:priority-high) AND (deck:"WaniKani Leech Fixes" OR deck:"WaniKani Verb Pair Contrasts")
+Limit: 30
+Order: Relative overdueness
+
+2. WK Verb Contrasts
+Search:
+deck:"WaniKani Verb Pair Contrasts" AND (tag:priority-high OR tag:priority-medium)
+Limit: 30
+Order: Relative overdueness
+
+3. WK Leeches
+Search:
+deck:"WaniKani Leech Fixes"
+Limit: 50
+Order: Relative overdueness
+
+4. WK Radicals Preview
+Search:
+deck:"WaniKani Current and Next Radicals"
+Limit: 20
+Order: Relative overdueness
+
+5. WK Confusables Light
+Search:
+deck:"WaniKani Confusable Vocabulary" AND tag:priority-high
+Limit: 20
+Order: Relative overdueness
+
+Notes:
+- Reviews in filtered decks update the original cards.
+- After regenerating/importing decks, click Rebuild on the filtered deck.
+- Keep deck options on the permanent decks; they should persist across imports.
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="store_true", help="Print version and exit")
-    parser.add_argument("--deck", choices=["leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "all"], default="all")
+    parser.add_argument("--deck", choices=["leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals", "all"], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
     parser.add_argument("--pitch-csv")
     parser.add_argument("--yomitan-dict")
     parser.add_argument("--write-pitch-template")
     parser.add_argument("--max-level", type=int, default=60)
+    parser.add_argument("--radical-current-level", type=int, default=None, help="Override detected current WaniKani level for radical preview.")
     parser.add_argument("--min-srs", type=int, default=1)
     parser.add_argument("--only-unlocked", action="store_true")
     parser.add_argument("--only-started", action="store_true")
@@ -1006,7 +1302,7 @@ def main() -> None:
     print()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    subjects = get_cached_collection("subjects", params={"types": "vocabulary,kanji"}, params_key="vocabulary_kanji", refresh=args.refresh_cache)
+    subjects = get_cached_collection("subjects", params={"types": "vocabulary,kanji,radical"}, params_key="vocabulary_kanji_radical", refresh=args.refresh_cache)
     assignments = get_cached_collection("assignments", refresh=args.refresh_cache)
     reviews = get_cached_collection("review_statistics", refresh=args.refresh_cache)
     studies = get_cached_collection("study_materials", refresh=args.refresh_cache)
@@ -1014,6 +1310,8 @@ def main() -> None:
     pitch_index = merge_pitch_indexes(load_yomitan_pitch(args.yomitan_dict), load_pitch_csv(args.pitch_csv))
     vocab_items = vocab_subjects(subjects, indexes["assignments"], args)
     kanji_items = kanji_subjects(subjects, indexes["assignments"], args)
+    radical_items = radical_subjects(subjects, args)
+    current_level, next_level = selected_radical_levels(subjects, indexes["assignments"], args)
     if args.write_pitch_template:
         write_pitch_template(vocab_items, args.write_pitch_template)
         return
@@ -1023,13 +1321,17 @@ def main() -> None:
     phonetic_families = find_phonetic_families(kanji_items, args)
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
+    print(f"Eligible radicals: {len(radical_items)}")
+    print(f"Radical preview levels: current={current_level}, next={next_level}")
     print(f"Leeches: {len(leeches)}")
     print(f"Verb pairs: {len(verb_pairs)}")
     print(f"Confusable groups: {len(confusables)}")
     print(f"Phonetic families: {len(phonetic_families)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
     created: List[Path] = []
-    wanted = {args.deck} if args.deck != "all" else {"leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches"}
+    wanted = {args.deck} if args.deck != "all" else {"leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals"}
+    if "radicals" in wanted and radical_items:
+        created.append(build_radical_deck(radical_items, kanji_items, indexes, args, output_dir))
     if "leeches" in wanted and leeches:
         created.append(build_leech_deck(leeches, indexes, pitch_index, output_dir))
     if "verb-pairs" in wanted and verb_pairs:
@@ -1045,9 +1347,11 @@ def main() -> None:
     if not created:
         print("No decks created. Try lowering filters, refreshing cache, or adding pitch data.", file=sys.stderr)
         sys.exit(1)
+    settings_path = write_filtered_deck_suggestions(output_dir)
     print("Created:")
     for path in created:
         print(f"  {path}")
+    print(f"  {settings_path}")
 
 
 if __name__ == "__main__":
