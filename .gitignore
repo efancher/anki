@@ -1,0 +1,21 @@
+# WaniKani API cache
+.wk_cache/
+
+# Generated Anki packages and helper files
+out/
+
+# Local virtual environments
+env_anki/
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
