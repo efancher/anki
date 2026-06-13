@@ -1,0 +1,45 @@
+---
+description: Bump Anki note-type template versions when wk_decks card templates or CSS change
+globs: wk_decks.py
+alwaysApply: false
+---
+
+# WaniKani Anki template versioning
+
+When editing `wk_decks.py`, any change to **Anki card templates or styling** must bump the matching entry in `MODEL_TEMPLATE_VERSIONS` so regenerated `.apkg` files force Anki to accept note-type updates on import.
+
+## What counts as a template change
+
+Bump a template version when you change any of:
+
+- `qfmt` / `afmt` strings in `make_radical_model`, `make_item_model`, `make_pair_model`, or `make_family_model`
+- `COMMON_CSS` or `css=` passed to a `WkModel`
+- Note-type **fields** list (add/remove/reorder) for any model
+- `WkModel` behavior that affects exported note-type JSON (`to_json`, mod timestamps)
+
+Do **not** bump for note **content** only (leech scoring, pair metadata, API logic, deck building) unless templates/CSS/fields also changed.
+
+## Which key to bump
+
+| Area changed | Bump |
+|--------------|------|
+| `make_item_model`, item card backs referencing template meta | `MODEL_TEMPLATE_VERSIONS["item"]` |
+| `make_pair_model`, pair back HTML structure tied to pair cards | `MODEL_TEMPLATE_VERSIONS["pair"]` |
+| `make_family_model` | `MODEL_TEMPLATE_VERSIONS["family"]` |
+| `make_radical_model` | `MODEL_TEMPLATE_VERSIONS["radical"]` |
+| `COMMON_CSS` shared by multiple models | every model that uses the changed CSS |
+
+Increment the `vN` suffix only (e.g. `v5` → `v6`). Do not change stable `NOTE_TYPE_NAMES`.
+
+## Also update
+
+1. **`VERSION`** at the top of `wk_decks.py` when shipping generator changes (patch bump for template-only fixes).
+2. **Verification strings** if they hardcode a template label (e.g. import instructions, `meta_html`, `pair_side_back_html` meta lines use `MODEL_TEMPLATE_VERSIONS[...]` — prefer that, not literals).
+3. **`TEMPLATE_MOD_GENERATION_BASE`** only if new `mod` values would not exceed `int(time.time())` (rare; see `template_mod_epoch`).
+
+## Checklist before finishing
+
+- [ ] Bumped the correct `MODEL_TEMPLATE_VERSIONS` key(s)
+- [ ] Bumped `VERSION` if this is a user-facing generator release
+- [ ] Did not rename `NOTE_TYPE_NAMES` or `MODEL_IDS`
+- [ ] User can verify after import: card backs / Manage Note Types → Cards CSS comment show the new `vN`

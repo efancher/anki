@@ -36,7 +36,7 @@ With Yomitan pitch dictionary zip/folder:
 
 from __future__ import annotations
 
-VERSION = "2.8.0"
+VERSION = "2.9.3"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -101,10 +101,29 @@ MODEL_IDS = {
     "radical": 1865429015,
 }
 
-ITEM_MODEL_TEMPLATE_VERSION = "v4"
+# Bump the relevant key when that note type's templates/CSS change.
+# Anki import uses model.mod; these map to stable epoch seconds (see template_mod_epoch).
+MODEL_TEMPLATE_VERSIONS = {
+    "item": "v5",
+    "pair": "v2",
+    "family": "v1",
+    "radical": "v2",
+}
+ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
+
+# Floor for model.mod in .apkg — must exceed past genanki imports that used time.time().
+TEMPLATE_MOD_GENERATION_BASE = 1781000000
+MODEL_TEMPLATE_MOD_SLOT = {
+    "item": 0,
+    "pair": 1,
+    "family": 2,
+    "radical": 3,
+}
+TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
+TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
 
 # Stable Anki note type names — do not embed version numbers here.
-# Template/schema version lives in ITEM_MODEL_TEMPLATE_VERSION and card Meta fields.
+# Template/schema version lives in MODEL_TEMPLATE_VERSIONS and card Meta fields.
 NOTE_TYPE_NAMES = {
     "item": "WK Update-Safe Item",
     "pair": "WK Update-Safe Verb Pair",
@@ -274,6 +293,72 @@ COMMON_CSS = """
 .context { text-align: left; margin: 10px auto; max-width: 760px; padding: 8px 0; border-top: 1px solid #ddd; }
 .context .jp { font-size: 22px; margin-top: 0; }
 .weak-side { font-size: 14px; color: #900; font-weight: bold; margin-bottom: 8px; }
+
+/* Kanji vs vocabulary color cues (meaning / reading cards) */
+.wk-card { margin: 0 auto; max-width: 760px; padding: 8px 12px 4px; border-radius: 10px; }
+.subject-badge {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
+.prompt-hint { font-size: 14px; font-weight: 500; margin-top: 6px; opacity: 0.92; }
+
+.wk-card.wk-kanji {
+  background: rgba(74, 144, 226, 0.12);
+  border: 2px solid rgba(74, 144, 226, 0.45);
+}
+.wk-card.wk-kanji .subject-badge { background: #2f6fad; color: #f5f9ff; }
+.wk-card.wk-kanji .prompt { color: #4a90e2; }
+.wk-card.wk-kanji .prompt-hint { color: #5a9fd4; }
+.wk-card.wk-kanji .jp { color: #3d7fc4; }
+
+.wk-card.wk-vocabulary {
+  background: rgba(76, 175, 120, 0.12);
+  border: 2px solid rgba(76, 175, 120, 0.45);
+}
+.wk-card.wk-vocabulary .subject-badge { background: #3d8f5c; color: #f4fff7; }
+.wk-card.wk-vocabulary .prompt { color: #4caf7a; }
+.wk-card.wk-vocabulary .prompt-hint { color: #5cbf8e; }
+.wk-card.wk-vocabulary .jp { color: #3d9f68; }
+
+.nightMode .wk-card.wk-kanji,
+.card.nightMode .wk-card.wk-kanji,
+.night_mode .wk-card.wk-kanji {
+  background: rgba(74, 144, 226, 0.18);
+  border-color: rgba(126, 184, 232, 0.55);
+}
+.nightMode .wk-card.wk-kanji .prompt,
+.card.nightMode .wk-card.wk-kanji .prompt,
+.night_mode .wk-card.wk-kanji .prompt { color: #9ecfff; }
+.nightMode .wk-card.wk-kanji .jp,
+.card.nightMode .wk-card.wk-kanji .jp,
+.night_mode .wk-card.wk-kanji .jp { color: #b8dcff; }
+
+.nightMode .wk-card.wk-vocabulary,
+.card.nightMode .wk-card.wk-vocabulary,
+.night_mode .wk-card.wk-vocabulary {
+  background: rgba(76, 175, 120, 0.16);
+  border-color: rgba(125, 206, 160, 0.55);
+}
+.nightMode .wk-card.wk-vocabulary .prompt,
+.card.nightMode .wk-card.wk-vocabulary .prompt,
+.night_mode .wk-card.wk-vocabulary .prompt { color: #9de0b8; }
+.nightMode .wk-card.wk-vocabulary .jp,
+.card.nightMode .wk-card.wk-vocabulary .jp,
+.night_mode .wk-card.wk-vocabulary .jp { color: #b8ecc9; }
+
+.pair-back-item { text-align: left; margin: 0 auto; max-width: 360px; padding: 8px; }
+.pair-back-item .meaning { font-size: 18px; color: #cfcfcf; margin: 8px 0 10px; }
+.pair-role { font-size: 15px; margin: 8px 0; color: #bbb; }
+.pair-back-item h4 { font-size: 15px; margin: 12px 0 6px; text-align: left; }
+.pair-example { margin: 8px 0; padding: 8px 0; border-top: 1px solid #ddd; }
+.pair-example .jp { font-size: 22px; margin-top: 0; }
+.pair-example .meaning { font-size: 16px; margin-top: 4px; }
 
 """
 
@@ -508,16 +593,57 @@ def get_cached_review_statistics(
     return items
 
 
+def template_mod_epoch(model_key: str) -> int:
+    version = MODEL_TEMPLATE_VERSIONS[model_key]
+    match = re.search(r"v(\d+)$", version, re.IGNORECASE)
+    version_index = int(match.group(1)) if match else 0
+    slot = MODEL_TEMPLATE_MOD_SLOT[model_key]
+    return (
+        TEMPLATE_MOD_GENERATION_BASE
+        + slot * TEMPLATE_MOD_SLOT_STRIDE
+        + version_index * TEMPLATE_MOD_SECONDS_PER_VERSION
+    )
+
+
+def versioned_css(css: str, model_key: str) -> str:
+    label = f"{model_key}-{MODEL_TEMPLATE_VERSIONS[model_key]}"
+    return f"/* WK template {label} · generator {VERSION} */\n{css}"
+
+
+class WkModel(genanki.Model):
+    """genanki.Model with per-note-type mod timestamps so Anki accepts template updates on import."""
+
+    def __init__(self, *args, template_key: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.template_key = template_key
+
+    def to_json(self, timestamp: float, deck_id):
+        data = super().to_json(timestamp, deck_id)
+        data["mod"] = template_mod_epoch(self.template_key)
+        return data
+
+
+def package_write_timestamp(models: Iterable[genanki.Model]) -> float:
+    epochs = [template_mod_epoch(model.template_key) for model in models if hasattr(model, "template_key")]
+    if not epochs:
+        return time.time()
+    return max(epochs) + 1.0
+
+
 def write_apkg(deck: genanki.Deck, path: Path) -> None:
-    genanki.Package(deck).write_to_file(str(path))
+    models = list(deck.models.values())
+    genanki.Package(deck).write_to_file(str(path), timestamp=package_write_timestamp(models))
 
 
 def write_bundled_apkg(decks: Sequence[genanki.Deck], path: Path) -> None:
     if not decks:
         return
+    all_models: List[genanki.Model] = []
+    for deck in decks:
+        all_models.extend(deck.models.values())
     package = genanki.Package(decks[0])
     package.decks = list(decks)
-    package.write_to_file(str(path))
+    package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
 
 
 def primary_meanings(subject: dict) -> List[str]:
@@ -709,6 +835,22 @@ def subject_type_label(subject: dict) -> str:
     if kind == "vocabulary":
         return "Vocabulary"
     return kind.replace("_", " ").title()
+
+
+def subject_style_class(subject: dict) -> str:
+    kind = subject.get("object") or ""
+    if kind == "kanji":
+        return "wk-kanji"
+    if kind == "vocabulary":
+        return "wk-vocabulary"
+    return "wk-item"
+
+
+def subject_type_flags(subject: dict) -> Tuple[str, str]:
+    kind = subject.get("object") or ""
+    is_kanji = "1" if kind == "kanji" else ""
+    is_vocabulary = "1" if kind == "vocabulary" else ""
+    return is_kanji, is_vocabulary
 
 
 def reading_mnemonic(subject: dict) -> str:
@@ -909,10 +1051,11 @@ def item_html(subject: dict, assignment_index: Dict[int, dict], review_index: Di
 
 
 
-def make_radical_model() -> genanki.Model:
-    return genanki.Model(
+def make_radical_model() -> WkModel:
+    return WkModel(
         MODEL_IDS["radical"],
         NOTE_TYPE_NAMES["radical"],
+        template_key="radical",
         fields=[
             {"name": "GuidKey"},
             {"name": "Radical"},
@@ -921,6 +1064,7 @@ def make_radical_model() -> genanki.Model:
             {"name": "Status"},
             {"name": "KanjiPreview"},
             {"name": "Notes"},
+            {"name": "Description"},
         ],
         templates=[
             {
@@ -934,21 +1078,21 @@ def make_radical_model() -> genanki.Model:
                 {{FrontSide}}
                 <hr>
                 <div class='meaning'>{{Meaning}}</div>
-                <h3>Used in / upcoming kanji</h3>
-                <div class='family-members'>{{KanjiPreview}}</div>
-                <div class='notes'>{{Notes}}</div>
+                {{#Description}}<h3>Description</h3><div class='notes'>{{Description}}</div>{{/Description}}
+                {{#KanjiPreview}}<h3>Used in / upcoming kanji</h3><div class='family-members'>{{KanjiPreview}}</div>{{/KanjiPreview}}
                 """,
             }
         ],
-        css=COMMON_CSS,
+        css=versioned_css(COMMON_CSS, "radical"),
     )
 
 
 
-def make_item_model() -> genanki.Model:
-    return genanki.Model(
+def make_item_model() -> WkModel:
+    return WkModel(
         MODEL_IDS["item"],
         NOTE_TYPE_NAMES["item"],
+        template_key="item",
         fields=[
             {"name": "GuidKey"},
             {"name": "Expression"},
@@ -969,14 +1113,24 @@ def make_item_model() -> genanki.Model:
             {"name": "ContextSentences"},
             {"name": "MeaningWeak"},
             {"name": "ReadingWeak"},
+            {"name": "StyleClass"},
+            {"name": "IsKanji"},
+            {"name": "IsVocabulary"},
         ],
         templates=[
             {
                 "name": "Meaning",
                 "qfmt": """
-                <div class="prompt">{{SubjectType}} meaning?</div>
+                <div class="wk-card {{StyleClass}}">
+                <div class="subject-badge">{{SubjectType}}</div>
+                <div class="prompt">
+                  Meaning?
+                  {{#IsKanji}}<div class="prompt-hint">Kanji meaning (English)</div>{{/IsKanji}}
+                  {{#IsVocabulary}}<div class="prompt-hint">Vocabulary meaning (English)</div>{{/IsVocabulary}}
+                </div>
                 {{#MeaningWeak}}<div class="weak-side">Meaning side needs work</div>{{/MeaningWeak}}
                 <div class="jp">{{Expression}}</div>
+                </div>
                 """,
                 "afmt": """
                 {{FrontSide}}
@@ -992,9 +1146,16 @@ def make_item_model() -> genanki.Model:
             {
                 "name": "Reading",
                 "qfmt": """
-                <div class="prompt">{{SubjectType}} reading?</div>
+                <div class="wk-card {{StyleClass}}">
+                <div class="subject-badge">{{SubjectType}}</div>
+                <div class="prompt">
+                  Reading?
+                  {{#IsKanji}}<div class="prompt-hint">On'yomi / kun'yomi</div>{{/IsKanji}}
+                  {{#IsVocabulary}}<div class="prompt-hint">Vocabulary reading (kana)</div>{{/IsVocabulary}}
+                </div>
                 {{#ReadingWeak}}<div class="weak-side">Reading side needs work</div>{{/ReadingWeak}}
                 <div class="jp">{{Expression}}</div>
+                </div>
                 """,
                 "afmt": """
                 {{FrontSide}}
@@ -1010,11 +1171,11 @@ def make_item_model() -> genanki.Model:
             },
             {
                 "name": "Pitch",
-                "qfmt": "{{#Pitch}}<div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div>{{/Pitch}}",
+                "qfmt": "{{#Pitch}}<div class='wk-card {{StyleClass}}'><div class='subject-badge'>{{SubjectType}}</div><div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div></div>{{/Pitch}}",
                 "afmt": "{{FrontSide}}<hr><div class='pitch-answer'>{{Pitch}} {{PitchPattern}}</div>{{ItemHtml}}",
             },
         ],
-        css=COMMON_CSS,
+        css=versioned_css(COMMON_CSS, "item"),
     )
 
 
@@ -1192,22 +1353,57 @@ def compact_pair_front(subject: dict) -> str:
     """
 
 
-def detailed_pair_back(subject: dict, assignment_index: Dict[int, dict], review_index: Dict[int, dict], study_index: Dict[int, dict], pitch_index: Dict[Tuple[str, str], dict], role: str = "") -> str:
+def pair_context_block_html(subject: dict, heading: str = "Context") -> str:
+    sentences = context_sentences_html(subject)
+    if not sentences:
+        return ""
+    return f"<h4>{html.escape(heading)}</h4>{sentences}"
+
+
+def pair_side_back_html(
+    subject: dict,
+    assignment_index: Dict[int, dict],
+    pitch_index: Dict[Tuple[str, str], dict],
+    role: str = "",
+) -> str:
+    data = subject["data"]
+    expr = html.escape(data.get("characters") or "")
+    reading = html.escape("、".join(primary_readings(subject)) or first_reading(subject))
+    meanings = html.escape("; ".join(primary_meanings(subject)))
+    role_html = f"<div class='pair-role'><b>Contrast role:</b> {html.escape(role)}</div>" if role else ""
     vt = verb_type(subject)
-    role_html = f"<div><b>Role:</b> {html.escape(role)}</div>" if role else ""
-    vt_html = f"<div><b>Verb type:</b> {html.escape(vt)}</div>" if vt else ""
+    vt_html = f"<div class='meta'><b>Verb type:</b> {html.escape(vt)}</div>" if vt else ""
+    pitch = pitch_for(subject, pitch_index)
+    pitch_html = ""
+    if pitch.get("pitch") or pitch.get("pattern"):
+        pitch_html = (
+            f"<div class='pitch'><b>Pitch:</b> "
+            f"{html.escape(str(pitch.get('pitch') or ''))} "
+            f"<span>{html.escape(str(pitch.get('pattern') or ''))}</span></div>"
+        )
+    context_html = pair_context_block_html(subject)
     return f"""
-    {item_html(subject, assignment_index, review_index, study_index, pitch_index)}
-    <div class="notes">
+    <div class="pair-back-item">
+      <div class="jp">{expr}</div>
+      <div class="reading">{reading}</div>
+      <div class="meaning">{meanings}</div>
       {role_html}
       {vt_html}
+      {context_html}
+      {pitch_html}
+      <div class="meta">WK Level {data.get('level', '?')} · SRS {srs_stage(subject, assignment_index)} · template {MODEL_TEMPLATE_VERSIONS['pair']}</div>
     </div>
     """
 
-def make_pair_model() -> genanki.Model:
-    return genanki.Model(
+
+def pair_examples_html(curated_examples: str) -> str:
+    return curated_examples or ""
+
+def make_pair_model() -> WkModel:
+    return WkModel(
         MODEL_IDS["pair"],
         NOTE_TYPE_NAMES["pair"],
+        template_key="pair",
         fields=[
             {"name": "GuidKey"},
             {"name": "LeftFrontHtml"},
@@ -1242,9 +1438,8 @@ def make_pair_model() -> genanki.Model:
                   <div>{{LeftBackHtml}}</div>
                   <div>{{RightBackHtml}}</div>
                 </div>
-                <h3>Examples</h3>
-                <div class='notes'>{{Examples}}</div>
-                <h3>Notes</h3>
+                {{#Examples}}<h3>Contrast examples</h3><div class='notes'>{{Examples}}</div>{{/Examples}}
+                <h3>Relationship</h3>
                 <div class='notes'>{{Explanation}}</div>
                 """,
             },
@@ -1259,6 +1454,7 @@ def make_pair_model() -> genanki.Model:
                 {{FrontSide}}
                 <hr>
                 {{RightBackHtml}}
+                {{#Examples}}<h3>Examples</h3><div class='notes'>{{Examples}}</div>{{/Examples}}
                 <div class='notes'>{{Explanation}}</div>
                 """,
             },
@@ -1268,14 +1464,15 @@ def make_pair_model() -> genanki.Model:
                 "afmt": "{{FrontSide}}<hr><b>{{LeftExpression}}</b>: {{LeftPitch}}<br><b>{{RightExpression}}</b>: {{RightPitch}}",
             },
         ],
-        css=COMMON_CSS,
+        css=versioned_css(COMMON_CSS, "pair"),
     )
 
 
-def make_family_model() -> genanki.Model:
-    return genanki.Model(
+def make_family_model() -> WkModel:
+    return WkModel(
         MODEL_IDS["family"],
         NOTE_TYPE_NAMES["family"],
+        template_key="family",
         fields=[
             {"name": "GuidKey"},
             {"name": "FamilyTitle"},
@@ -1291,7 +1488,7 @@ def make_family_model() -> genanki.Model:
                 "afmt": "{{FrontSide}}<hr>{{MembersHtml}}<div class='notes'>{{Explanation}}</div>",
             }
         ],
-        css=COMMON_CSS,
+        css=versioned_css(COMMON_CSS, "family"),
     )
 
 
@@ -1358,6 +1555,11 @@ def radical_display(radical: dict) -> str:
         return chars
     # Some WK radicals are images rather than Unicode characters.
     return radical["data"].get("slug") or "radical"
+
+
+def radical_description_html(radical: dict) -> str:
+    mnemonic = strip_html(radical["data"].get("meaning_mnemonic"))
+    return html.escape(mnemonic) if mnemonic else ""
 
 
 def vocab_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
@@ -1559,6 +1761,7 @@ def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusa
     guid = stable_guid(kind, subject["id"])
     syns = meaning_synonyms(subject, indexes["studies"])
     weakness_tags = leech_weakness_tags(subject, indexes["reviews"])
+    is_kanji, is_vocabulary = subject_type_flags(subject)
     note = genanki.Note(
         model=model,
         fields=[
@@ -1581,6 +1784,9 @@ def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusa
             context_sentences_html(subject),
             "1" if "leech-meaning" in weakness_tags else "",
             "1" if "leech-reading" in weakness_tags else "",
+            subject_style_class(subject),
+            is_kanji,
+            is_vocabulary,
         ],
         tags=[
             "wanikani",
@@ -1622,6 +1828,7 @@ def build_radical_deck(
         meanings = html.escape("; ".join(primary_meanings(radical)))
         radical_text = html.escape(radical_display(radical))
         preview_kanji = kanji_using_radical(kanji_items, radical, max_level=min(level + 3, 60), limit=12)
+        kanji_html = ""
         if preview_kanji:
             kanji_html = "".join(
                 f"<div class='member'><span class='jp'>{html.escape(k['data'].get('characters') or '')}</span> "
@@ -1630,8 +1837,6 @@ def build_radical_deck(
                 f"<span class='meta'>WK Level {k['data'].get('level', '?')}</span></div>"
                 for k in preview_kanji
             )
-        else:
-            kanji_html = "<div class='meta'>No kanji preview found in current cached WaniKani subjects.</div>"
 
         note = genanki.Note(
             model=model,
@@ -1642,7 +1847,8 @@ def build_radical_deck(
                 str(level),
                 html.escape(status),
                 kanji_html,
-                "Preview deck for current and next WaniKani level radicals.",
+                "",
+                radical_description_html(radical),
             ],
             tags=[
                 "wanikani",
@@ -1696,13 +1902,12 @@ def build_pair_deck(pairs: List[Tuple[dict, dict]], indexes: dict, pitch_index: 
         relationship = metadata.get("relationship", "RELATED VERB CONTRAST")
         left_role = metadata.get("left_role", "")
         right_role = metadata.get("right_role", "")
-        examples = metadata.get("examples", "")
+        examples = pair_examples_html(metadata.get("examples", ""))
 
         explanation = (
             f"<b>{html.escape(relationship)}</b><br>"
             f"{html.escape(left['data'].get('characters') or '')}: {html.escape(left_role)}<br>"
-            f"{html.escape(right['data'].get('characters') or '')}: {html.escape(right_role)}<br><br>"
-            "Use the pair as a contrast. The front intentionally hides meanings so you practice the relationship, not recognition by English gloss."
+            f"{html.escape(right['data'].get('characters') or '')}: {html.escape(right_role)}"
         )
 
         note = genanki.Note(
@@ -1711,8 +1916,8 @@ def build_pair_deck(pairs: List[Tuple[dict, dict]], indexes: dict, pitch_index: 
                 guid,
                 compact_pair_front(left),
                 compact_pair_front(right),
-                detailed_pair_back(left, indexes["assignments"], indexes["reviews"], indexes["studies"], pitch_index, left_role),
-                detailed_pair_back(right, indexes["assignments"], indexes["reviews"], indexes["studies"], pitch_index, right_role),
+                pair_side_back_html(left, indexes["assignments"], pitch_index, left_role),
+                pair_side_back_html(right, indexes["assignments"], pitch_index, right_role),
                 html.escape(left["data"].get("characters") or ""),
                 html.escape(right["data"].get("characters") or ""),
                 html.escape(first_reading(left)),
@@ -1853,8 +2058,14 @@ def write_filtered_decks_json(output_dir: Path) -> Path:
 
 
 
+def format_template_versions() -> str:
+    lines = [f"  {NOTE_TYPE_NAMES[key]}: template {MODEL_TEMPLATE_VERSIONS[key]}" for key in MODEL_TEMPLATE_VERSIONS]
+    return "\n".join(lines)
+
+
 def write_import_instructions(output_dir: Path) -> Path:
     note_types = ", ".join(NOTE_TYPE_NAMES.values())
+    template_lines = format_template_versions()
     path = output_dir / "anki_import_instructions.txt"
     path.write_text(
         f"""WaniKani → Anki import instructions (generator {VERSION})
@@ -1866,13 +2077,19 @@ This updates every deck in one step with one Anki dialog.
 
 When Anki asks about existing note types:
   - Choose UPDATE / replace existing note type
+  - "Update if newer" is usually enough after regenerating decks
+  - Use "Always update" if templates still look stale
   - Do NOT choose "Create new note type" or "Keep old note type"
 
 Expected note type names (stable — no version suffix):
   {note_types}
 
-After import, verify any leech card back includes:
-  template {ITEM_MODEL_TEMPLATE_VERSION}
+Current template versions (bump in wk_decks.py when cards/CSS change):
+{template_lines}
+
+After import, verify card backs include the expected template label:
+  - Leech / pitch leech: template {MODEL_TEMPLATE_VERSIONS['item']}
+  - Verb pairs: template {MODEL_TEMPLATE_VERSIONS['pair']} on each verb back
 
 Meaning / Reading card fronts should show only the Japanese expression.
 Pitch cards may also show the reading on front when pitch data exists.
@@ -1884,10 +2101,10 @@ Filtered decks (WK::Daily Priority, etc.) cannot be bundled in .apkg files.
 After importing, run Tools → WK Setup Filtered Decks in Anki using the add-on
 in anki_addon/wk_filtered_decks (reads {FILTERED_DECKS_JSON}).
 
-If you ever end up with duplicate note types again:
-  1. Browse → filter by deck → note the old vs new note type counts
-  2. Prefer re-importing {BUNDLE_FILENAME} with "Update existing note type"
-  3. Or delete the deck notes once and re-import (loses scheduling)
+If templates still do not update after import:
+  1. Tools → Manage Note Types → Cards — confirm CSS starts with WK template comment
+  2. Re-import with "Always update" for the note type
+  3. Last resort: delete notes in that deck and re-import (loses scheduling)
 """,
         encoding="utf-8",
     )
@@ -1900,8 +2117,8 @@ def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
     if bundle_path:
         print(f"  Recommended: import {bundle_path.name} (all decks in one file)")
     print("  When Anki asks about an existing note type, choose UPDATE — not create new.")
-    print(f"  Leech note type name: {NOTE_TYPE_NAMES['item']}")
-    print(f"  Verify card backs include: template {ITEM_MODEL_TEMPLATE_VERSION}")
+    print(f"  Leech note type: {NOTE_TYPE_NAMES['item']} · template {MODEL_TEMPLATE_VERSIONS['item']}")
+    print(f"  Verb pair note type: {NOTE_TYPE_NAMES['pair']} · template {MODEL_TEMPLATE_VERSIONS['pair']}")
     print(f"  Full instructions: out/anki_import_instructions.txt")
     print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
 
