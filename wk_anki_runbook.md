@@ -43,13 +43,13 @@ source ~/.zshrc
 Before generating decks, confirm you are running the current script:
 
 ```bash
-python wk_decks_v2_4_1.py --version
+python wk_decks.py --version
 ```
 
 Expected:
 
 ```text
-wk_decks.py v2.4.1 (2026-06-09)
+wk_decks.py v2.7.0 (2026-06-11)
 ```
 
 A normal run should also print a startup banner with the same version.
@@ -59,7 +59,7 @@ A normal run should also print a startup banner with the same version.
 Start with items you have actually started in WaniKani:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started
+python wk_decks.py --deck all --only-started
 ```
 
 The output appears in:
@@ -81,7 +81,7 @@ Once a week:
 
 ```bash
 source venv/bin/activate
-python wk_decks_v2_4_1.py --deck all --only-started
+python wk_decks.py --deck all --only-started
 ```
 
 Then import the regenerated `.apkg` files into Anki.
@@ -93,7 +93,7 @@ The script uses stable note GUIDs. Regenerated notes should update existing note
 If you want fewer cards:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --min-srs 5 --max-cards 100
+python wk_decks.py --deck all --only-started --min-srs 5 --max-cards 100
 ```
 
 `--min-srs 5` roughly means Guru+.
@@ -101,13 +101,13 @@ python wk_decks_v2_4_1.py --deck all --only-started --min-srs 5 --max-cards 100
 ## Leech-only mode
 
 ```bash
-python wk_decks_v2_4_1.py --deck leeches --only-started
+python wk_decks.py --deck leeches --only-started
 ```
 
 Stricter leech threshold:
 
 ```bash
-python wk_decks_v2_4_1.py --deck leeches --only-started \
+python wk_decks.py --deck leeches --only-started \
   --leech-incorrect-min 12 \
   --leech-streak-max 1
 ```
@@ -115,7 +115,7 @@ python wk_decks_v2_4_1.py --deck leeches --only-started \
 Looser threshold:
 
 ```bash
-python wk_decks_v2_4_1.py --deck leeches --only-started \
+python wk_decks.py --deck leeches --only-started \
   --leech-incorrect-min 5 \
   --leech-streak-max 3
 ```
@@ -123,7 +123,7 @@ python wk_decks_v2_4_1.py --deck leeches --only-started \
 ## Verb pairs only
 
 ```bash
-python wk_decks_v2_4_1.py --deck verb-pairs --only-started
+python wk_decks.py --deck verb-pairs --only-started
 ```
 
 This is the best deck for problems like:
@@ -138,26 +138,26 @@ This is the best deck for problems like:
 ## Confusables only
 
 ```bash
-python wk_decks_v2_4_1.py --deck confusables --only-started
+python wk_decks.py --deck confusables --only-started
 ```
 
 If groups are too large:
 
 ```bash
-python wk_decks_v2_4_1.py --deck confusables --only-started \
+python wk_decks.py --deck confusables --only-started \
   --max-confusable-group-size 4
 ```
 
 ## Phonetic families only
 
 ```bash
-python wk_decks_v2_4_1.py --deck phonetic-families --only-started --min-srs 5
+python wk_decks.py --deck phonetic-families --only-started --min-srs 5
 ```
 
 If you want only stronger patterns:
 
 ```bash
-python wk_decks_v2_4_1.py --deck phonetic-families --only-started \
+python wk_decks.py --deck phonetic-families --only-started \
   --min-family-size 4
 ```
 
@@ -181,7 +181,7 @@ study_materials_all.json
 To force fresh WaniKani data:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --refresh-cache
+python wk_decks.py --deck all --only-started --refresh-cache
 ```
 
 ## Pitch accent integration
@@ -191,7 +191,7 @@ WaniKani does not provide pitch accent through its API. You have three practical
 ### Option A: No pitch data
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started
+python wk_decks.py --deck all --only-started
 ```
 
 Pitch fields will be blank.
@@ -201,7 +201,7 @@ Pitch fields will be blank.
 Generate a blank pitch template from your eligible WaniKani vocabulary:
 
 ```bash
-python wk_decks_v2_4_1.py --only-started --write-pitch-template pitch_template.csv
+python wk_decks.py --only-started --write-pitch-template pitch_template.csv
 ```
 
 This creates:
@@ -223,7 +223,7 @@ expression,reading,pitch,pattern
 Then run:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --pitch-csv pitch_template.csv
+python wk_decks.py --deck all --only-started --pitch-csv pitch_template.csv
 ```
 
 ### Option C: Yomitan pitch dictionary
@@ -249,21 +249,21 @@ Put the pitch dictionary zip there, for example:
 Then run:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started \
+python wk_decks.py --deck all --only-started \
   --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
 ```
 
 You can also pass an extracted dictionary folder:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started \
+python wk_decks.py --deck all --only-started \
   --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents/
 ```
 
 Recommended pitch-specific run:
 
 ```bash
-python wk_decks_v2_4_1.py --deck pitch-leeches --only-started \
+python wk_decks.py --deck pitch-leeches --only-started \
   --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
 ```
 
@@ -300,20 +300,20 @@ stable_guid()
 For your use case, start with:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --min-srs 3 --max-cards 150
+python wk_decks.py --deck all --only-started --min-srs 3 --max-cards 150
 ```
 
 If it feels like too many cards:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --min-srs 5 --max-cards 100
+python wk_decks.py --deck all --only-started --min-srs 5 --max-cards 100
 ```
 
 If you want only high-value fixes:
 
 ```bash
-python wk_decks_v2_4_1.py --deck leeches --only-started
-python wk_decks_v2_4_1.py --deck verb-pairs --only-started --min-srs 3
+python wk_decks.py --deck leeches --only-started
+python wk_decks.py --deck verb-pairs --only-started --min-srs 3
 ```
 
 ## Troubleshooting
@@ -339,13 +339,13 @@ pip install genanki requests
 Try relaxing filters:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --min-srs 1 --max-cards 300
+python wk_decks.py --deck all --only-started --min-srs 1 --max-cards 300
 ```
 
 Or refresh cache:
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --refresh-cache
+python wk_decks.py --deck all --only-started --refresh-cache
 ```
 
 ### Duplicate notes appear in Anki
@@ -528,13 +528,13 @@ Each radical card includes:
 ### Run all decks
 
 ```bash
-python wk_decks_v2_4_1.py --deck all --only-started --min-srs 3 --max-cards 150
+python wk_decks.py --deck all --only-started --min-srs 3 --max-cards 150
 ```
 
 ### Run radicals only
 
 ```bash
-python wk_decks_v2_4_1.py --deck radicals
+python wk_decks.py --deck radicals
 ```
 
 ### Override current level
@@ -542,7 +542,7 @@ python wk_decks_v2_4_1.py --deck radicals
 If the detected level seems wrong:
 
 ```bash
-python wk_decks_v2_4_1.py --deck radicals --radical-current-level 12
+python wk_decks.py --deck radicals --radical-current-level 12
 ```
 
 This will generate level 12 and level 13 radicals.
@@ -561,3 +561,102 @@ Order: `Relative overdueness`
 ## v2.4.1 bug fix
 
 Fixes a `NameError: review_index is not defined` crash when generating leech cards with priority tags.
+
+
+## v2.6.0 improvements
+
+### WaniKani-style leech cards
+
+Leech items now generate separate **Meaning** and **Reading** cards:
+
+- Front: kanji or vocabulary only
+- Back: meaning or reading, plus the relevant mnemonic and stats
+
+Reading cards for vocabulary also include WaniKani context sentences when available.
+
+### Smarter leech scoring
+
+Leeches are ranked by a composite score using:
+
+- total meaning/reading misses
+- WaniKani `percentage_correct`
+- current streak (lower streak = higher priority)
+- recency of last review (`updated_at`)
+
+Tune with:
+
+```bash
+python wk_decks.py --deck leeches --only-started --leech-score-min 2.5
+```
+
+The default `--leech-score-min 1.0` keeps behavior close to earlier versions while improving sort order.
+
+### Meaning vs reading weakness tags
+
+Notes are tagged when one review side is clearly weaker:
+
+- `leech-meaning`
+- `leech-reading`
+
+Suggested filtered decks:
+
+```text
+deck:"WaniKani Leech Fixes" AND tag:leech-meaning
+deck:"WaniKani Leech Fixes" AND tag:leech-reading
+```
+
+Weak-side cards also show a small front hint: "Meaning side needs work" or "Reading side needs work".
+
+### Preview mode
+
+List what would be generated without writing `.apkg` files:
+
+```bash
+python wk_decks.py --deck all --only-started --dry-run
+```
+
+Use this to tune `--max-cards`, `--leech-incorrect-min`, and `--leech-score-min` before importing.
+
+
+## v2.7.0 API improvements
+
+### Incremental sync
+
+User-specific collections now cache as:
+
+```json
+{
+  "synced_at": "2026-06-11T12:00:00Z",
+  "items": [ ... ]
+}
+```
+
+After the cache age expires (24 hours by default), the script fetches only records changed since `synced_at` using the API's `updated_after` filter, then merges them into the local cache.
+
+Use `--refresh-cache` when you want a full re-download instead of an incremental update.
+
+### Server-side assignment filtering
+
+Assignment downloads now honor your CLI filters on the API side:
+
+- `--only-started` → `started=true`
+- `--only-unlocked` → `unlocked=true`
+- `--only-burned` → `burned=true`
+- `--min-srs` → `srs_stages=...`
+- `--max-level` → `levels=...`
+
+Review statistics are fetched in batches for the filtered assignment subject IDs, so weekly runs transfer much less data.
+
+### Current level from `/user`
+
+Radical preview levels now come from `GET /user` (`data.level`) instead of inferring level from unlocked assignments.
+
+You can still override with `--radical-current-level`.
+
+### WaniKani-native confusables
+
+Confusable vocabulary groups now use WaniKani's `component_subject_ids` when available, with the previous shared-kanji-string grouping kept as a fallback.
+
+### Cache note after upgrading
+
+The first run after upgrading may re-download assignments/review statistics because cache filenames now include your filter settings (for example `assignments_started_true_srs_stages_1-9_...json`). This is expected once.

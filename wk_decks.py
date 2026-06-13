@@ -23,14 +23,21 @@ Basic use:
 With pitch CSV:
   python wk_decks.py --deck all --only-started --pitch-csv pitch.csv
 
+Preview without writing decks:
+  python wk_decks.py --deck all --only-started --dry-run
+
+Recommended weekly import (one file, all decks):
+  python wk_decks.py --deck all --only-started
+  # then import out/wk_all.apkg into Anki
+
 With Yomitan pitch dictionary zip/folder:
   python wk_decks.py --deck all --only-started --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
 """
 
 from __future__ import annotations
 
-VERSION = "2.4.1"
-BUILD_DATE = "2026-06-09"
+VERSION = "2.8.0"
+BUILD_DATE = "2026-06-11"
 
 import warnings
 
@@ -50,6 +57,7 @@ import sys
 import time
 import zipfile
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -61,6 +69,20 @@ WK_REVISION = "20170710"
 CACHE_DIR = Path(".wk_cache")
 CACHE_MAX_AGE_HOURS = 24
 OUTPUT_DIR = Path("out")
+
+# Leech scoring weights
+LEECH_RECENCY_BOOST_DAYS = 3
+LEECH_RECENCY_MID_DAYS = 14
+LEECH_RECENCY_STALE_DAYS = 60
+LEECH_RECENCY_BOOST = 1.5
+LEECH_RECENCY_MID = 1.2
+LEECH_RECENCY_STALE = 0.85
+LEECH_STREAK_PENALTY_MAX = 5
+LEECH_STREAK_PENALTY_STEP = 0.2
+LEECH_WEAK_SIDE_MIN_INCORRECT = 2
+CONTEXT_SENTENCE_LIMIT = 3
+SECONDS_PER_DAY = 86400
+REVIEW_STATS_BATCH_SIZE = 100
 
 # Keep stable after first import.
 DECK_IDS = {
@@ -78,6 +100,68 @@ MODEL_IDS = {
     "family": 1865429014,
     "radical": 1865429015,
 }
+
+ITEM_MODEL_TEMPLATE_VERSION = "v4"
+
+# Stable Anki note type names — do not embed version numbers here.
+# Template/schema version lives in ITEM_MODEL_TEMPLATE_VERSION and card Meta fields.
+NOTE_TYPE_NAMES = {
+    "item": "WK Update-Safe Item",
+    "pair": "WK Update-Safe Verb Pair",
+    "family": "WK Update-Safe Family",
+    "radical": "WK Update-Safe Radical",
+}
+
+BUNDLE_FILENAME = "wk_all.apkg"
+FILTERED_DECKS_JSON = "anki_filtered_decks.json"
+
+# anki.decks.Deck.Filtered.SearchTerm.Order.RELATIVE_OVERDUENESS
+FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
+
+FILTERED_DECK_DEFINITIONS = [
+    {
+        "name": "WK::Daily Priority",
+        "search": '(tag:priority-high) AND (deck:"WaniKani Leech Fixes" OR deck:"WaniKani Verb Pair Contrasts")',
+        "limit": 30,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Verb Contrasts",
+        "search": 'deck:"WaniKani Verb Pair Contrasts" AND (tag:priority-high OR tag:priority-medium)',
+        "limit": 30,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Leeches",
+        "search": 'deck:"WaniKani Leech Fixes"',
+        "limit": 50,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Meaning Leeches",
+        "search": 'deck:"WaniKani Leech Fixes" AND tag:leech-meaning',
+        "limit": 30,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Reading Leeches",
+        "search": 'deck:"WaniKani Leech Fixes" AND tag:leech-reading',
+        "limit": 30,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Radicals Preview",
+        "search": 'deck:"WaniKani Current and Next Radicals"',
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Confusables Light",
+        "search": 'deck:"WaniKani Confusable Vocabulary" AND tag:priority-high',
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+]
 
 DECK_NAMES = {
     "leeches": "WaniKani Leech Fixes",
@@ -178,12 +262,44 @@ COMMON_CSS = """
   color: #c8c8c8;
 }
 
+.answer { font-weight: 600; margin-top: 8px; }
+.reading.answer { font-size: 34px; }
+.meaning.answer { font-size: 24px; }
+.reading-detail { font-size: 16px; color: #aaa; margin-top: 6px; }
+.nightMode .reading-detail,
+.card.nightMode .reading-detail,
+.night_mode .reading-detail {
+  color: #cccccc;
+}
+.context { text-align: left; margin: 10px auto; max-width: 760px; padding: 8px 0; border-top: 1px solid #ddd; }
+.context .jp { font-size: 22px; margin-top: 0; }
+.weak-side { font-size: 14px; color: #900; font-weight: bold; margin-bottom: 8px; }
+
 """
 
 
 def cache_path(collection: str, params_key: str = "all") -> Path:
     safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", params_key)
     return CACHE_DIR / f"{collection}_{safe_key}.json"
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def normalize_cache_envelope(raw: Any) -> dict:
+    if isinstance(raw, list):
+        return {"synced_at": None, "items": raw}
+    if isinstance(raw, dict) and "items" in raw:
+        return raw
+    raise ValueError("Unexpected cache format")
+
+
+def merge_records(existing: Sequence[dict], updates: Sequence[dict]) -> List[dict]:
+    by_id = {item["id"]: item for item in existing}
+    for item in updates:
+        by_id[item["id"]] = item
+    return list(by_id.values())
 
 
 def load_json_cache(path: Path, max_age_hours: int, refresh: bool = False) -> Optional[Any]:
@@ -195,21 +311,52 @@ def load_json_cache(path: Path, max_age_hours: int, refresh: bool = False) -> Op
         return json.load(f)
 
 
+def load_cache_envelope(path: Path, max_age_hours: int, refresh: bool = False) -> Tuple[Optional[dict], bool]:
+    """Return (envelope, is_stale). envelope is None when a full download is required."""
+    if refresh or not path.exists():
+        return None, False
+    age_seconds = time.time() - path.stat().st_mtime
+    is_stale = age_seconds > max_age_hours * 3600
+    with path.open("r", encoding="utf-8") as f:
+        return normalize_cache_envelope(json.load(f)), is_stale
+
+
+def save_cache_envelope(path: Path, items: Sequence[dict], synced_at: Optional[str] = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    envelope = {"synced_at": synced_at or utc_now_iso(), "items": list(items)}
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(envelope, f, ensure_ascii=False, indent=2)
+
+
 def save_json_cache(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def wk_get_all(collection: str, params: Optional[dict] = None) -> List[dict]:
+def wk_headers() -> dict:
     token = os.environ.get("WANIKANI_API_TOKEN")
     if not token:
         raise RuntimeError("Set WANIKANI_API_TOKEN first.")
-    headers = {"Authorization": f"Bearer {token}", "Wanikani-Revision": WK_REVISION}
+    return {"Authorization": f"Bearer {token}", "Wanikani-Revision": WK_REVISION}
+
+
+def wk_get_resource(resource: str) -> dict:
+    response = requests.get(f"{WK_API_BASE}/{resource}", headers=wk_headers(), timeout=45)
+    if response.status_code == 429:
+        retry_after = int(response.headers.get("Retry-After", "5"))
+        print(f"Rate limited by WaniKani. Waiting {retry_after}s...")
+        time.sleep(retry_after)
+        return wk_get_resource(resource)
+    response.raise_for_status()
+    return response.json()
+
+
+def wk_get_all(collection: str, params: Optional[dict] = None) -> List[dict]:
     url = f"{WK_API_BASE}/{collection}"
     out: List[dict] = []
     while url:
-        response = requests.get(url, headers=headers, params=params, timeout=45)
+        response = requests.get(url, headers=wk_headers(), params=params, timeout=45)
         if response.status_code == 429:
             retry_after = int(response.headers.get("Retry-After", "5"))
             print(f"Rate limited by WaniKani. Waiting {retry_after}s...")
@@ -223,17 +370,154 @@ def wk_get_all(collection: str, params: Optional[dict] = None) -> List[dict]:
     return out
 
 
-def get_cached_collection(collection: str, *, params: Optional[dict] = None, params_key: str = "all", refresh: bool = False) -> List[dict]:
-    path = cache_path(collection, params_key)
+def batched(values: Sequence[int], size: int) -> Iterable[List[int]]:
+    for start in range(0, len(values), size):
+        yield list(values[start : start + size])
+
+
+def assignment_params_key(params: dict) -> str:
+    parts = []
+    for key in sorted(params):
+        value = params[key]
+        if isinstance(value, list):
+            parts.append(f"{key}={'-'.join(str(v) for v in value)}")
+        else:
+            parts.append(f"{key}={value}")
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", "_".join(parts)) if parts else "all"
+
+
+def build_assignment_params(args: argparse.Namespace) -> dict:
+    params: dict = {"subject_types": "radical,kanji,vocabulary"}
+    if args.max_level < 60:
+        params["levels"] = ",".join(str(level) for level in range(1, args.max_level + 1))
+    if args.only_started:
+        params["started"] = "true"
+    if args.only_unlocked:
+        params["unlocked"] = "true"
+    if args.only_burned:
+        params["burned"] = "true"
+    if args.min_srs > 0:
+        params["srs_stages"] = ",".join(str(stage) for stage in range(args.min_srs, 10))
+    return params
+
+
+def get_cached_user(refresh: bool = False) -> dict:
+    path = CACHE_DIR / "user.json"
     cached = load_json_cache(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
     if cached is not None:
-        print(f"Using cached {collection}: {path}")
+        print(f"Using cached user: {path}")
         return cached
+    print("Downloading WaniKani user...")
+    payload = wk_get_resource("user")
+    user = payload["data"]
+    save_json_cache(path, user)
+    print(f"Saved user cache: {path}")
+    return user
+
+
+def get_cached_collection(
+    collection: str,
+    *,
+    params: Optional[dict] = None,
+    params_key: str = "all",
+    refresh: bool = False,
+) -> List[dict]:
+    path = cache_path(collection, params_key)
+    envelope, is_stale = load_cache_envelope(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
+
+    if envelope is not None and not is_stale and not refresh:
+        print(f"Using cached {collection}: {path} ({len(envelope['items'])} items)")
+        return envelope["items"]
+
+    if envelope is not None and is_stale and envelope.get("synced_at") and not refresh:
+        print(f"Incremental sync for {collection} since {envelope['synced_at']}...")
+        sync_params = dict(params or {})
+        sync_params["updated_after"] = envelope["synced_at"]
+        delta = wk_get_all(collection, params=sync_params)
+        items = merge_records(envelope["items"], delta)
+        save_cache_envelope(path, items)
+        print(f"Updated {collection} cache: {path} (+{len(delta)} changed, {len(items)} total)")
+        return items
+
     print(f"Downloading WaniKani {collection}...")
-    data = wk_get_all(collection, params=params)
-    save_json_cache(path, data)
-    print(f"Saved {collection} cache: {path}")
-    return data
+    items = wk_get_all(collection, params=params)
+    save_cache_envelope(path, items)
+    print(f"Saved {collection} cache: {path} ({len(items)} items)")
+    return items
+
+
+def fetch_review_statistics(
+    subject_ids: Sequence[int],
+    *,
+    updated_after: Optional[str] = None,
+) -> List[dict]:
+    if updated_after:
+        return wk_get_all(
+            "review_statistics",
+            params={
+                "subject_types": "kanji,vocabulary",
+                "updated_after": updated_after,
+            },
+        )
+
+    if not subject_ids:
+        return wk_get_all(
+            "review_statistics",
+            params={"subject_types": "kanji,vocabulary"},
+        )
+
+    out: List[dict] = []
+    for batch in batched(list(subject_ids), REVIEW_STATS_BATCH_SIZE):
+        out.extend(
+            wk_get_all(
+                "review_statistics",
+                params={
+                    "subject_ids": ",".join(str(subject_id) for subject_id in batch),
+                    "subject_types": "kanji,vocabulary",
+                },
+            )
+        )
+    return merge_records([], out)
+
+
+def get_cached_review_statistics(
+    subject_ids: Sequence[int],
+    *,
+    params_key: str = "all",
+    refresh: bool = False,
+) -> List[dict]:
+    path = cache_path("review_statistics", params_key)
+    envelope, is_stale = load_cache_envelope(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
+
+    if envelope is not None and not is_stale and not refresh:
+        print(f"Using cached review_statistics: {path} ({len(envelope['items'])} items)")
+        return envelope["items"]
+
+    if envelope is not None and is_stale and envelope.get("synced_at") and not refresh:
+        print(f"Incremental sync for review_statistics since {envelope['synced_at']}...")
+        delta = fetch_review_statistics(subject_ids, updated_after=envelope["synced_at"])
+        items = merge_records(envelope["items"], delta)
+        save_cache_envelope(path, items)
+        print(f"Updated review_statistics cache: {path} (+{len(delta)} changed, {len(items)} total)")
+        return items
+
+    print("Downloading WaniKani review_statistics...")
+    items = fetch_review_statistics(subject_ids)
+    save_cache_envelope(path, items)
+    print(f"Saved review_statistics cache: {path} ({len(items)} items)")
+    return items
+
+
+def write_apkg(deck: genanki.Deck, path: Path) -> None:
+    genanki.Package(deck).write_to_file(str(path))
+
+
+def write_bundled_apkg(decks: Sequence[genanki.Deck], path: Path) -> None:
+    if not decks:
+        return
+    package = genanki.Package(decks[0])
+    package.decks = list(decks)
+    package.write_to_file(str(path))
 
 
 def primary_meanings(subject: dict) -> List[str]:
@@ -305,30 +589,182 @@ def passes_progress_filter(subject: dict, assignment_index: Dict[int, dict], arg
     return srs_stage(subject, assignment_index) >= args.min_srs
 
 
-def incorrect_total(subject: dict, review_index: Dict[int, dict]) -> int:
+def review_stats_data(subject: dict, review_index: Dict[int, dict]) -> dict:
     stats = review_index.get(subject["id"])
-    if not stats:
-        return 0
-    d = stats["data"]
-    return int(d.get("meaning_incorrect") or 0) + int(d.get("reading_incorrect") or 0)
+    return stats["data"] if stats else {}
+
+
+def meaning_incorrect(subject: dict, review_index: Dict[int, dict]) -> int:
+    return int(review_stats_data(subject, review_index).get("meaning_incorrect") or 0)
+
+
+def reading_incorrect(subject: dict, review_index: Dict[int, dict]) -> int:
+    return int(review_stats_data(subject, review_index).get("reading_incorrect") or 0)
+
+
+def meaning_streak(subject: dict, review_index: Dict[int, dict]) -> int:
+    return int(review_stats_data(subject, review_index).get("meaning_current_streak") or 0)
+
+
+def reading_streak(subject: dict, review_index: Dict[int, dict]) -> int:
+    return int(review_stats_data(subject, review_index).get("reading_current_streak") or 0)
+
+
+def incorrect_total(subject: dict, review_index: Dict[int, dict]) -> int:
+    return meaning_incorrect(subject, review_index) + reading_incorrect(subject, review_index)
 
 
 def current_streak_min(subject: dict, review_index: Dict[int, dict]) -> int:
     stats = review_index.get(subject["id"])
     if not stats:
         return 999
-    d = stats["data"]
-    return min(int(d.get("meaning_current_streak") or 0), int(d.get("reading_current_streak") or 0))
+    return min(meaning_streak(subject, review_index), reading_streak(subject, review_index))
+
+
+def parse_wk_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def recency_weight(updated_at: Optional[str]) -> float:
+    reviewed_at = parse_wk_timestamp(updated_at)
+    if reviewed_at is None:
+        return 1.0
+    age_days = (datetime.now(timezone.utc) - reviewed_at).total_seconds() / SECONDS_PER_DAY
+    if age_days <= LEECH_RECENCY_BOOST_DAYS:
+        return LEECH_RECENCY_BOOST
+    if age_days <= LEECH_RECENCY_MID_DAYS:
+        return LEECH_RECENCY_MID
+    if age_days <= LEECH_RECENCY_STALE_DAYS:
+        return 1.0
+    return LEECH_RECENCY_STALE
+
+
+def streak_penalty(streak_min: int) -> float:
+    return 1.0 + max(0, LEECH_STREAK_PENALTY_MAX - streak_min) * LEECH_STREAK_PENALTY_STEP
+
+
+def error_rate_factor(subject: dict, review_index: Dict[int, dict]) -> float:
+    data = review_stats_data(subject, review_index)
+    pct_correct = data.get("percentage_correct")
+    if pct_correct is not None:
+        return max(0.05, (100.0 - float(pct_correct)) / 100.0)
+    incorrect = incorrect_total(subject, review_index)
+    attempts = incorrect + max(current_streak_min(subject, review_index), 1)
+    return max(0.05, incorrect / attempts)
+
+
+def leech_score(subject: dict, review_index: Dict[int, dict]) -> float:
+    incorrect = incorrect_total(subject, review_index)
+    if incorrect <= 0:
+        return 0.0
+    data = review_stats_data(subject, review_index)
+    return incorrect * error_rate_factor(subject, review_index) * streak_penalty(current_streak_min(subject, review_index)) * recency_weight(data.get("updated_at"))
 
 
 def is_leech(subject: dict, review_index: Dict[int, dict], args: argparse.Namespace) -> bool:
-    return incorrect_total(subject, review_index) >= args.leech_incorrect_min and current_streak_min(subject, review_index) <= args.leech_streak_max
+    if incorrect_total(subject, review_index) < args.leech_incorrect_min:
+        return False
+    if current_streak_min(subject, review_index) > args.leech_streak_max:
+        return False
+    return leech_score(subject, review_index) >= args.leech_score_min
+
+
+def leech_weakness_tags(subject: dict, review_index: Dict[int, dict]) -> List[str]:
+    tags: List[str] = []
+    m_wrong = meaning_incorrect(subject, review_index)
+    r_wrong = reading_incorrect(subject, review_index)
+    m_streak = meaning_streak(subject, review_index)
+    r_streak = reading_streak(subject, review_index)
+
+    if m_wrong >= LEECH_WEAK_SIDE_MIN_INCORRECT and (m_wrong > r_wrong or m_streak < r_streak):
+        tags.append("leech-meaning")
+    if r_wrong >= LEECH_WEAK_SIDE_MIN_INCORRECT and (r_wrong > m_wrong or r_streak < m_streak):
+        tags.append("leech-reading")
+    return tags
 
 
 def leech_label(subject: dict, review_index: Dict[int, dict]) -> str:
     total = incorrect_total(subject, review_index)
-    streak = current_streak_min(subject, review_index)
-    return f"misses={total}, current-streak-min={streak}" if total else ""
+    if not total:
+        return ""
+    score = leech_score(subject, review_index)
+    pct = review_stats_data(subject, review_index).get("percentage_correct")
+    pct_text = f", accuracy={pct}%" if pct is not None else ""
+    return (
+        f"score={score:.1f}{pct_text}, "
+        f"meaning misses={meaning_incorrect(subject, review_index)} (streak={meaning_streak(subject, review_index)}), "
+        f"reading misses={reading_incorrect(subject, review_index)} (streak={reading_streak(subject, review_index)})"
+    )
+
+
+def subject_type_label(subject: dict) -> str:
+    kind = subject.get("object") or ""
+    if kind == "kanji":
+        return "Kanji"
+    if kind == "vocabulary":
+        return "Vocabulary"
+    return kind.replace("_", " ").title()
+
+
+def reading_mnemonic(subject: dict) -> str:
+    return strip_html(subject["data"].get("reading_mnemonic"))
+
+
+def readings_by_type(subject: dict) -> Dict[str, List[str]]:
+    grouped: DefaultDict[str, List[str]] = defaultdict(list)
+    for reading in subject["data"].get("readings") or []:
+        reading_type = reading.get("type") or "reading"
+        if reading.get("primary") or reading.get("accepted_answer"):
+            grouped[reading_type].append(reading["reading"])
+    if not grouped:
+        for reading in subject["data"].get("readings") or []:
+            grouped[reading.get("type") or "reading"].append(reading["reading"])
+    return dict(grouped)
+
+
+def readings_detail_html(subject: dict) -> str:
+    if subject.get("object") != "kanji":
+        return ""
+    grouped = readings_by_type(subject)
+    if not grouped:
+        return ""
+    labels = {
+        "onyomi": "On'yomi",
+        "kunyomi": "Kun'yomi",
+        "nanori": "Nanori",
+    }
+    parts = []
+    for reading_type, values in grouped.items():
+        label = labels.get(reading_type, reading_type.title())
+        parts.append(f"{label}: {html.escape('、'.join(values))}")
+    return "<br>".join(parts)
+
+
+def meta_html(subject: dict, assignment_index: Dict[int, dict]) -> str:
+    data = subject["data"]
+    return html.escape(
+        f"WK Level {data.get('level', '?')} · SRS {srs_stage(subject, assignment_index)} · template {ITEM_MODEL_TEMPLATE_VERSION}"
+    )
+
+
+def context_sentences_html(subject: dict) -> str:
+    if subject.get("object") != "vocabulary":
+        return ""
+    sentences = subject["data"].get("context_sentences") or []
+    if not sentences:
+        return ""
+    parts = []
+    for sentence in sentences[:CONTEXT_SENTENCE_LIMIT]:
+        ja = html.escape(strip_html(sentence.get("ja")))
+        en = html.escape(strip_html(sentence.get("en")))
+        if ja:
+            parts.append(f'<div class="context"><div class="jp">{ja}</div><div class="meaning">{en}</div></div>')
+    return "".join(parts)
 
 
 def meaning_synonyms(subject: dict, study_index: Dict[int, dict]) -> List[str]:
@@ -476,7 +912,7 @@ def item_html(subject: dict, assignment_index: Dict[int, dict], review_index: Di
 def make_radical_model() -> genanki.Model:
     return genanki.Model(
         MODEL_IDS["radical"],
-        "WK Update-Safe Radical Model v1",
+        NOTE_TYPE_NAMES["radical"],
         fields=[
             {"name": "GuidKey"},
             {"name": "Radical"},
@@ -510,11 +946,76 @@ def make_radical_model() -> genanki.Model:
 
 
 def make_item_model() -> genanki.Model:
-    return genanki.Model(MODEL_IDS["item"], "WK Update-Safe Item Model v2", fields=[
-        {"name": "GuidKey"}, {"name": "Expression"}, {"name": "Reading"}, {"name": "Meaning"}, {"name": "ItemHtml"}, {"name": "Mnemonic"}, {"name": "Confusables"}, {"name": "Pitch"}, {"name": "PitchPattern"}, {"name": "Notes"}], templates=[
-        {"name": "Meaning", "qfmt": '<div class="prompt">Meaning?</div><div class="jp">{{Expression}}</div><div class="reading">{{Reading}}</div>', "afmt": "{{FrontSide}}<hr>{{ItemHtml}}<h3>Mnemonic</h3><div class='notes'>{{Mnemonic}}</div><h3>Confusables</h3><div>{{Confusables}}</div>"},
-        {"name": "Reading", "qfmt": '<div class="prompt">Reading?</div><div class="jp">{{Expression}}</div>', "afmt": "{{FrontSide}}<hr>{{ItemHtml}}"},
-        {"name": "Pitch", "qfmt": "{{#Pitch}}<div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div>{{/Pitch}}", "afmt": "{{FrontSide}}<hr><div class='pitch-answer'>{{Pitch}} {{PitchPattern}}</div>{{ItemHtml}}"}], css=COMMON_CSS)
+    return genanki.Model(
+        MODEL_IDS["item"],
+        NOTE_TYPE_NAMES["item"],
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Expression"},
+            {"name": "Reading"},
+            {"name": "Meaning"},
+            {"name": "ItemHtml"},
+            {"name": "Mnemonic"},
+            {"name": "Confusables"},
+            {"name": "Pitch"},
+            {"name": "PitchPattern"},
+            {"name": "Notes"},
+            {"name": "ReadingMnemonic"},
+            {"name": "SubjectType"},
+            {"name": "ReadingsDetail"},
+            {"name": "Meta"},
+            {"name": "LeechStats"},
+            {"name": "Synonyms"},
+            {"name": "ContextSentences"},
+            {"name": "MeaningWeak"},
+            {"name": "ReadingWeak"},
+        ],
+        templates=[
+            {
+                "name": "Meaning",
+                "qfmt": """
+                <div class="prompt">{{SubjectType}} meaning?</div>
+                {{#MeaningWeak}}<div class="weak-side">Meaning side needs work</div>{{/MeaningWeak}}
+                <div class="jp">{{Expression}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="meaning answer">{{Meaning}}</div>
+                {{#Synonyms}}<div class="synonyms"><b>Your synonyms:</b> {{Synonyms}}</div>{{/Synonyms}}
+                {{#Mnemonic}}<h3>Meaning mnemonic</h3><div class="notes">{{Mnemonic}}</div>{{/Mnemonic}}
+                {{#Confusables}}<h3>Confusables</h3><div class="notes">{{Confusables}}</div>{{/Confusables}}
+                <div class="meta">{{Meta}}</div>
+                {{#LeechStats}}<div class="leech">{{LeechStats}}</div>{{/LeechStats}}
+                """,
+            },
+            {
+                "name": "Reading",
+                "qfmt": """
+                <div class="prompt">{{SubjectType}} reading?</div>
+                {{#ReadingWeak}}<div class="weak-side">Reading side needs work</div>{{/ReadingWeak}}
+                <div class="jp">{{Expression}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="reading answer">{{Reading}}</div>
+                {{#ReadingsDetail}}<div class="reading-detail">{{ReadingsDetail}}</div>{{/ReadingsDetail}}
+                {{#ReadingMnemonic}}<h3>Reading mnemonic</h3><div class="notes">{{ReadingMnemonic}}</div>{{/ReadingMnemonic}}
+                {{#ContextSentences}}<h3>Context</h3>{{ContextSentences}}{{/ContextSentences}}
+                {{#Pitch}}<div class="pitch"><b>Pitch:</b> {{Pitch}} <span>{{PitchPattern}}</span></div>{{/Pitch}}
+                <div class="meta">{{Meta}}</div>
+                {{#LeechStats}}<div class="leech">{{LeechStats}}</div>{{/LeechStats}}
+                """,
+            },
+            {
+                "name": "Pitch",
+                "qfmt": "{{#Pitch}}<div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div>{{/Pitch}}",
+                "afmt": "{{FrontSide}}<hr><div class='pitch-answer'>{{Pitch}} {{PitchPattern}}</div>{{ItemHtml}}",
+            },
+        ],
+        css=COMMON_CSS,
+    )
 
 
 
@@ -706,7 +1207,7 @@ def detailed_pair_back(subject: dict, assignment_index: Dict[int, dict], review_
 def make_pair_model() -> genanki.Model:
     return genanki.Model(
         MODEL_IDS["pair"],
-        "WK Update-Safe Pair Model v3",
+        NOTE_TYPE_NAMES["pair"],
         fields=[
             {"name": "GuidKey"},
             {"name": "LeftFrontHtml"},
@@ -774,7 +1275,7 @@ def make_pair_model() -> genanki.Model:
 def make_family_model() -> genanki.Model:
     return genanki.Model(
         MODEL_IDS["family"],
-        "WK Update-Safe Family Model v2",
+        NOTE_TYPE_NAMES["family"],
         fields=[
             {"name": "GuidKey"},
             {"name": "FamilyTitle"},
@@ -804,7 +1305,14 @@ def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List
     ]
 
 
-def current_wk_level(subjects: Sequence[dict], assignment_index: Dict[int, dict]) -> int:
+def index_subjects_by_id(subjects: Iterable[dict]) -> Dict[int, dict]:
+    return {s["id"]: s for s in subjects}
+
+
+def current_wk_level(user: dict, subjects: Sequence[dict], assignment_index: Dict[int, dict]) -> int:
+    level = int(user.get("level") or 0)
+    if level > 0:
+        return level
     levels = []
     for subject in subjects:
         assignment = assignment_index.get(subject["id"])
@@ -813,11 +1321,11 @@ def current_wk_level(subjects: Sequence[dict], assignment_index: Dict[int, dict]
     return max(levels) if levels else 1
 
 
-def selected_radical_levels(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> Tuple[int, int]:
+def selected_radical_levels(user: dict, subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> Tuple[int, int]:
     if args.radical_current_level:
         current = args.radical_current_level
     else:
-        current = current_wk_level(subjects, assignment_index)
+        current = current_wk_level(user, subjects, assignment_index)
     next_level = min(current + 1, 60)
     return current, next_level
 
@@ -862,7 +1370,15 @@ def kanji_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], 
 
 def find_leeches(subjects: Sequence[dict], assignment_index: Dict[int, dict], review_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
     candidates = [s for s in subjects if s.get("object") in {"vocabulary", "kanji"} and passes_progress_filter(s, assignment_index, args) and is_leech(s, review_index, args)]
-    return sorted(candidates, key=lambda s: (-incorrect_total(s, review_index), s["data"].get("level", 999)))[: args.max_cards]
+    return sorted(
+        candidates,
+        key=lambda s: (
+            -leech_score(s, review_index),
+            -incorrect_total(s, review_index),
+            s["data"].get("level", 999),
+            s["data"].get("characters") or "",
+        ),
+    )[: args.max_cards]
 
 
 def best_item(items: List[dict]) -> dict:
@@ -892,20 +1408,67 @@ def shared_kanji_key(expr: str) -> str:
     return "".join(ch for ch in expr if "\u4e00" <= ch <= "\u9fff")
 
 
-def find_confusable_groups(vocab_items: Sequence[dict], args: argparse.Namespace) -> List[List[dict]]:
-    groups: DefaultDict[str, List[dict]] = defaultdict(list)
+def component_group_key(item: dict) -> Optional[Tuple[int, ...]]:
+    components = item["data"].get("component_subject_ids") or []
+    if not components:
+        return None
+    return tuple(sorted(components))
+
+
+def confusable_group_title(group: List[dict], subject_index: Dict[int, dict]) -> str:
+    components = group[0]["data"].get("component_subject_ids") or []
+    if components:
+        kanji_chars = "".join(
+            subject_index[component_id]["data"].get("characters") or "?"
+            for component_id in sorted(components)
+            if component_id in subject_index
+        )
+        if kanji_chars:
+            return kanji_chars
+    return shared_kanji_key(group[0]["data"].get("characters") or "")
+
+
+def finalize_confusable_group(items: List[dict], args: argparse.Namespace) -> Optional[List[dict]]:
+    unique = sorted(items, key=lambda x: (x["data"].get("level", 999), x["data"].get("characters") or ""))
+    if len(unique) < 2 or len(unique) > args.max_confusable_group_size:
+        return None
+    readings = {first_reading(x) for x in unique}
+    if len(readings) >= 2 or len(unique) >= 3:
+        return unique
+    return None
+
+
+def find_confusable_groups(
+    vocab_items: Sequence[dict],
+    args: argparse.Namespace,
+) -> List[List[dict]]:
+    by_components: DefaultDict[Tuple[int, ...], List[dict]] = defaultdict(list)
+    by_kanji: DefaultDict[str, List[dict]] = defaultdict(list)
+
     for item in vocab_items:
-        key = shared_kanji_key(item["data"].get("characters") or "")
-        if key:
-            groups[key].append(item)
-    out = []
-    for _, items in groups.items():
-        unique = sorted(items, key=lambda x: (x["data"].get("level", 999), x["data"].get("characters") or ""))
-        if 2 <= len(unique) <= args.max_confusable_group_size:
-            readings = {first_reading(x) for x in unique}
-            if len(readings) >= 2 or len(unique) >= 3:
-                out.append(unique)
-    return sorted(out, key=lambda g: (min(x["data"].get("level", 999) for x in g), g[0]["data"].get("characters") or ""))[: args.max_cards]
+        component_key = component_group_key(item)
+        if component_key:
+            by_components[component_key].append(item)
+        kanji_key = shared_kanji_key(item["data"].get("characters") or "")
+        if kanji_key:
+            by_kanji[kanji_key].append(item)
+
+    seen_group_ids: Set[Tuple[int, ...]] = set()
+    out: List[List[dict]] = []
+    for grouped_items in list(by_components.values()) + list(by_kanji.values()):
+        group = finalize_confusable_group(grouped_items, args)
+        if not group:
+            continue
+        group_ids = tuple(item["id"] for item in group)
+        if group_ids in seen_group_ids:
+            continue
+        seen_group_ids.add(group_ids)
+        out.append(group)
+
+    return sorted(
+        out,
+        key=lambda g: (min(x["data"].get("level", 999) for x in g), g[0]["data"].get("characters") or ""),
+    )[: args.max_cards]
 
 
 def onyomi_readings(kanji: dict) -> List[str]:
@@ -948,13 +1511,13 @@ def write_pitch_template(vocab_items: Sequence[dict], path: str) -> None:
 
 def priority_for_item(subject: dict, review_index: Dict[int, dict], kind: str) -> str:
     """Return priority-high/medium/low tag for single-item cards."""
-    total = incorrect_total(subject, review_index)
+    score = leech_score(subject, review_index)
     streak = current_streak_min(subject, review_index)
 
     if kind in {"leech", "pitch-leech"}:
-        if total >= 8 or streak <= 1:
+        if score >= 12 or streak <= 1:
             return "priority-high"
-        if total >= 4:
+        if score >= 6:
             return "priority-medium"
         return "priority-low"
 
@@ -991,26 +1554,56 @@ def priority_for_confusable_group(group: List[dict], review_index: Dict[int, dic
 def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusables_html: str = "") -> None:
     data = subject["data"]
     expr = data.get("characters") or ""
-    reading = first_reading(subject)
+    reading = "、".join(primary_readings(subject)) or first_reading(subject)
     pitch = pitch_for(subject, pitch_index)
     guid = stable_guid(kind, subject["id"])
-    note = genanki.Note(model=model, fields=[
-        guid, html.escape(expr), html.escape(reading), html.escape("; ".join(primary_meanings(subject))),
-        item_html(subject, indexes["assignments"], indexes["reviews"], indexes["studies"], pitch_index),
-        html.escape(strip_html(data.get("meaning_mnemonic"))), confusables_html,
-        html.escape(str(pitch.get("pitch") or "")), html.escape(str(pitch.get("pattern") or "")), ""],
+    syns = meaning_synonyms(subject, indexes["studies"])
+    weakness_tags = leech_weakness_tags(subject, indexes["reviews"])
+    note = genanki.Note(
+        model=model,
+        fields=[
+            guid,
+            html.escape(expr),
+            html.escape(reading),
+            html.escape("; ".join(primary_meanings(subject))),
+            item_html(subject, indexes["assignments"], indexes["reviews"], indexes["studies"], pitch_index),
+            html.escape(strip_html(data.get("meaning_mnemonic"))),
+            confusables_html,
+            html.escape(str(pitch.get("pitch") or "")),
+            html.escape(str(pitch.get("pattern") or "")),
+            "",
+            html.escape(reading_mnemonic(subject)),
+            html.escape(subject_type_label(subject)),
+            readings_detail_html(subject),
+            meta_html(subject, indexes["assignments"]),
+            html.escape(leech_label(subject, indexes["reviews"])),
+            html.escape("; ".join(syns)),
+            context_sentences_html(subject),
+            "1" if "leech-meaning" in weakness_tags else "",
+            "1" if "leech-reading" in weakness_tags else "",
+        ],
         tags=[
             "wanikani",
             kind,
             priority_for_item(subject, indexes["reviews"], kind),
             f"wk-level-{data.get('level', 0)}",
-        ], guid=guid)
+            *weakness_tags,
+        ],
+        guid=guid,
+    )
     deck.add_note(note)
 
 
 
-def build_radical_deck(radicals: List[dict], kanji_items: List[dict], indexes: dict, args: argparse.Namespace, output_dir: Path) -> Path:
-    current_level, next_level = selected_radical_levels(radicals + kanji_items, indexes["assignments"], args)
+def build_radical_deck(
+    radicals: List[dict],
+    kanji_items: List[dict],
+    indexes: dict,
+    args: argparse.Namespace,
+    output_dir: Path,
+    current_level: int,
+    next_level: int,
+) -> Tuple[Path, genanki.Deck]:
     selected = [
         r for r in radicals
         if int(r["data"].get("level") or 999) in {current_level, next_level}
@@ -1063,22 +1656,22 @@ def build_radical_deck(radicals: List[dict], kanji_items: List[dict], indexes: d
         deck.add_note(note)
 
     out = output_dir / "wk_radicals_current_next.apkg"
-    genanki.Package(deck).write_to_file(str(out))
-    return out
+    write_apkg(deck, out)
+    return out, deck
 
 
 
-def build_leech_deck(items, indexes, pitch_index, output_dir: Path) -> Path:
+def build_leech_deck(items, indexes, pitch_index, output_dir: Path) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["leeches"], DECK_NAMES["leeches"])
     model = make_item_model()
     for item in items:
         add_item_note(deck, model, item, indexes, pitch_index, "leech")
     out = output_dir / "wk_leeches.apkg"
-    genanki.Package(deck).write_to_file(str(out))
-    return out
+    write_apkg(deck, out)
+    return out, deck
 
 
-def build_pitch_leeches_deck(items, indexes, pitch_index, output_dir: Path) -> Optional[Path]:
+def build_pitch_leeches_deck(items, indexes, pitch_index, output_dir: Path) -> Optional[Tuple[Path, genanki.Deck]]:
     pitch_items = [i for i in items if pitch_for(i, pitch_index).get("pitch") or pitch_for(i, pitch_index).get("pattern")]
     if not pitch_items:
         return None
@@ -1087,11 +1680,11 @@ def build_pitch_leeches_deck(items, indexes, pitch_index, output_dir: Path) -> O
     for item in pitch_items:
         add_item_note(deck, model, item, indexes, pitch_index, "pitch-leech")
     out = output_dir / "wk_pitch_leeches.apkg"
-    genanki.Package(deck).write_to_file(str(out))
-    return out
+    write_apkg(deck, out)
+    return out, deck
 
 
-def build_pair_deck(pairs: List[Tuple[dict, dict]], indexes: dict, pitch_index: Dict[Tuple[str, str], dict], output_dir: Path) -> Path:
+def build_pair_deck(pairs: List[Tuple[dict, dict]], indexes: dict, pitch_index: Dict[Tuple[str, str], dict], output_dir: Path) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["verb-pairs"], DECK_NAMES["verb-pairs"])
     model = make_pair_model()
     for left, right in pairs:
@@ -1141,15 +1734,15 @@ def build_pair_deck(pairs: List[Tuple[dict, dict]], indexes: dict, pitch_index: 
         )
         deck.add_note(note)
     out = output_dir / "wk_verb_pairs.apkg"
-    genanki.Package(deck).write_to_file(str(out))
-    return out
+    write_apkg(deck, out)
+    return out, deck
 
 
-def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path) -> Path:
+def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path, subject_index: Dict[int, dict]) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["confusables"], DECK_NAMES["confusables"])
     model = make_family_model()
     for group in groups:
-        key = shared_kanji_key(group[0]["data"].get("characters") or "")
+        key = confusable_group_title(group, subject_index)
         members_front = "\n".join(
             f"<span class='front-member'>{html.escape(i['data'].get('characters') or '')}"
             f"<span class='front-reading'>{html.escape(first_reading(i))}</span></span>"
@@ -1168,7 +1761,7 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path) -> Pa
                 "Compare these WaniKani vocabulary items. What makes each one different?",
                 f"<div class='front-members'>{members_front}</div>",
                 f"<div class='family-members'>{members}</div>",
-                "These items share kanji or visual/reading cues, so drill the contrast rather than memorizing each in isolation.",
+                "These items share WaniKani kanji components or the same kanji string, so drill the contrast rather than memorizing each in isolation.",
             ],
             tags=[
                 "wanikani",
@@ -1179,11 +1772,11 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path) -> Pa
         )
         deck.add_note(note)
     out = output_dir / "wk_confusables.apkg"
-    genanki.Package(deck).write_to_file(str(out))
-    return out
+    write_apkg(deck, out)
+    return out, deck
 
 
-def build_phonetic_family_deck(families, output_dir: Path) -> Path:
+def build_phonetic_family_deck(families, output_dir: Path) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["phonetic-families"], DECK_NAMES["phonetic-families"])
     model = make_family_model()
     for comp, reading, members in families:
@@ -1212,55 +1805,199 @@ def build_phonetic_family_deck(families, output_dir: Path) -> Path:
         )
         deck.add_note(note)
     out = output_dir / "wk_phonetic_families.apkg"
-    genanki.Package(deck).write_to_file(str(out))
-    return out
+    write_apkg(deck, out)
+    return out, deck
 
 
 
 def write_filtered_deck_suggestions(output_dir: Path) -> Path:
     path = output_dir / "anki_filtered_decks.txt"
+    lines = ["Suggested Anki filtered decks", ""]
+    for index, deck in enumerate(FILTERED_DECK_DEFINITIONS, start=1):
+        lines.extend(
+            [
+                f"{index}. {deck['name']}",
+                "Search:",
+                deck["search"],
+                f"Limit: {deck['limit']}",
+                "Order: Relative overdueness",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Automated setup:",
+            f"  Install the add-on in anki_addon/wk_filtered_decks, then use",
+            f"  Tools → WK Setup Filtered Decks after importing {BUNDLE_FILENAME}.",
+            f"  It reads {FILTERED_DECKS_JSON} from your generator output folder.",
+            "",
+            "Notes:",
+            "- Reviews in filtered decks update the original cards.",
+            "- After regenerating/importing decks, run WK Setup Filtered Decks again (Rebuild).",
+            "- Filtered decks cannot be included inside .apkg files; they live in your Anki profile.",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def write_filtered_decks_json(output_dir: Path) -> Path:
+    path = output_dir / FILTERED_DECKS_JSON
+    payload = {
+        "generator_version": VERSION,
+        "order_labels": {"relative_overdueness": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS},
+        "decks": FILTERED_DECK_DEFINITIONS,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+
+def write_import_instructions(output_dir: Path) -> Path:
+    note_types = ", ".join(NOTE_TYPE_NAMES.values())
+    path = output_dir / "anki_import_instructions.txt"
     path.write_text(
-        """Suggested Anki filtered decks
+        f"""WaniKani → Anki import instructions (generator {VERSION})
 
-1. WK Daily Priority
-Search:
-(tag:priority-high) AND (deck:"WaniKani Leech Fixes" OR deck:"WaniKani Verb Pair Contrasts")
-Limit: 30
-Order: Relative overdueness
+RECOMMENDED: import the bundled file
+  {BUNDLE_FILENAME}
 
-2. WK Verb Contrasts
-Search:
-deck:"WaniKani Verb Pair Contrasts" AND (tag:priority-high OR tag:priority-medium)
-Limit: 30
-Order: Relative overdueness
+This updates every deck in one step with one Anki dialog.
 
-3. WK Leeches
-Search:
-deck:"WaniKani Leech Fixes"
-Limit: 50
-Order: Relative overdueness
+When Anki asks about existing note types:
+  - Choose UPDATE / replace existing note type
+  - Do NOT choose "Create new note type" or "Keep old note type"
 
-4. WK Radicals Preview
-Search:
-deck:"WaniKani Current and Next Radicals"
-Limit: 20
-Order: Relative overdueness
+Expected note type names (stable — no version suffix):
+  {note_types}
 
-5. WK Confusables Light
-Search:
-deck:"WaniKani Confusable Vocabulary" AND tag:priority-high
-Limit: 20
-Order: Relative overdueness
+After import, verify any leech card back includes:
+  template {ITEM_MODEL_TEMPLATE_VERSION}
 
-Notes:
-- Reviews in filtered decks update the original cards.
-- After regenerating/importing decks, click Rebuild on the filtered deck.
-- Keep deck options on the permanent decks; they should persist across imports.
+Meaning / Reading card fronts should show only the Japanese expression.
+Pitch cards may also show the reading on front when pitch data exists.
+
+Individual deck files (wk_leeches.apkg, etc.) are still written for one-off
+imports, but weekly updates are cleaner with {BUNDLE_FILENAME} alone.
+
+Filtered decks (WK::Daily Priority, etc.) cannot be bundled in .apkg files.
+After importing, run Tools → WK Setup Filtered Decks in Anki using the add-on
+in anki_addon/wk_filtered_decks (reads {FILTERED_DECKS_JSON}).
+
+If you ever end up with duplicate note types again:
+  1. Browse → filter by deck → note the old vs new note type counts
+  2. Prefer re-importing {BUNDLE_FILENAME} with "Update existing note type"
+  3. Or delete the deck notes once and re-import (loses scheduling)
 """,
         encoding="utf-8",
     )
     return path
 
+
+def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
+    print()
+    print("Anki import checklist:")
+    if bundle_path:
+        print(f"  Recommended: import {bundle_path.name} (all decks in one file)")
+    print("  When Anki asks about an existing note type, choose UPDATE — not create new.")
+    print(f"  Leech note type name: {NOTE_TYPE_NAMES['item']}")
+    print(f"  Verify card backs include: template {ITEM_MODEL_TEMPLATE_VERSION}")
+    print(f"  Full instructions: out/anki_import_instructions.txt")
+    print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
+
+
+def subject_summary(subject: dict, review_index: Dict[int, dict]) -> str:
+    data = subject["data"]
+    expr = data.get("characters") or data.get("slug") or "?"
+    kind = subject.get("object") or "item"
+    level = data.get("level", "?")
+    score = leech_score(subject, review_index)
+    weakness = ",".join(leech_weakness_tags(subject, review_index)) or "-"
+    return (
+        f"{expr} [{kind} L{level}] score={score:.1f} "
+        f"m={meaning_incorrect(subject, review_index)}/{meaning_streak(subject, review_index)} "
+        f"r={reading_incorrect(subject, review_index)}/{reading_streak(subject, review_index)} "
+        f"weak={weakness}"
+    )
+
+
+def preview_deck_section(title: str, lines: Sequence[str], limit: int = 25) -> None:
+    print(f"\n{title} ({len(lines)} items)")
+    print("-" * len(title))
+    if not lines:
+        print("  (none)")
+        return
+    for line in lines[:limit]:
+        print(f"  {line}")
+    if len(lines) > limit:
+        print(f"  ... and {len(lines) - limit} more")
+
+
+def print_preview_report(
+    args: argparse.Namespace,
+    *,
+    leeches: Sequence[dict],
+    verb_pairs: Sequence[Tuple[dict, dict]],
+    confusables: Sequence[List[dict]],
+    phonetic_families: Sequence[Tuple[str, str, List[dict]]],
+    radical_items: Sequence[dict],
+    current_level: int,
+    next_level: int,
+    pitch_index: Dict[Tuple[str, str], dict],
+    review_index: Dict[int, dict],
+) -> None:
+    print("\nDRY RUN — no .apkg files will be written")
+    print("=" * 60)
+    wanted = {args.deck} if args.deck != "all" else {"leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals"}
+
+    if "leeches" in wanted:
+        preview_deck_section(
+            DECK_NAMES["leeches"],
+            [subject_summary(item, review_index) for item in leeches],
+        )
+    if "pitch-leeches" in wanted:
+        pitch_leeches = [i for i in leeches if pitch_for(i, pitch_index).get("pitch") or pitch_for(i, pitch_index).get("pattern")]
+        preview_deck_section(
+            DECK_NAMES["pitch-leeches"],
+            [subject_summary(item, review_index) for item in pitch_leeches],
+        )
+    if "verb-pairs" in wanted:
+        preview_deck_section(
+            DECK_NAMES["verb-pairs"],
+            [
+                f"{left['data'].get('characters') or '?'} ↔ {right['data'].get('characters') or '?'}"
+                for left, right in verb_pairs
+            ],
+        )
+    if "confusables" in wanted:
+        preview_deck_section(
+            DECK_NAMES["confusables"],
+            [
+                " / ".join(i["data"].get("characters") or "?" for i in group)
+                for group in confusables
+            ],
+        )
+    if "phonetic-families" in wanted:
+        preview_deck_section(
+            DECK_NAMES["phonetic-families"],
+            [f"{comp} → {reading} ({len(members)} kanji)" for comp, reading, members in phonetic_families],
+        )
+    if "radicals" in wanted:
+        selected = [
+            r for r in radical_items
+            if int(r["data"].get("level") or 999) in {current_level, next_level}
+        ]
+        preview_deck_section(
+            DECK_NAMES["radicals"],
+            [
+                f"{radical_display(r)} [L{r['data'].get('level', '?')}] {'; '.join(primary_meanings(r))}"
+                for r in sorted(selected, key=lambda x: (x["data"].get("level", 999), radical_display(x)))
+            ],
+        )
+
+    print("\nLeech filters:")
+    print(f"  incorrect_min={args.leech_incorrect_min}, streak_max={args.leech_streak_max}, score_min={args.leech_score_min}")
+    print("\nRe-run without --dry-run to write decks.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -1278,8 +2015,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--only-unlocked", action="store_true")
     parser.add_argument("--only-started", action="store_true")
     parser.add_argument("--only-burned", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="Preview generated deck contents without writing .apkg files.")
+    parser.add_argument("--no-bundle", action="store_true", help="Do not write the combined out/wk_all.apkg file.")
     parser.add_argument("--leech-incorrect-min", type=int, default=3)
     parser.add_argument("--leech-streak-max", type=int, default=5)
+    parser.add_argument("--leech-score-min", type=float, default=1.0, help="Minimum composite leech score after incorrect/streak filters.")
     parser.add_argument("--max-cards", type=int, default=200)
     parser.add_argument("--max-confusable-group-size", type=int, default=7)
     parser.add_argument("--min-family-size", type=int, default=3)
@@ -1302,16 +2042,46 @@ def main() -> None:
     print()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    subjects = get_cached_collection("subjects", params={"types": "vocabulary,kanji,radical"}, params_key="vocabulary_kanji_radical", refresh=args.refresh_cache)
-    assignments = get_cached_collection("assignments", refresh=args.refresh_cache)
-    reviews = get_cached_collection("review_statistics", refresh=args.refresh_cache)
+
+    user = get_cached_user(refresh=args.refresh_cache)
+    subjects = get_cached_collection(
+        "subjects",
+        params={"types": "vocabulary,kanji,radical"},
+        params_key="vocabulary_kanji_radical",
+        refresh=args.refresh_cache,
+    )
+    assignment_params = build_assignment_params(args)
+    assignment_key = assignment_params_key(assignment_params)
+    assignments = get_cached_collection(
+        "assignments",
+        params=assignment_params,
+        params_key=assignment_key,
+        refresh=args.refresh_cache,
+    )
+    assignment_index = assignment_by_subject_id(assignments)
+    review_subject_ids = [
+        assignment["data"]["subject_id"]
+        for assignment in assignments
+        if assignment["data"].get("subject_type") in {"kanji", "vocabulary"}
+    ]
+    reviews = get_cached_review_statistics(
+        review_subject_ids,
+        params_key=assignment_key,
+        refresh=args.refresh_cache,
+    )
     studies = get_cached_collection("study_materials", refresh=args.refresh_cache)
-    indexes = {"assignments": assignment_by_subject_id(assignments), "reviews": review_stats_by_subject_id(reviews), "studies": study_materials_by_subject_id(studies)}
+    subject_index = index_subjects_by_id(subjects)
+    indexes = {
+        "assignments": assignment_index,
+        "reviews": review_stats_by_subject_id(reviews),
+        "studies": study_materials_by_subject_id(studies),
+    }
     pitch_index = merge_pitch_indexes(load_yomitan_pitch(args.yomitan_dict), load_pitch_csv(args.pitch_csv))
     vocab_items = vocab_subjects(subjects, indexes["assignments"], args)
     kanji_items = kanji_subjects(subjects, indexes["assignments"], args)
     radical_items = radical_subjects(subjects, args)
-    current_level, next_level = selected_radical_levels(subjects, indexes["assignments"], args)
+    current_level, next_level = selected_radical_levels(user, subjects, indexes["assignments"], args)
+    print(f"WaniKani user level: {user.get('level', '?')}")
     if args.write_pitch_template:
         write_pitch_template(vocab_items, args.write_pitch_template)
         return
@@ -1328,30 +2098,68 @@ def main() -> None:
     print(f"Confusable groups: {len(confusables)}")
     print(f"Phonetic families: {len(phonetic_families)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
+    if args.dry_run:
+        print_preview_report(
+            args,
+            leeches=leeches,
+            verb_pairs=verb_pairs,
+            confusables=confusables,
+            phonetic_families=phonetic_families,
+            radical_items=radical_items,
+            current_level=current_level,
+            next_level=next_level,
+            pitch_index=pitch_index,
+            review_index=indexes["reviews"],
+        )
+        return
     created: List[Path] = []
+    built_decks: List[genanki.Deck] = []
     wanted = {args.deck} if args.deck != "all" else {"leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals"}
     if "radicals" in wanted and radical_items:
-        created.append(build_radical_deck(radical_items, kanji_items, indexes, args, output_dir))
+        path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, current_level, next_level)
+        created.append(path)
+        built_decks.append(deck)
     if "leeches" in wanted and leeches:
-        created.append(build_leech_deck(leeches, indexes, pitch_index, output_dir))
+        path, deck = build_leech_deck(leeches, indexes, pitch_index, output_dir)
+        created.append(path)
+        built_decks.append(deck)
     if "verb-pairs" in wanted and verb_pairs:
-        created.append(build_pair_deck(verb_pairs, indexes, pitch_index, output_dir))
+        path, deck = build_pair_deck(verb_pairs, indexes, pitch_index, output_dir)
+        created.append(path)
+        built_decks.append(deck)
     if "confusables" in wanted and confusables:
-        created.append(build_confusables_deck(confusables, indexes, pitch_index, output_dir))
+        path, deck = build_confusables_deck(confusables, indexes, pitch_index, output_dir, subject_index)
+        created.append(path)
+        built_decks.append(deck)
     if "phonetic-families" in wanted and phonetic_families:
-        created.append(build_phonetic_family_deck(phonetic_families, output_dir))
+        path, deck = build_phonetic_family_deck(phonetic_families, output_dir)
+        created.append(path)
+        built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
         maybe = build_pitch_leeches_deck(leeches, indexes, pitch_index, output_dir)
         if maybe:
-            created.append(maybe)
+            path, deck = maybe
+            created.append(path)
+            built_decks.append(deck)
     if not created:
         print("No decks created. Try lowering filters, refreshing cache, or adding pitch data.", file=sys.stderr)
         sys.exit(1)
+    bundle_path: Optional[Path] = None
+    if built_decks and not args.no_bundle:
+        bundle_path = output_dir / BUNDLE_FILENAME
+        write_bundled_apkg(built_decks, bundle_path)
     settings_path = write_filtered_deck_suggestions(output_dir)
+    filtered_json_path = write_filtered_decks_json(output_dir)
+    instructions_path = write_import_instructions(output_dir)
     print("Created:")
+    if bundle_path:
+        print(f"  {bundle_path}  ← recommended import")
     for path in created:
         print(f"  {path}")
     print(f"  {settings_path}")
+    print(f"  {filtered_json_path}")
+    print(f"  {instructions_path}")
+    print_import_verification_help(bundle_path)
 
 
 if __name__ == "__main__":
