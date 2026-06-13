@@ -11,6 +11,7 @@ Decks:
   - phonetic-families: kanji grouped by repeated reading-bearing components
   - pitch-leeches: leeches with pitch data, if pitch data is supplied
   - radicals: current-level and next-level radicals
+  - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
   - all: all of the above
 
 Install:
@@ -36,7 +37,7 @@ With Yomitan pitch dictionary zip/folder:
 
 from __future__ import annotations
 
-VERSION = "2.9.3"
+VERSION = "2.10.0"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -56,10 +57,10 @@ import re
 import sys
 import time
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, DefaultDict, Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 import genanki
 import requests
@@ -83,6 +84,16 @@ LEECH_WEAK_SIDE_MIN_INCORRECT = 2
 CONTEXT_SENTENCE_LIMIT = 3
 SECONDS_PER_DAY = 86400
 REVIEW_STATS_BATCH_SIZE = 100
+READING_KEYWORD_MIN_USES = 5
+READING_KEYWORD_MIN_CONSISTENCY = 0.9
+READING_KEYWORD_EXAMPLE_LIMIT = 5
+READING_MNEMONIC_TAG_RE = re.compile(r"<reading>", re.IGNORECASE)
+READING_MNEMONIC_TAG_BODY_RE = re.compile(r"<reading>(.*?)</reading>", re.DOTALL | re.IGNORECASE)
+READING_MNEMONIC_PAIR_RE = re.compile(
+    r"<reading>(.*?)</reading>\s*(?:\(([^)]+)\)|（([^）]+)）)",
+    re.DOTALL | re.IGNORECASE,
+)
+READING_MNEMONIC_PAREN_KANA_RE = re.compile(r"\(([ぁ-んー]+)\)|（([ぁ-んー]+)）")
 
 # Keep stable after first import.
 DECK_IDS = {
@@ -92,6 +103,7 @@ DECK_IDS = {
     "phonetic-families": 2059400114,
     "pitch-leeches": 2059400115,
     "radicals": 2059400116,
+    "reading-keywords": 2059400117,
 }
 
 MODEL_IDS = {
@@ -99,6 +111,7 @@ MODEL_IDS = {
     "pair": 1865429013,
     "family": 1865429014,
     "radical": 1865429015,
+    "reading_keyword": 1865429016,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -108,6 +121,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "pair": "v2",
     "family": "v1",
     "radical": "v2",
+    "reading_keyword": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -118,6 +132,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "pair": 1,
     "family": 2,
     "radical": 3,
+    "reading_keyword": 4,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -129,6 +144,7 @@ NOTE_TYPE_NAMES = {
     "pair": "WK Update-Safe Verb Pair",
     "family": "WK Update-Safe Family",
     "radical": "WK Update-Safe Radical",
+    "reading_keyword": "WK Update-Safe Reading Keyword",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -189,6 +205,7 @@ DECK_NAMES = {
     "phonetic-families": "WaniKani Phonetic Families",
     "pitch-leeches": "WaniKani Pitch Leeches",
     "radicals": "WaniKani Current and Next Radicals",
+    "reading-keywords": "WaniKani Reading Keywords",
 }
 
 PAIR_RULES = [
@@ -857,6 +874,116 @@ def reading_mnemonic(subject: dict) -> str:
     return strip_html(subject["data"].get("reading_mnemonic"))
 
 
+class ReadingKeywordEntry(NamedTuple):
+    kana: str
+    keyword: str
+    uses: int
+    consistency: float
+    example_html: str
+
+
+def normalize_reading_keyword(raw: str) -> str:
+    text = re.sub(r"<[^>]+>", "", raw).strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) > 32:
+        text = text.split(" ", 1)[0]
+    return text.strip()
+
+
+def primary_reading_list(subject: dict) -> List[str]:
+    readings = subject["data"].get("readings") or []
+    primary = [r["reading"] for r in readings if r.get("primary") or r.get("accepted_answer")]
+    return primary or [r["reading"] for r in readings]
+
+
+def extract_reading_mnemonic_pairs(subject: dict) -> List[Tuple[str, str]]:
+    mnemonic = subject["data"].get("reading_mnemonic") or ""
+    if not mnemonic:
+        return []
+
+    pairs: List[Tuple[str, str]] = []
+    for match in READING_MNEMONIC_PAIR_RE.finditer(mnemonic):
+        keyword = normalize_reading_keyword(match.group(1))
+        kana = (match.group(2) or match.group(3) or "").strip()
+        if keyword and kana:
+            pairs.append((kana, keyword))
+
+    if pairs:
+        return pairs
+
+    if not READING_MNEMONIC_TAG_RE.search(mnemonic):
+        return []
+
+    tags = [normalize_reading_keyword(tag) for tag in READING_MNEMONIC_TAG_BODY_RE.findall(mnemonic)]
+    kana_in_paren = [
+        match.group(1) or match.group(2) or ""
+        for match in READING_MNEMONIC_PAREN_KANA_RE.finditer(mnemonic)
+    ]
+    if tags and kana_in_paren and len(tags) == len(kana_in_paren):
+        return [(kana.strip(), keyword) for kana, keyword in zip(kana_in_paren, tags) if kana and keyword]
+    if len(tags) == 1 and len(kana_in_paren) == 1:
+        return [(kana_in_paren[0].strip(), tags[0])]
+    primary = primary_reading_list(subject)
+    if len(tags) == 1 and primary:
+        return [(primary[0], tags[0])]
+    return []
+
+
+def reading_keyword_example_html(subjects: Sequence[dict]) -> str:
+    rows: List[str] = []
+    for subject in subjects[:READING_KEYWORD_EXAMPLE_LIMIT]:
+        data = subject["data"]
+        chars = html.escape(data.get("characters") or data.get("slug") or "?")
+        kind = subject.get("object") or "item"
+        level = data.get("level", "?")
+        meaning = html.escape("; ".join(primary_meanings(subject)))
+        rows.append(
+            f"<div class='member'><span class='jp'>{chars}</span> "
+            f"<span class='meta'>{html.escape(kind)} · WK Level {level}</span> "
+            f"<span class='meaning'>{meaning}</span></div>"
+        )
+    return "".join(rows)
+
+
+def build_reading_keyword_catalog(
+    subjects: Sequence[dict],
+    min_uses: int = READING_KEYWORD_MIN_USES,
+    min_consistency: float = READING_KEYWORD_MIN_CONSISTENCY,
+) -> List[ReadingKeywordEntry]:
+    counts: DefaultDict[str, Counter] = defaultdict(Counter)
+    examples: DefaultDict[Tuple[str, str], List[dict]] = defaultdict(list)
+
+    for subject in subjects:
+        if subject.get("object") not in ("kanji", "vocabulary"):
+            continue
+        for kana, keyword in extract_reading_mnemonic_pairs(subject):
+            counts[kana][keyword] += 1
+            key = (kana, keyword)
+            if len(examples[key]) < READING_KEYWORD_EXAMPLE_LIMIT:
+                examples[key].append(subject)
+
+    entries: List[ReadingKeywordEntry] = []
+    for kana, keyword_counts in counts.items():
+        total = sum(keyword_counts.values())
+        if total < min_uses:
+            continue
+        keyword, top_count = keyword_counts.most_common(1)[0]
+        consistency = top_count / total
+        if consistency < min_consistency:
+            continue
+        entries.append(
+            ReadingKeywordEntry(
+                kana=kana,
+                keyword=keyword,
+                uses=total,
+                consistency=consistency,
+                example_html=reading_keyword_example_html(examples[(kana, keyword)]),
+            )
+        )
+
+    return sorted(entries, key=lambda entry: (-entry.uses, entry.kana))
+
+
 def readings_by_type(subject: dict) -> Dict[str, List[str]]:
     grouped: DefaultDict[str, List[str]] = defaultdict(list)
     for reading in subject["data"].get("readings") or []:
@@ -1493,6 +1620,59 @@ def make_family_model() -> WkModel:
 
 
 
+def make_reading_keyword_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["reading_keyword"],
+        NOTE_TYPE_NAMES["reading_keyword"],
+        template_key="reading_keyword",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Kana"},
+            {"name": "Keyword"},
+            {"name": "Examples"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Reading → Keyword",
+                "qfmt": """
+                <div class="prompt">WK phonetic keyword?</div>
+                <div class="reading-kana">{{Kana}}</div>
+                <div class="meta">WaniKani reading mnemonic keyword</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="keyword-answer">{{Keyword}}</div>
+                {{#Examples}}<h3>Used in WK mnemonics</h3><div class="family-members">{{Examples}}</div>{{/Examples}}
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+            {
+                "name": "Keyword → Reading",
+                "qfmt": """
+                <div class="prompt">Which reading chunk?</div>
+                <div class="keyword-front">{{Keyword}}</div>
+                <div class="meta">Recall the kana this WK keyword represents</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="reading answer">{{Kana}}</div>
+                {{#Examples}}<h3>Used in WK mnemonics</h3><div class="family-members">{{Examples}}</div>{{/Examples}}
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+        ],
+        css=versioned_css(COMMON_CSS + """
+.reading-kana { font-size: 48px; margin: 16px 0; color: #d8d8d8; font-weight: 600; }
+.keyword-front { font-size: 40px; margin: 16px 0; color: #cfcfcf; font-weight: 600; }
+.keyword-answer { font-size: 36px; margin: 12px 0; color: #cfcfcf; font-weight: 600; }
+""", "reading_keyword"),
+    )
+
+
+
 def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
     max_level = min(args.max_level, 60)
     return [
@@ -2014,6 +2194,41 @@ def build_phonetic_family_deck(families, output_dir: Path) -> Tuple[Path, genank
     return out, deck
 
 
+def build_reading_keyword_deck(
+    entries: Sequence[ReadingKeywordEntry],
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
+    deck = genanki.Deck(DECK_IDS["reading-keywords"], DECK_NAMES["reading-keywords"])
+    model = make_reading_keyword_model()
+    for entry in entries:
+        guid = stable_guid("reading-keyword", entry.kana)
+        meta = (
+            f"WK mnemonic uses: {entry.uses} · consistency {entry.consistency:.0%} · "
+            f"template {MODEL_TEMPLATE_VERSIONS['reading_keyword']}"
+        )
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(entry.kana),
+                html.escape(entry.keyword),
+                entry.example_html,
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                "reading-keyword",
+                "priority-low",
+                f"reading-{entry.kana}",
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
+    out = output_dir / "wk_reading_keywords.apkg"
+    write_apkg(deck, out)
+    return out, deck
+
+
 
 def write_filtered_deck_suggestions(output_dir: Path) -> Path:
     path = output_dir / "anki_filtered_decks.txt"
@@ -2157,6 +2372,7 @@ def print_preview_report(
     verb_pairs: Sequence[Tuple[dict, dict]],
     confusables: Sequence[List[dict]],
     phonetic_families: Sequence[Tuple[str, str, List[dict]]],
+    reading_keywords: Sequence[ReadingKeywordEntry],
     radical_items: Sequence[dict],
     current_level: int,
     next_level: int,
@@ -2165,7 +2381,10 @@ def print_preview_report(
 ) -> None:
     print("\nDRY RUN — no .apkg files will be written")
     print("=" * 60)
-    wanted = {args.deck} if args.deck != "all" else {"leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals"}
+    wanted = {args.deck} if args.deck != "all" else {
+        "leeches", "verb-pairs", "confusables", "phonetic-families",
+        "pitch-leeches", "radicals", "reading-keywords",
+    }
 
     if "leeches" in wanted:
         preview_deck_section(
@@ -2199,6 +2418,14 @@ def print_preview_report(
             DECK_NAMES["phonetic-families"],
             [f"{comp} → {reading} ({len(members)} kanji)" for comp, reading, members in phonetic_families],
         )
+    if "reading-keywords" in wanted:
+        preview_deck_section(
+            DECK_NAMES["reading-keywords"],
+            [
+                f"{entry.kana} → {entry.keyword} (uses={entry.uses}, {entry.consistency:.0%})"
+                for entry in reading_keywords
+            ],
+        )
     if "radicals" in wanted:
         selected = [
             r for r in radical_items
@@ -2220,7 +2447,10 @@ def print_preview_report(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="store_true", help="Print version and exit")
-    parser.add_argument("--deck", choices=["leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals", "all"], default="all")
+    parser.add_argument("--deck", choices=[
+        "leeches", "verb-pairs", "confusables", "phonetic-families",
+        "pitch-leeches", "radicals", "reading-keywords", "all",
+    ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
     parser.add_argument("--pitch-csv")
@@ -2306,6 +2536,7 @@ def main() -> None:
     verb_pairs = find_verb_pairs(vocab_items, args)
     confusables = find_confusable_groups(vocab_items, args)
     phonetic_families = find_phonetic_families(kanji_items, args)
+    reading_keywords = build_reading_keyword_catalog(subjects)
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
@@ -2314,6 +2545,7 @@ def main() -> None:
     print(f"Verb pairs: {len(verb_pairs)}")
     print(f"Confusable groups: {len(confusables)}")
     print(f"Phonetic families: {len(phonetic_families)}")
+    print(f"Reading keywords: {len(reading_keywords)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
     if args.dry_run:
         print_preview_report(
@@ -2322,6 +2554,7 @@ def main() -> None:
             verb_pairs=verb_pairs,
             confusables=confusables,
             phonetic_families=phonetic_families,
+            reading_keywords=reading_keywords,
             radical_items=radical_items,
             current_level=current_level,
             next_level=next_level,
@@ -2331,7 +2564,10 @@ def main() -> None:
         return
     created: List[Path] = []
     built_decks: List[genanki.Deck] = []
-    wanted = {args.deck} if args.deck != "all" else {"leeches", "verb-pairs", "confusables", "phonetic-families", "pitch-leeches", "radicals"}
+    wanted = {args.deck} if args.deck != "all" else {
+        "leeches", "verb-pairs", "confusables", "phonetic-families",
+        "pitch-leeches", "radicals", "reading-keywords",
+    }
     if "radicals" in wanted and radical_items:
         path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, current_level, next_level)
         created.append(path)
@@ -2350,6 +2586,10 @@ def main() -> None:
         built_decks.append(deck)
     if "phonetic-families" in wanted and phonetic_families:
         path, deck = build_phonetic_family_deck(phonetic_families, output_dir)
+        created.append(path)
+        built_decks.append(deck)
+    if "reading-keywords" in wanted and reading_keywords:
+        path, deck = build_reading_keyword_deck(reading_keywords, output_dir)
         created.append(path)
         built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
