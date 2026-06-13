@@ -12,6 +12,7 @@ Decks:
   - pitch-leeches: leeches with pitch data, if pitch data is supplied
   - radicals: current-level and next-level radicals
   - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
+  - kanji-radicals: kanji whose radical components are unlocked in WaniKani
   - all: all of the above
 
 Install:
@@ -37,7 +38,7 @@ With Yomitan pitch dictionary zip/folder:
 
 from __future__ import annotations
 
-VERSION = "2.10.0"
+VERSION = "2.11.1"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -104,6 +105,7 @@ DECK_IDS = {
     "pitch-leeches": 2059400115,
     "radicals": 2059400116,
     "reading-keywords": 2059400117,
+    "kanji-radicals": 2059400118,
 }
 
 MODEL_IDS = {
@@ -112,6 +114,7 @@ MODEL_IDS = {
     "family": 1865429014,
     "radical": 1865429015,
     "reading_keyword": 1865429016,
+    "kanji_radical": 1865429017,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -122,6 +125,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "family": "v1",
     "radical": "v2",
     "reading_keyword": "v1",
+    "kanji_radical": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -133,6 +137,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "family": 2,
     "radical": 3,
     "reading_keyword": 4,
+    "kanji_radical": 5,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -145,6 +150,7 @@ NOTE_TYPE_NAMES = {
     "family": "WK Update-Safe Family",
     "radical": "WK Update-Safe Radical",
     "reading_keyword": "WK Update-Safe Reading Keyword",
+    "kanji_radical": "WK Update-Safe Kanji Radicals",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -206,6 +212,7 @@ DECK_NAMES = {
     "pitch-leeches": "WaniKani Pitch Leeches",
     "radicals": "WaniKani Current and Next Radicals",
     "reading-keywords": "WaniKani Reading Keywords",
+    "kanji-radicals": "WaniKani Kanji Radical Breakdown",
 }
 
 PAIR_RULES = [
@@ -376,6 +383,12 @@ COMMON_CSS = """
 .pair-example { margin: 8px 0; padding: 8px 0; border-top: 1px solid #ddd; }
 .pair-example .jp { font-size: 22px; margin-top: 0; }
 .pair-example .meaning { font-size: 16px; margin-top: 4px; }
+.radical-breakdown { text-align: left; margin: 12px auto; max-width: 640px; }
+.radical-piece { margin: 10px 0; padding-bottom: 8px; border-bottom: 1px solid #ddd; }
+.radical-piece .jp { font-size: 32px; }
+.radicals-front { margin: 16px auto; max-width: 760px; }
+.radicals-front-piece { display: inline-block; margin: 6px 12px; font-size: 28px; vertical-align: top; }
+.radicals-front-meaning { display: block; font-size: 14px; color: #aaa; margin-top: 4px; }
 
 """
 
@@ -527,19 +540,29 @@ def get_cached_collection(
     path = cache_path(collection, params_key)
     envelope, is_stale = load_cache_envelope(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
 
-    if envelope is not None and not is_stale and not refresh:
-        print(f"Using cached {collection}: {path} ({len(envelope['items'])} items)")
-        return envelope["items"]
+    if refresh or envelope is None:
+        print(f"Downloading WaniKani {collection}...")
+        items = wk_get_all(collection, params=params)
+        save_cache_envelope(path, items)
+        print(f"Saved {collection} cache: {path} ({len(items)} items)")
+        return items
 
-    if envelope is not None and is_stale and envelope.get("synced_at") and not refresh:
-        print(f"Incremental sync for {collection} since {envelope['synced_at']}...")
+    if envelope.get("synced_at"):
+        print(f"Syncing {collection} since {envelope['synced_at']}...")
         sync_params = dict(params or {})
         sync_params["updated_after"] = envelope["synced_at"]
         delta = wk_get_all(collection, params=sync_params)
         items = merge_records(envelope["items"], delta)
         save_cache_envelope(path, items)
-        print(f"Updated {collection} cache: {path} (+{len(delta)} changed, {len(items)} total)")
+        if delta:
+            print(f"Updated {collection} cache: {path} (+{len(delta)} changed, {len(items)} total)")
+        else:
+            print(f"No {collection} changes since last sync ({len(items)} items in cache)")
         return items
+
+    if not is_stale:
+        print(f"Using cached {collection}: {path} ({len(envelope['items'])} items)")
+        return envelope["items"]
 
     print(f"Downloading WaniKani {collection}...")
     items = wk_get_all(collection, params=params)
@@ -591,17 +614,27 @@ def get_cached_review_statistics(
     path = cache_path("review_statistics", params_key)
     envelope, is_stale = load_cache_envelope(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
 
-    if envelope is not None and not is_stale and not refresh:
-        print(f"Using cached review_statistics: {path} ({len(envelope['items'])} items)")
-        return envelope["items"]
+    if refresh or envelope is None:
+        print("Downloading WaniKani review_statistics...")
+        items = fetch_review_statistics(subject_ids)
+        save_cache_envelope(path, items)
+        print(f"Saved review_statistics cache: {path} ({len(items)} items)")
+        return items
 
-    if envelope is not None and is_stale and envelope.get("synced_at") and not refresh:
-        print(f"Incremental sync for review_statistics since {envelope['synced_at']}...")
+    if envelope.get("synced_at"):
+        print(f"Syncing review_statistics since {envelope['synced_at']}...")
         delta = fetch_review_statistics(subject_ids, updated_after=envelope["synced_at"])
         items = merge_records(envelope["items"], delta)
         save_cache_envelope(path, items)
-        print(f"Updated review_statistics cache: {path} (+{len(delta)} changed, {len(items)} total)")
+        if delta:
+            print(f"Updated review_statistics cache: {path} (+{len(delta)} changed, {len(items)} total)")
+        else:
+            print(f"No review_statistics changes since last sync ({len(items)} items in cache)")
         return items
+
+    if not is_stale:
+        print(f"Using cached review_statistics: {path} ({len(envelope['items'])} items)")
+        return envelope["items"]
 
     print("Downloading WaniKani review_statistics...")
     items = fetch_review_statistics(subject_ids)
@@ -1673,6 +1706,55 @@ def make_reading_keyword_model() -> WkModel:
 
 
 
+def make_kanji_radical_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["kanji_radical"],
+        NOTE_TYPE_NAMES["kanji_radical"],
+        template_key="kanji_radical",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Kanji"},
+            {"name": "RadicalsFrontHtml"},
+            {"name": "RadicalsBackHtml"},
+            {"name": "MeaningMnemonic"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Kanji → Radicals",
+                "qfmt": """
+                <div class="prompt">Which radicals?</div>
+                <div class="jp">{{Kanji}}</div>
+                <div class="meta">Recall the radical building blocks</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                {{RadicalsBackHtml}}
+                {{#MeaningMnemonic}}<h3>Meaning mnemonic</h3><div class="notes">{{MeaningMnemonic}}</div>{{/MeaningMnemonic}}
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+            {
+                "name": "Radicals → Kanji",
+                "qfmt": """
+                <div class="prompt">Which kanji uses these radicals?</div>
+                {{RadicalsFrontHtml}}
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="jp">{{Kanji}}</div>
+                {{#MeaningMnemonic}}<h3>Meaning mnemonic</h3><div class="notes">{{MeaningMnemonic}}</div>{{/MeaningMnemonic}}
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+        ],
+        css=versioned_css(COMMON_CSS, "kanji_radical"),
+    )
+
+
+
 def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
     max_level = min(args.max_level, 60)
     return [
@@ -1740,6 +1822,77 @@ def radical_display(radical: dict) -> str:
 def radical_description_html(radical: dict) -> str:
     mnemonic = strip_html(radical["data"].get("meaning_mnemonic"))
     return html.escape(mnemonic) if mnemonic else ""
+
+
+def radical_index_by_id(subjects: Sequence[dict]) -> Dict[int, dict]:
+    return {subject["id"]: subject for subject in subjects if subject.get("object") == "radical"}
+
+
+def unlocked_subject_ids(subjects: Sequence[dict], assignment_index: Dict[int, dict]) -> Set[int]:
+    return {subject["id"] for subject in subjects if is_unlocked(subject, assignment_index)}
+
+
+def kanji_has_unlocked_radicals_only(kanji: dict, unlocked_radical_ids: Set[int]) -> bool:
+    component_ids = kanji["data"].get("component_subject_ids") or []
+    return bool(component_ids) and all(component_id in unlocked_radical_ids for component_id in component_ids)
+
+
+def kanji_radicals_back_html(kanji: dict, radical_index: Dict[int, dict]) -> str:
+    rows: List[str] = []
+    for component_id in kanji["data"].get("component_subject_ids") or []:
+        radical = radical_index.get(component_id)
+        if not radical:
+            continue
+        display = html.escape(radical_display(radical))
+        meaning = html.escape("; ".join(primary_meanings(radical)))
+        rows.append(
+            f"<div class='radical-piece'><span class='jp'>{display}</span> "
+            f"<span class='meaning'>{meaning}</span></div>"
+        )
+    return f"<div class='radical-breakdown'>{''.join(rows)}</div>" if rows else ""
+
+
+def kanji_radicals_front_html(kanji: dict, radical_index: Dict[int, dict]) -> str:
+    pieces: List[str] = []
+    for component_id in kanji["data"].get("component_subject_ids") or []:
+        radical = radical_index.get(component_id)
+        if not radical:
+            continue
+        display = html.escape(radical_display(radical))
+        meaning = html.escape("; ".join(primary_meanings(radical)))
+        pieces.append(
+            f"<span class='radicals-front-piece'>{display}"
+            f"<span class='radicals-front-meaning'>{meaning}</span></span>"
+        )
+    if not pieces:
+        return ""
+    return f"<div class='radicals-front'>{''.join(pieces)}</div>"
+
+
+def meaning_mnemonic_html(subject: dict) -> str:
+    mnemonic = strip_html(subject["data"].get("meaning_mnemonic"))
+    return html.escape(mnemonic) if mnemonic else ""
+
+
+def find_kanji_radical_breakdown(
+    kanji_items: Sequence[dict],
+    radical_items: Sequence[dict],
+    assignment_index: Dict[int, dict],
+    args: argparse.Namespace,
+) -> List[dict]:
+    unlocked_radical_ids = unlocked_subject_ids(radical_items, assignment_index)
+    candidates = [
+        kanji
+        for kanji in kanji_items
+        if kanji_has_unlocked_radicals_only(kanji, unlocked_radical_ids)
+    ]
+    return sorted(
+        candidates,
+        key=lambda kanji: (
+            kanji["data"].get("level", 999),
+            kanji["data"].get("characters") or "",
+        ),
+    )[: args.max_cards]
 
 
 def vocab_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
@@ -2229,6 +2382,56 @@ def build_reading_keyword_deck(
     return out, deck
 
 
+def build_kanji_radical_deck(
+    kanji_items: Sequence[dict],
+    radical_index: Dict[int, dict],
+    assignment_index: Dict[int, dict],
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
+    deck = genanki.Deck(DECK_IDS["kanji-radicals"], DECK_NAMES["kanji-radicals"])
+    model = make_kanji_radical_model()
+    for kanji in kanji_items:
+        data = kanji["data"]
+        guid = stable_guid("kanji-radical", kanji["id"])
+        radicals_back = kanji_radicals_back_html(kanji, radical_index)
+        if not radicals_back:
+            continue
+        level = data.get("level", "?")
+        meta = (
+            f"WK Level {level} · SRS {srs_stage(kanji, assignment_index)} · "
+            f"template {MODEL_TEMPLATE_VERSIONS['kanji_radical']}"
+        )
+        component_tags = [
+            f"radical-{radical['data'].get('slug') or radical_display(radical)}"
+            for component_id in data.get("component_subject_ids") or []
+            for radical in [radical_index.get(component_id)]
+            if radical
+        ]
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(data.get("characters") or ""),
+                kanji_radicals_front_html(kanji, radical_index),
+                radicals_back,
+                meaning_mnemonic_html(kanji),
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                "kanji-radical",
+                "priority-medium",
+                f"wk-level-{level}",
+                *component_tags[:8],
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
+    out = output_dir / "wk_kanji_radicals.apkg"
+    write_apkg(deck, out)
+    return out, deck
+
+
 
 def write_filtered_deck_suggestions(output_dir: Path) -> Path:
     path = output_dir / "anki_filtered_decks.txt"
@@ -2312,6 +2515,10 @@ Pitch cards may also show the reading on front when pitch data exists.
 Individual deck files (wk_leeches.apkg, etc.) are still written for one-off
 imports, but weekly updates are cleaner with {BUNDLE_FILENAME} alone.
 
+Each run syncs WaniKani data with updated_after when a prior cache exists
+(assignments, subjects, review stats). Use --refresh-cache to force a full
+re-download. Re-import the .apkg to add new notes; stable GUIDs update existing cards.
+
 Filtered decks (WK::Daily Priority, etc.) cannot be bundled in .apkg files.
 After importing, run Tools → WK Setup Filtered Decks in Anki using the add-on
 in anki_addon/wk_filtered_decks (reads {FILTERED_DECKS_JSON}).
@@ -2373,6 +2580,7 @@ def print_preview_report(
     confusables: Sequence[List[dict]],
     phonetic_families: Sequence[Tuple[str, str, List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
+    kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
     current_level: int,
     next_level: int,
@@ -2383,7 +2591,7 @@ def print_preview_report(
     print("=" * 60)
     wanted = {args.deck} if args.deck != "all" else {
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords",
+        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
     }
 
     if "leeches" in wanted:
@@ -2426,6 +2634,15 @@ def print_preview_report(
                 for entry in reading_keywords
             ],
         )
+    if "kanji-radicals" in wanted:
+        preview_deck_section(
+            DECK_NAMES["kanji-radicals"],
+            [
+                f"{kanji['data'].get('characters') or '?'} [L{kanji['data'].get('level', '?')}] "
+                f"{len(kanji['data'].get('component_subject_ids') or [])} radicals"
+                for kanji in kanji_radical_items
+            ],
+        )
     if "radicals" in wanted:
         selected = [
             r for r in radical_items
@@ -2449,7 +2666,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords", "all",
+        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals", "all",
     ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
@@ -2537,6 +2754,7 @@ def main() -> None:
     confusables = find_confusable_groups(vocab_items, args)
     phonetic_families = find_phonetic_families(kanji_items, args)
     reading_keywords = build_reading_keyword_catalog(subjects)
+    kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
@@ -2546,6 +2764,7 @@ def main() -> None:
     print(f"Confusable groups: {len(confusables)}")
     print(f"Phonetic families: {len(phonetic_families)}")
     print(f"Reading keywords: {len(reading_keywords)}")
+    print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
     if args.dry_run:
         print_preview_report(
@@ -2555,6 +2774,7 @@ def main() -> None:
             confusables=confusables,
             phonetic_families=phonetic_families,
             reading_keywords=reading_keywords,
+            kanji_radical_items=kanji_radical_items,
             radical_items=radical_items,
             current_level=current_level,
             next_level=next_level,
@@ -2566,7 +2786,7 @@ def main() -> None:
     built_decks: List[genanki.Deck] = []
     wanted = {args.deck} if args.deck != "all" else {
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords",
+        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
     }
     if "radicals" in wanted and radical_items:
         path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, current_level, next_level)
@@ -2590,6 +2810,15 @@ def main() -> None:
         built_decks.append(deck)
     if "reading-keywords" in wanted and reading_keywords:
         path, deck = build_reading_keyword_deck(reading_keywords, output_dir)
+        created.append(path)
+        built_decks.append(deck)
+    if "kanji-radicals" in wanted and kanji_radical_items:
+        path, deck = build_kanji_radical_deck(
+            kanji_radical_items,
+            radical_index_by_id(subjects),
+            indexes["assignments"],
+            output_dir,
+        )
         created.append(path)
         built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
