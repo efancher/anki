@@ -40,7 +40,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.13.1"
+VERSION = "2.14.1"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -131,6 +131,7 @@ MODEL_IDS = {
     "radical": 1865429015,
     "reading_keyword": 1865429016,
     "kanji_radical": 1865429017,
+    "phonetic_drill": 1865429018,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -142,6 +143,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "radical": "v2",
     "reading_keyword": "v1",
     "kanji_radical": "v1",
+    "phonetic_drill": "v2",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -154,6 +156,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "radical": 3,
     "reading_keyword": 4,
     "kanji_radical": 5,
+    "phonetic_drill": 6,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -167,6 +170,7 @@ NOTE_TYPE_NAMES = {
     "radical": "WK Update-Safe Radical",
     "reading_keyword": "WK Update-Safe Reading Keyword",
     "kanji_radical": "WK Update-Safe Kanji Radicals",
+    "phonetic_drill": "WK Update-Safe Phonetic Drill",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -800,14 +804,12 @@ def kanji_shares_phonetic_reading(
     reading: str,
     keisei_kanji: dict,
 ) -> bool:
-    """True when Keisei and WK (if WK lists on'yomi) agree this kanji carries the reading."""
+    """True when Keisei and WK both list this on'yomi for the kanji."""
     keisei_readings = keisei_kanji_readings(char, keisei_kanji)
     if reading not in keisei_readings:
         return False
     wk_onyomi = wk_onyomi_readings(subject)
-    if wk_onyomi and reading not in wk_onyomi:
-        return False
-    return True
+    return bool(wk_onyomi) and reading in wk_onyomi
 
 
 def first_reading(subject: dict) -> str:
@@ -1856,6 +1858,74 @@ def make_kanji_radical_model() -> WkModel:
     )
 
 
+def make_phonetic_drill_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["phonetic_drill"],
+        NOTE_TYPE_NAMES["phonetic_drill"],
+        template_key="phonetic_drill",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Kanji"},
+            {"name": "Prompt"},
+            {"name": "ReadingAnswer"},
+            {"name": "PhoneticPiece"},
+            {"name": "AnchorHtml"},
+            {"name": "Meaning"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Kanji → On'yomi via phonetic",
+                "qfmt": """
+                <div class="prompt">{{Prompt}}</div>
+                <div class="jp">{{Kanji}}</div>
+                <div class="meta">Predict the on'yomi using the phonetic component</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="reading answer">{{ReadingAnswer}}</div>
+                <div class="phonetic-piece">
+                  <span class="meta">Phonetic component</span>
+                  <span class="jp">{{PhoneticPiece}}</span>
+                </div>
+                <div class="meaning">{{Meaning}}</div>
+                <div class="meta">{{Meta}}</div>
+                {{AnchorHtml}}
+                """,
+            },
+        ],
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.phonetic-piece { margin: 12px 0; }
+.phonetic-piece .jp { font-size: 36px; }
+.phonetic-anchor-footnote {
+  font-size: 13px;
+  font-weight: normal;
+  color: #aaa;
+  margin-top: 14px;
+  text-align: left;
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.phonetic-anchor-footnote .phonetic-anchor-label {
+  font-size: 13px;
+  font-weight: normal;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+.phonetic-anchor-footnote .phonetic-anchor { margin: 6px 0; }
+.phonetic-anchor-footnote .jp { font-size: 18px; }
+.phonetic-anchor-footnote .reading { font-size: 15px; color: #aaa; font-weight: normal; }
+.phonetic-anchor-footnote .meta { font-size: 12px; }
+""",
+            "phonetic_drill",
+        ),
+    )
+
+
 
 def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
     max_level = min(args.max_level, 60)
@@ -2126,16 +2196,6 @@ def kanji_by_char(kanji_items: Sequence[dict]) -> Dict[str, dict]:
     return index
 
 
-def phonetic_family_hint_html(meta: dict) -> str:
-    wk_radical = meta.get("wk-radical")
-    if not wk_radical:
-        return ""
-    return (
-        f"<div class='meta'>WK radical keyword: {html.escape(str(wk_radical))}</div>"
-        f"<div class='meta'>Phonetic piece in other kanji, not necessarily a WK kanji</div>"
-    )
-
-
 def known_phonetic_components(started_kanji: Sequence[dict], keisei_kanji: dict) -> Set[str]:
     """Phonetic pieces from Keisei for kanji the user has already started."""
     known: Set[str] = set()
@@ -2201,34 +2261,67 @@ def find_phonetic_families(
     return families[: args.max_cards]
 
 
-def phonetic_member_row_html(
-    kanji: dict,
-    family_reading: str,
+def phonetic_drill_note_count(families: Sequence[Tuple[str, str, List[dict]]]) -> int:
+    return sum(len(members) for _, _, members in families)
+
+
+def kanji_onyomi_label(kanji: dict, char: str, keisei_kanji: dict) -> str:
+    onyomi = wk_onyomi_readings(kanji) or keisei_kanji_readings(char, keisei_kanji)
+    return "、".join(onyomi)
+
+
+def phonetic_anchor_back_html(
+    comp: str,
+    members: Sequence[dict],
+    current_kanji_id: int,
+    started_kanji_ids: Set[int],
+    all_kanji_by_char: Dict[str, dict],
     keisei_kanji: dict,
-    *,
-    is_started: bool,
 ) -> str:
-    data = kanji["data"]
-    char = data.get("characters") or ""
-    meaning = "; ".join(primary_meanings(kanji))
-    level = data.get("level", "?")
-    wk_onyomi = wk_onyomi_readings(kanji)
-    keisei_readings = keisei_kanji_readings(char, keisei_kanji)
-    other_onyomi = [r for r in wk_onyomi or keisei_readings if r != family_reading]
-    kun = [r["reading"] for r in data.get("readings", []) if r.get("type") == "kunyomi"]
-    extras: List[str] = []
-    if other_onyomi:
-        extras.append(f"also on: {'、'.join(other_onyomi)}")
-    if kun:
-        extras.append(f"kun: {'、'.join(kun[:2])}")
-    progress = "started" if is_started else "preview"
-    extra_html = f" <span class='meta'>{html.escape(' · '.join(extras))}</span>" if extras else ""
+    """Anchor kanji with full on'yomi so the phonetic piece is not mis-learned."""
+    parts: List[str] = []
+    if comp in all_kanji_by_char:
+        anchor = all_kanji_by_char[comp]
+        onyomi_label = kanji_onyomi_label(anchor, comp, keisei_kanji)
+        parts.append(
+            f"<div class='phonetic-anchor'>"
+            f"<div class='meta'>Phonetic kanji {html.escape(comp)} — all on'yomi:</div>"
+            f"<span class='jp'>{html.escape(comp)}</span> "
+            f"<span class='reading'>{html.escape(onyomi_label)}</span>"
+            f"</div>"
+        )
+    started_others = sorted(
+        [
+            member
+            for member in members
+            if member["id"] in started_kanji_ids and member["id"] != current_kanji_id
+        ],
+        key=lambda item: item["data"].get("level", 999),
+    )
+    if started_others:
+        rows = []
+        for member in started_others:
+            char = member["data"].get("characters") or ""
+            onyomi_label = kanji_onyomi_label(member, char, keisei_kanji)
+            rows.append(
+                f"<div class='member'>"
+                f"<span class='jp'>{html.escape(char)}</span> "
+                f"<span class='reading'>{html.escape(onyomi_label)}</span>"
+                f"</div>"
+            )
+        parts.append(
+            f"<div class='phonetic-anchor'>"
+            f"<div class='meta'>You already know (same sound family):</div>"
+            f"<div class='family-members'>{''.join(rows)}</div>"
+            f"</div>"
+        )
+    if not parts:
+        return ""
     return (
-        f"<div class='member{' member-preview' if not is_started else ''}'>"
-        f"<span class='jp'>{html.escape(char)}</span> "
-        f"<span class='reading'>{html.escape(family_reading)}</span> "
-        f"<span class='meaning'>{html.escape(meaning)}</span> "
-        f"<span class='meta'>WK Level {level} · {progress}</span>{extra_html}</div>"
+        "<div class='phonetic-anchor-footnote'>"
+        "<div class='phonetic-anchor-label'>Don't mix up these readings</div>"
+        f"{''.join(parts)}"
+        "</div>"
     )
 
 
@@ -2520,44 +2613,58 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path, subje
 
 def build_phonetic_family_deck(
     families: Sequence[Tuple[str, str, List[dict]]],
-    keisei_phonetic: dict,
     keisei_kanji: dict,
     started_kanji_ids: Set[int],
+    all_kanji_by_char: Dict[str, dict],
     output_dir: Path,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["phonetic-families"], DECK_NAMES["phonetic-families"])
-    model = make_family_model()
+    model = make_phonetic_drill_model()
+    template_label = MODEL_TEMPLATE_VERSIONS["phonetic_drill"]
     for comp, reading, members in families:
-        meta = keisei_phonetic.get(comp) or {}
-        rows = [
-            phonetic_member_row_html(
-                kanji,
-                reading,
+        for kanji in members:
+            data = kanji["data"]
+            char = data.get("characters") or ""
+            is_started = kanji["id"] in started_kanji_ids
+            meaning = "; ".join(primary_meanings(kanji))
+            level = data.get("level", "?")
+            progress = "started" if is_started else "preview"
+            anchor_html = phonetic_anchor_back_html(
+                comp,
+                members,
+                kanji["id"],
+                started_kanji_ids,
+                all_kanji_by_char,
                 keisei_kanji,
-                is_started=kanji["id"] in started_kanji_ids,
             )
-            for kanji in members
-        ]
-        members_html = (
-            f"<div class='reading answer'>Shared on'yomi: {html.escape(reading)}</div>"
-            f"<div class='family-members'>{''.join(rows)}</div>"
-        )
-        guid = stable_guid("phonetic-family", comp, reading)
-        note = genanki.Note(
-            model=model,
-            fields=[
-                guid,
-                f"<span class='jp'>{html.escape(comp)}</span> → <span class='reading'>{html.escape(reading)}</span>",
-                "Which kanji use this phonetic piece with this on'yomi reading?",
-                phonetic_family_hint_html(meta),
-                members_html,
-                "Keisei phonetic family. Includes future WK kanji (preview) that share a phonetic "
-                "you have seen in kanji you already started.",
-            ],
-            tags=["wanikani", "phonetic-family", "priority-low", f"reading-{reading}"],
-            guid=guid,
-        )
-        deck.add_note(note)
+            meta = (
+                f"WK Level {level} · {progress} · {comp}→{reading} · "
+                f"template {template_label}"
+            )
+            guid = stable_guid("phonetic-drill", kanji["id"], comp, reading)
+            note = genanki.Note(
+                model=model,
+                fields=[
+                    guid,
+                    html.escape(char),
+                    "What is the on'yomi reading?",
+                    html.escape(reading),
+                    html.escape(comp),
+                    anchor_html,
+                    html.escape(meaning),
+                    html.escape(meta),
+                ],
+                tags=[
+                    "wanikani",
+                    "phonetic-drill",
+                    "phonetic-family",
+                    "priority-low",
+                    f"reading-{reading}",
+                    progress,
+                ],
+                guid=guid,
+            )
+            deck.add_note(note)
     out = output_dir / "wk_phonetic_families.apkg"
     write_apkg(deck, out)
     return out, deck
@@ -2961,7 +3068,11 @@ def print_preview_report(
     if "phonetic-families" in wanted:
         preview_deck_section(
             DECK_NAMES["phonetic-families"],
-            [f"{comp} → {reading} ({len(members)} kanji)" for comp, reading, members in phonetic_families],
+            [
+                f"{m['data'].get('characters') or '?'} → {reading} via {comp}"
+                for comp, reading, members in phonetic_families
+                for m in members
+            ],
         )
     if "reading-keywords" in wanted:
         preview_deck_section(
@@ -3103,6 +3214,7 @@ def main() -> None:
         args,
     )
     started_kanji_ids = {item["id"] for item in kanji_items}
+    all_kanji_by_char = kanji_by_char(all_wk_kanji_subjects(subjects, args))
     reading_keywords = build_reading_keyword_catalog(subjects)
     kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
     print(f"Eligible vocab: {len(vocab_items)}")
@@ -3112,7 +3224,7 @@ def main() -> None:
     print(f"Leeches: {len(leeches)}")
     print(f"Verb pairs: {len(verb_pairs)}")
     print(f"Confusable groups: {len(confusables)}")
-    print(f"Phonetic families: {len(phonetic_families)}")
+    print(f"Phonetic families: {len(phonetic_families)} ({phonetic_drill_note_count(phonetic_families)} drill cards)")
     print(f"Reading keywords: {len(reading_keywords)}")
     print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
@@ -3189,9 +3301,9 @@ def main() -> None:
     if "phonetic-families" in wanted and phonetic_families:
         path, deck = build_phonetic_family_deck(
             phonetic_families,
-            keisei_databases.get("phonetic", {}),
             keisei_databases.get("kanji", {}),
             started_kanji_ids,
+            all_kanji_by_char,
             output_dir,
         )
         created.append(path)
