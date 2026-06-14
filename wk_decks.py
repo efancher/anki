@@ -8,7 +8,7 @@ Decks:
   - leeches: items you repeatedly miss in WaniKani
   - verb-pairs: transitive/intransitive and related contrast pairs
   - confusables: vocabulary sharing kanji/readings that are easy to mix up
-  - phonetic-families: Keisei phonetic components → usual readings + WK family kanji
+  - phonetic-families: Keisei phonetic + shared on'yomi reading → WK kanji in that sound group
   - pitch-leeches: leeches with pitch data, if pitch data is supplied
   - radicals: current-level and next-level radicals
   - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
@@ -40,7 +40,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.12.1"
+VERSION = "2.13.1"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -783,6 +783,31 @@ def primary_readings(subject: dict) -> List[str]:
     readings = subject["data"].get("readings", [])
     primary = [r["reading"] for r in readings if r.get("primary") or r.get("accepted_answer")]
     return primary or [r["reading"] for r in readings]
+
+
+def wk_onyomi_readings(subject: dict) -> List[str]:
+    readings = subject["data"].get("readings", [])
+    return [r["reading"] for r in readings if r.get("type") == "onyomi"]
+
+
+def keisei_kanji_readings(char: str, keisei_kanji: dict) -> List[str]:
+    return list((keisei_kanji.get(char) or {}).get("readings") or [])
+
+
+def kanji_shares_phonetic_reading(
+    subject: dict,
+    char: str,
+    reading: str,
+    keisei_kanji: dict,
+) -> bool:
+    """True when Keisei and WK (if WK lists on'yomi) agree this kanji carries the reading."""
+    keisei_readings = keisei_kanji_readings(char, keisei_kanji)
+    if reading not in keisei_readings:
+        return False
+    wk_onyomi = wk_onyomi_readings(subject)
+    if wk_onyomi and reading not in wk_onyomi:
+        return False
+    return True
 
 
 def first_reading(subject: dict) -> str:
@@ -1980,6 +2005,15 @@ def kanji_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], 
     return [s for s in subjects if s.get("object") == "kanji" and passes_progress_filter(s, assignment_index, args)]
 
 
+def all_wk_kanji_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
+    """All WaniKani kanji up to max_level (ignores started/unlocked filters)."""
+    return [
+        s
+        for s in subjects
+        if s.get("object") == "kanji" and s["data"].get("level", 999) <= args.max_level
+    ]
+
+
 def find_leeches(subjects: Sequence[dict], assignment_index: Dict[int, dict], review_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
     candidates = [s for s in subjects if s.get("object") in {"vocabulary", "kanji"} and passes_progress_filter(s, assignment_index, args) and is_leech(s, review_index, args)]
     return sorted(
@@ -2102,39 +2136,100 @@ def phonetic_family_hint_html(meta: dict) -> str:
     )
 
 
+def known_phonetic_components(started_kanji: Sequence[dict], keisei_kanji: dict) -> Set[str]:
+    """Phonetic pieces from Keisei for kanji the user has already started."""
+    known: Set[str] = set()
+    for item in started_kanji:
+        char = item["data"].get("characters")
+        if not char:
+            continue
+        phonetic = (keisei_kanji.get(char) or {}).get("phonetic")
+        if phonetic:
+            known.add(phonetic)
+    return known
+
+
 def find_phonetic_families(
-    kanji_items: Sequence[dict],
+    started_kanji_items: Sequence[dict],
+    all_kanji_items: Sequence[dict],
     keisei_phonetic: dict,
+    keisei_kanji: dict,
     args: argparse.Namespace,
-) -> List[Tuple[str, List[str], List[dict]]]:
-    """Build Keisei phonetic families filtered to the user's eligible WK kanji."""
-    if not keisei_phonetic:
+) -> List[Tuple[str, str, List[dict]]]:
+    """Phonetic + on'yomi groups seeded from started kanji; members may include future WK kanji."""
+    if not keisei_phonetic or not keisei_kanji or not started_kanji_items:
         return []
 
-    by_char = kanji_by_char(kanji_items)
-    families: List[Tuple[str, List[str], List[dict]]] = []
-    for comp, meta in keisei_phonetic.items():
-        members = [
-            by_char[char]
-            for char in meta.get("compounds") or []
-            if char in by_char and char != comp
-        ]
-        if len(members) < args.min_family_size:
+    known_phonetics = known_phonetic_components(started_kanji_items, keisei_kanji)
+    if not known_phonetics:
+        return []
+
+    started_ids = {item["id"] for item in started_kanji_items}
+    by_char = kanji_by_char(all_kanji_items)
+    families: List[Tuple[str, str, List[dict]]] = []
+    for comp in sorted(known_phonetics):
+        meta = keisei_phonetic.get(comp)
+        if not meta:
             continue
-        members = sorted(
-            {item["id"]: item for item in members}.values(),
-            key=lambda item: item["data"].get("level", 999),
-        )[: args.max_family_members]
-        readings = [reading for reading in meta.get("readings") or [] if reading]
-        families.append((comp, readings, members))
+        by_reading: DefaultDict[str, List[dict]] = defaultdict(list)
+        for char in meta.get("compounds") or []:
+            if char == comp or char not in by_char:
+                continue
+            subject = by_char[char]
+            for reading in meta.get("readings") or []:
+                if not reading or not kanji_shares_phonetic_reading(subject, char, reading, keisei_kanji):
+                    continue
+                by_reading[reading].append(subject)
+        for reading, members in by_reading.items():
+            unique_members = sorted(
+                {item["id"]: item for item in members}.values(),
+                key=lambda item: item["data"].get("level", 999),
+            )
+            if len(unique_members) < args.min_family_size:
+                continue
+            if not any(item["id"] in started_ids for item in unique_members):
+                continue
+            families.append((comp, reading, unique_members[: args.max_family_members]))
 
     families.sort(
         key=lambda family: (
             min(member["data"].get("level", 999) for member in family[2]),
             family[0],
+            family[1],
         ),
     )
     return families[: args.max_cards]
+
+
+def phonetic_member_row_html(
+    kanji: dict,
+    family_reading: str,
+    keisei_kanji: dict,
+    *,
+    is_started: bool,
+) -> str:
+    data = kanji["data"]
+    char = data.get("characters") or ""
+    meaning = "; ".join(primary_meanings(kanji))
+    level = data.get("level", "?")
+    wk_onyomi = wk_onyomi_readings(kanji)
+    keisei_readings = keisei_kanji_readings(char, keisei_kanji)
+    other_onyomi = [r for r in wk_onyomi or keisei_readings if r != family_reading]
+    kun = [r["reading"] for r in data.get("readings", []) if r.get("type") == "kunyomi"]
+    extras: List[str] = []
+    if other_onyomi:
+        extras.append(f"also on: {'、'.join(other_onyomi)}")
+    if kun:
+        extras.append(f"kun: {'、'.join(kun[:2])}")
+    progress = "started" if is_started else "preview"
+    extra_html = f" <span class='meta'>{html.escape(' · '.join(extras))}</span>" if extras else ""
+    return (
+        f"<div class='member{' member-preview' if not is_started else ''}'>"
+        f"<span class='jp'>{html.escape(char)}</span> "
+        f"<span class='reading'>{html.escape(family_reading)}</span> "
+        f"<span class='meaning'>{html.escape(meaning)}</span> "
+        f"<span class='meta'>WK Level {level} · {progress}</span>{extra_html}</div>"
+    )
 
 
 def write_pitch_template(vocab_items: Sequence[dict], path: str) -> None:
@@ -2424,45 +2519,42 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path, subje
 
 
 def build_phonetic_family_deck(
-    families: Sequence[Tuple[str, List[str], List[dict]]],
+    families: Sequence[Tuple[str, str, List[dict]]],
     keisei_phonetic: dict,
+    keisei_kanji: dict,
+    started_kanji_ids: Set[int],
     output_dir: Path,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["phonetic-families"], DECK_NAMES["phonetic-families"])
     model = make_family_model()
-    for comp, readings, members in families:
+    for comp, reading, members in families:
         meta = keisei_phonetic.get(comp) or {}
-        readings_label = "、".join(readings)
-        rows = []
-        for kanji in members:
-            data = kanji["data"]
-            rows.append(
-                f"<div class='member'><span class='jp'>{html.escape(data.get('characters') or '')}</span> "
-                f"<span class='reading'>{html.escape('、'.join(primary_readings(kanji)))}</span> "
-                f"<span class='meaning'>{html.escape('; '.join(primary_meanings(kanji)))}</span> "
-                f"<span class='meta'>WK Level {data.get('level', '?')}</span></div>"
+        rows = [
+            phonetic_member_row_html(
+                kanji,
+                reading,
+                keisei_kanji,
+                is_started=kanji["id"] in started_kanji_ids,
             )
-        members_html = "".join(rows)
-        if readings_label:
-            members_html = (
-                f"<div class='reading answer'>Usual readings: {html.escape(readings_label)}</div>"
-                f"<div class='family-members'>{members_html}</div>"
-            )
-        else:
-            members_html = f"<div class='family-members'>{members_html}</div>"
-        guid = stable_guid("phonetic-family", comp)
-        reading_tags = [f"reading-{reading}" for reading in readings]
+            for kanji in members
+        ]
+        members_html = (
+            f"<div class='reading answer'>Shared on'yomi: {html.escape(reading)}</div>"
+            f"<div class='family-members'>{''.join(rows)}</div>"
+        )
+        guid = stable_guid("phonetic-family", comp, reading)
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
-                f"<span class='jp'>{html.escape(comp)}</span>",
-                "What on'yomi readings does this phonetic component usually signal?",
+                f"<span class='jp'>{html.escape(comp)}</span> → <span class='reading'>{html.escape(reading)}</span>",
+                "Which kanji use this phonetic piece with this on'yomi reading?",
                 phonetic_family_hint_html(meta),
                 members_html,
-                "Keisei phonetic family (GPL-3.0). Useful reading heuristic, not formal etymology.",
+                "Keisei phonetic family. Includes future WK kanji (preview) that share a phonetic "
+                "you have seen in kanji you already started.",
             ],
-            tags=["wanikani", "phonetic-family", "priority-low", *reading_tags],
+            tags=["wanikani", "phonetic-family", "priority-low", f"reading-{reading}"],
             guid=guid,
         )
         deck.add_note(note)
@@ -2587,7 +2679,7 @@ def deck_names_for_run(
     leeches: Sequence[dict],
     verb_pairs: Sequence[Tuple[dict, dict]],
     confusables: Sequence[List[dict]],
-    phonetic_families: Sequence[Tuple[str, List[str], List[dict]]],
+    phonetic_families: Sequence[Tuple[str, str, List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     pitch_index: Dict[Tuple[str, str], dict],
@@ -2625,7 +2717,7 @@ def build_run_history_row(
     leeches: Sequence[dict],
     verb_pairs: Sequence[Tuple[dict, dict]],
     confusables: Sequence[List[dict]],
-    phonetic_families: Sequence[Tuple[str, List[str], List[dict]]],
+    phonetic_families: Sequence[Tuple[str, str, List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
@@ -2823,7 +2915,7 @@ def print_preview_report(
     leeches: Sequence[dict],
     verb_pairs: Sequence[Tuple[dict, dict]],
     confusables: Sequence[List[dict]],
-    phonetic_families: Sequence[Tuple[str, List[str], List[dict]]],
+    phonetic_families: Sequence[Tuple[str, str, List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
@@ -2869,7 +2961,7 @@ def print_preview_report(
     if "phonetic-families" in wanted:
         preview_deck_section(
             DECK_NAMES["phonetic-families"],
-            [f"{comp} → {'、'.join(readings)} ({len(members)} kanji)" for comp, readings, members in phonetic_families],
+            [f"{comp} → {reading} ({len(members)} kanji)" for comp, reading, members in phonetic_families],
         )
     if "reading-keywords" in wanted:
         preview_deck_section(
@@ -3005,9 +3097,12 @@ def main() -> None:
     confusables = find_confusable_groups(vocab_items, args)
     phonetic_families = find_phonetic_families(
         kanji_items,
+        all_wk_kanji_subjects(subjects, args),
         keisei_databases.get("phonetic", {}),
+        keisei_databases.get("kanji", {}),
         args,
     )
+    started_kanji_ids = {item["id"] for item in kanji_items}
     reading_keywords = build_reading_keyword_catalog(subjects)
     kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
     print(f"Eligible vocab: {len(vocab_items)}")
@@ -3095,6 +3190,8 @@ def main() -> None:
         path, deck = build_phonetic_family_deck(
             phonetic_families,
             keisei_databases.get("phonetic", {}),
+            keisei_databases.get("kanji", {}),
+            started_kanji_ids,
             output_dir,
         )
         created.append(path)
