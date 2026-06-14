@@ -8,7 +8,7 @@ Decks:
   - leeches: items you repeatedly miss in WaniKani
   - verb-pairs: transitive/intransitive and related contrast pairs
   - confusables: vocabulary sharing kanji/readings that are easy to mix up
-  - phonetic-families: kanji grouped by repeated reading-bearing components
+  - phonetic-families: Keisei phonetic components → usual readings + WK family kanji
   - pitch-leeches: leeches with pitch data, if pitch data is supplied
   - radicals: current-level and next-level radicals
   - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
@@ -34,11 +34,13 @@ Recommended weekly import (one file, all decks):
 
 With Yomitan pitch dictionary zip/folder:
   python wk_decks.py --deck all --only-started --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
+
+Each run appends one row to out/wk_run_history.csv with deck counts and bundle contents.
 """
 
 from __future__ import annotations
 
-VERSION = "2.11.1"
+VERSION = "2.12.1"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -71,6 +73,20 @@ WK_REVISION = "20170710"
 CACHE_DIR = Path(".wk_cache")
 CACHE_MAX_AGE_HOURS = 24
 OUTPUT_DIR = Path("out")
+
+# Keisei phonetic-semantic DB (GPL-3.0, mwil/wanikani-userscripts).
+# Pinned commit for stable raw JSON URLs; auto-downloaded into .wk_cache/keisei/.
+KEISEI_DB_COMMIT = "8ee517737d604f1df0ff103a33b69f1f07218815"
+KEISEI_DB_BASE = (
+    f"https://raw.githubusercontent.com/mwil/wanikani-userscripts/{KEISEI_DB_COMMIT}"
+    "/wanikani-phonetic-compounds/db"
+)
+KEISEI_CACHE_DIR = CACHE_DIR / "keisei"
+KEISEI_DB_FILES = {
+    "kanji": "kanji_esc.json",
+    "phonetic": "phonetic_esc.json",
+    "wk_kanji": "wk_kanji_esc.json",
+}
 
 # Leech scoring weights
 LEECH_RECENCY_BOOST_DAYS = 3
@@ -154,9 +170,36 @@ NOTE_TYPE_NAMES = {
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
+RUN_HISTORY_FILENAME = "wk_run_history.csv"
 FILTERED_DECKS_JSON = "anki_filtered_decks.json"
-
-# anki.decks.Deck.Filtered.SearchTerm.Order.RELATIVE_OVERDUENESS
+RUN_HISTORY_COLUMNS = [
+    "run_at",
+    "generator_version",
+    "dry_run",
+    "deck",
+    "wk_level",
+    "only_started",
+    "only_unlocked",
+    "only_burned",
+    "min_srs",
+    "max_level",
+    "refresh_cache",
+    "eligible_vocab",
+    "eligible_kanji",
+    "eligible_radicals",
+    "radical_level_current",
+    "radical_level_next",
+    "leeches",
+    "verb_pairs",
+    "confusables",
+    "phonetic_families",
+    "reading_keywords",
+    "kanji_radical_breakdown",
+    "pitch_entries",
+    "pitch_leeches",
+    "bundled_in_wk_all",
+    "bundled_decks",
+]
 FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
 
 FILTERED_DECK_DEFINITIONS = [
@@ -236,13 +279,6 @@ CURATED_READING_PAIRS = {
     "きこえる": "きく",
     "きかせる": "きく",
 }
-
-PHONETIC_COMPONENTS = [
-    "青", "工", "寺", "方", "可", "反", "皮", "良", "亡", "包", "生", "令", "吾", "羊",
-    "各", "交", "台", "成", "易", "曷", "爰", "央", "申", "肖", "昔", "票", "咸", "兼",
-    "喿", "倉", "莫", "馬", "半", "白", "主", "且", "奇", "其", "求", "朱", "占", "少",
-    "氏", "司", "者", "采", "甫", "孚", "戔", "夬", "圭", "奚", "果", "奏", "曼", "雚",
-]
 
 COMMON_CSS = """
 .card {
@@ -447,6 +483,47 @@ def save_json_cache(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def keisei_cache_path(filename: str) -> Path:
+    return KEISEI_CACHE_DIR / filename
+
+
+def download_keisei_json(url: str) -> dict:
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    return json.loads(response.text)
+
+
+def load_keisei_json(key: str, refresh: bool = False) -> dict:
+    filename = KEISEI_DB_FILES[key]
+    path = keisei_cache_path(filename)
+    url = f"{KEISEI_DB_BASE}/{filename}"
+    if refresh or not path.exists():
+        print(f"Downloading Keisei {key} database...")
+        KEISEI_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        data = download_keisei_json(url)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        print(f"Saved Keisei cache: {path}")
+        return data
+    print(f"Using cached Keisei {key}: {path}")
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def ensure_keisei_databases(refresh: bool = False) -> Dict[str, dict]:
+    """Download missing Keisei phonetic DB JSON files; return parsed data when available."""
+    loaded: Dict[str, dict] = {}
+    for key, filename in KEISEI_DB_FILES.items():
+        path = keisei_cache_path(filename)
+        try:
+            loaded[key] = load_keisei_json(key, refresh=refresh)
+        except requests.RequestException as exc:
+            print(f"Warning: could not fetch Keisei {key} database: {exc}", file=sys.stderr)
+            if path.exists():
+                with path.open("r", encoding="utf-8") as f:
+                    loaded[key] = json.load(f)
+    return loaded
 
 
 def wk_headers() -> dict:
@@ -2006,26 +2083,58 @@ def find_confusable_groups(
     )[: args.max_cards]
 
 
-def onyomi_readings(kanji: dict) -> List[str]:
-    readings = kanji["data"].get("readings", [])
-    vals = [r["reading"] for r in readings if r.get("type") == "onyomi" and (r.get("primary") or r.get("accepted_answer"))]
-    return vals or [r["reading"] for r in readings if r.get("type") == "onyomi"]
+def kanji_by_char(kanji_items: Sequence[dict]) -> Dict[str, dict]:
+    index: Dict[str, dict] = {}
+    for item in kanji_items:
+        char = item["data"].get("characters")
+        if char:
+            index[char] = item
+    return index
 
 
-def find_phonetic_families(kanji_items: Sequence[dict], args: argparse.Namespace) -> List[Tuple[str, str, List[dict]]]:
-    component_groups: DefaultDict[Tuple[str, str], List[dict]] = defaultdict(list)
-    for k in kanji_items:
-        char = k["data"].get("characters") or ""
-        for comp in PHONETIC_COMPONENTS:
-            if comp != char and comp in char:
-                for reading in onyomi_readings(k):
-                    component_groups[(comp, reading)].append(k)
-    families = []
-    for (comp, reading), members in component_groups.items():
-        unique = sorted({m["id"]: m for m in members}.values(), key=lambda x: x["data"].get("level", 999))
-        if len(unique) >= args.min_family_size:
-            families.append((comp, reading, unique[: args.max_family_members]))
-    return sorted(families, key=lambda f: (f[1], f[0]))[: args.max_cards]
+def phonetic_family_hint_html(meta: dict) -> str:
+    wk_radical = meta.get("wk-radical")
+    if not wk_radical:
+        return ""
+    return (
+        f"<div class='meta'>WK radical keyword: {html.escape(str(wk_radical))}</div>"
+        f"<div class='meta'>Phonetic piece in other kanji, not necessarily a WK kanji</div>"
+    )
+
+
+def find_phonetic_families(
+    kanji_items: Sequence[dict],
+    keisei_phonetic: dict,
+    args: argparse.Namespace,
+) -> List[Tuple[str, List[str], List[dict]]]:
+    """Build Keisei phonetic families filtered to the user's eligible WK kanji."""
+    if not keisei_phonetic:
+        return []
+
+    by_char = kanji_by_char(kanji_items)
+    families: List[Tuple[str, List[str], List[dict]]] = []
+    for comp, meta in keisei_phonetic.items():
+        members = [
+            by_char[char]
+            for char in meta.get("compounds") or []
+            if char in by_char and char != comp
+        ]
+        if len(members) < args.min_family_size:
+            continue
+        members = sorted(
+            {item["id"]: item for item in members}.values(),
+            key=lambda item: item["data"].get("level", 999),
+        )[: args.max_family_members]
+        readings = [reading for reading in meta.get("readings") or [] if reading]
+        families.append((comp, readings, members))
+
+    families.sort(
+        key=lambda family: (
+            min(member["data"].get("level", 999) for member in family[2]),
+            family[0],
+        ),
+    )
+    return families[: args.max_cards]
 
 
 def write_pitch_template(vocab_items: Sequence[dict], path: str) -> None:
@@ -2314,31 +2423,46 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path, subje
     return out, deck
 
 
-def build_phonetic_family_deck(families, output_dir: Path) -> Tuple[Path, genanki.Deck]:
+def build_phonetic_family_deck(
+    families: Sequence[Tuple[str, List[str], List[dict]]],
+    keisei_phonetic: dict,
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["phonetic-families"], DECK_NAMES["phonetic-families"])
     model = make_family_model()
-    for comp, reading, members in families:
-        members_front = "".join(
-            f"<span class='front-member'>{html.escape(m['data'].get('characters') or '')}"
-            f"<span class='front-reading'>{html.escape('、'.join(primary_readings(m)))}</span></span>"
-            for m in members
-        )
+    for comp, readings, members in families:
+        meta = keisei_phonetic.get(comp) or {}
+        readings_label = "、".join(readings)
         rows = []
-        for k in members:
-            d = k["data"]
-            rows.append(f"<div class='member'><span class='jp'>{html.escape(d.get('characters') or '')}</span> <span class='reading'>{html.escape('、'.join(primary_readings(k)))}</span> <span class='meaning'>{html.escape('; '.join(primary_meanings(k)))}</span> <span class='meta'>WK Level {d.get('level', '?')}</span></div>")
-        guid = stable_guid("phonetic-family", comp, reading, *[m["id"] for m in members])
+        for kanji in members:
+            data = kanji["data"]
+            rows.append(
+                f"<div class='member'><span class='jp'>{html.escape(data.get('characters') or '')}</span> "
+                f"<span class='reading'>{html.escape('、'.join(primary_readings(kanji)))}</span> "
+                f"<span class='meaning'>{html.escape('; '.join(primary_meanings(kanji)))}</span> "
+                f"<span class='meta'>WK Level {data.get('level', '?')}</span></div>"
+            )
+        members_html = "".join(rows)
+        if readings_label:
+            members_html = (
+                f"<div class='reading answer'>Usual readings: {html.escape(readings_label)}</div>"
+                f"<div class='family-members'>{members_html}</div>"
+            )
+        else:
+            members_html = f"<div class='family-members'>{members_html}</div>"
+        guid = stable_guid("phonetic-family", comp)
+        reading_tags = [f"reading-{reading}" for reading in readings]
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
-                f"{html.escape(comp)} → {html.escape(reading)}",
-                "Which kanji share this component/reading pattern?",
-                f"<div class='front-members'>{members_front}</div>",
-                f"<div class='family-members'>{''.join(rows)}</div>",
-                "This is a practical WaniKani reading-pattern card. Treat it as a useful heuristic, not a formal etymology claim.",
+                f"<span class='jp'>{html.escape(comp)}</span>",
+                "What on'yomi readings does this phonetic component usually signal?",
+                phonetic_family_hint_html(meta),
+                members_html,
+                "Keisei phonetic family (GPL-3.0). Useful reading heuristic, not formal etymology.",
             ],
-            tags=["wanikani", "phonetic-family", "priority-low", f"reading-{reading}"],
+            tags=["wanikani", "phonetic-family", "priority-low", *reading_tags],
             guid=guid,
         )
         deck.add_note(note)
@@ -2433,6 +2557,124 @@ def build_kanji_radical_deck(
 
 
 
+def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, str], dict]) -> int:
+    return sum(
+        1
+        for item in leeches
+        if pitch_for(item, pitch_index).get("pitch") or pitch_for(item, pitch_index).get("pattern")
+    )
+
+
+def wanted_decks(args: argparse.Namespace) -> Set[str]:
+    if args.deck != "all":
+        return {args.deck}
+    return {
+        "leeches",
+        "verb-pairs",
+        "confusables",
+        "phonetic-families",
+        "pitch-leeches",
+        "radicals",
+        "reading-keywords",
+        "kanji-radicals",
+    }
+
+
+def deck_names_for_run(
+    wanted: Set[str],
+    *,
+    radical_items: Sequence[dict],
+    leeches: Sequence[dict],
+    verb_pairs: Sequence[Tuple[dict, dict]],
+    confusables: Sequence[List[dict]],
+    phonetic_families: Sequence[Tuple[str, List[str], List[dict]]],
+    reading_keywords: Sequence[ReadingKeywordEntry],
+    kanji_radical_items: Sequence[dict],
+    pitch_index: Dict[Tuple[str, str], dict],
+) -> List[str]:
+    names: List[str] = []
+    if "radicals" in wanted and radical_items:
+        names.append(DECK_NAMES["radicals"])
+    if "leeches" in wanted and leeches:
+        names.append(DECK_NAMES["leeches"])
+    if "verb-pairs" in wanted and verb_pairs:
+        names.append(DECK_NAMES["verb-pairs"])
+    if "confusables" in wanted and confusables:
+        names.append(DECK_NAMES["confusables"])
+    if "phonetic-families" in wanted and phonetic_families:
+        names.append(DECK_NAMES["phonetic-families"])
+    if "reading-keywords" in wanted and reading_keywords:
+        names.append(DECK_NAMES["reading-keywords"])
+    if "kanji-radicals" in wanted and kanji_radical_items:
+        names.append(DECK_NAMES["kanji-radicals"])
+    if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
+        names.append(DECK_NAMES["pitch-leeches"])
+    return names
+
+
+def build_run_history_row(
+    args: argparse.Namespace,
+    user: dict,
+    *,
+    dry_run: bool,
+    current_level: int,
+    next_level: int,
+    vocab_count: int,
+    kanji_count: int,
+    radical_count: int,
+    leeches: Sequence[dict],
+    verb_pairs: Sequence[Tuple[dict, dict]],
+    confusables: Sequence[List[dict]],
+    phonetic_families: Sequence[Tuple[str, List[str], List[dict]]],
+    reading_keywords: Sequence[ReadingKeywordEntry],
+    kanji_radical_items: Sequence[dict],
+    radical_items: Sequence[dict],
+    pitch_index: Dict[Tuple[str, str], dict],
+    bundled_deck_names: Sequence[str],
+    bundled_in_wk_all: bool,
+) -> Dict[str, Any]:
+    wanted = wanted_decks(args)
+    return {
+        "run_at": utc_now_iso(),
+        "generator_version": VERSION,
+        "dry_run": int(dry_run),
+        "deck": args.deck,
+        "wk_level": user.get("level", ""),
+        "only_started": int(args.only_started),
+        "only_unlocked": int(args.only_unlocked),
+        "only_burned": int(args.only_burned),
+        "min_srs": args.min_srs,
+        "max_level": args.max_level,
+        "refresh_cache": int(args.refresh_cache),
+        "eligible_vocab": vocab_count,
+        "eligible_kanji": kanji_count,
+        "eligible_radicals": radical_count,
+        "radical_level_current": current_level,
+        "radical_level_next": next_level,
+        "leeches": len(leeches),
+        "verb_pairs": len(verb_pairs),
+        "confusables": len(confusables),
+        "phonetic_families": len(phonetic_families),
+        "reading_keywords": len(reading_keywords),
+        "kanji_radical_breakdown": len(kanji_radical_items),
+        "pitch_entries": len(pitch_index),
+        "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
+        "bundled_in_wk_all": int(bundled_in_wk_all),
+        "bundled_decks": "|".join(bundled_deck_names),
+    }
+
+
+def append_run_history(output_dir: Path, row: Dict[str, Any]) -> Path:
+    path = output_dir / RUN_HISTORY_FILENAME
+    write_header = not path.exists()
+    with path.open("a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=RUN_HISTORY_COLUMNS, extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow({column: row.get(column, "") for column in RUN_HISTORY_COLUMNS})
+    return path
+
+
 def write_filtered_deck_suggestions(output_dir: Path) -> Path:
     path = output_dir / "anki_filtered_decks.txt"
     lines = ["Suggested Anki filtered decks", ""]
@@ -2519,6 +2761,9 @@ Each run syncs WaniKani data with updated_after when a prior cache exists
 (assignments, subjects, review stats). Use --refresh-cache to force a full
 re-download. Re-import the .apkg to add new notes; stable GUIDs update existing cards.
 
+Each run appends a row to {RUN_HISTORY_FILENAME} with deck counts and which
+decks were bundled into {BUNDLE_FILENAME}.
+
 Filtered decks (WK::Daily Priority, etc.) cannot be bundled in .apkg files.
 After importing, run Tools → WK Setup Filtered Decks in Anki using the add-on
 in anki_addon/wk_filtered_decks (reads {FILTERED_DECKS_JSON}).
@@ -2578,7 +2823,7 @@ def print_preview_report(
     leeches: Sequence[dict],
     verb_pairs: Sequence[Tuple[dict, dict]],
     confusables: Sequence[List[dict]],
-    phonetic_families: Sequence[Tuple[str, str, List[dict]]],
+    phonetic_families: Sequence[Tuple[str, List[str], List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
@@ -2624,7 +2869,7 @@ def print_preview_report(
     if "phonetic-families" in wanted:
         preview_deck_section(
             DECK_NAMES["phonetic-families"],
-            [f"{comp} → {reading} ({len(members)} kanji)" for comp, reading, members in phonetic_families],
+            [f"{comp} → {'、'.join(readings)} ({len(members)} kanji)" for comp, readings, members in phonetic_families],
         )
     if "reading-keywords" in wanted:
         preview_deck_section(
@@ -2749,10 +2994,20 @@ def main() -> None:
     if args.write_pitch_template:
         write_pitch_template(vocab_items, args.write_pitch_template)
         return
+    keisei_databases = ensure_keisei_databases(refresh=args.refresh_cache)
+    if keisei_databases:
+        print(
+            "Keisei phonetic DB:",
+            ", ".join(f"{key}={len(keisei_databases[key])}" for key in sorted(keisei_databases)),
+        )
     leeches = find_leeches(subjects, indexes["assignments"], indexes["reviews"], args)
     verb_pairs = find_verb_pairs(vocab_items, args)
     confusables = find_confusable_groups(vocab_items, args)
-    phonetic_families = find_phonetic_families(kanji_items, args)
+    phonetic_families = find_phonetic_families(
+        kanji_items,
+        keisei_databases.get("phonetic", {}),
+        args,
+    )
     reading_keywords = build_reading_keyword_catalog(subjects)
     kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
     print(f"Eligible vocab: {len(vocab_items)}")
@@ -2766,7 +3021,43 @@ def main() -> None:
     print(f"Reading keywords: {len(reading_keywords)}")
     print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
+    wanted = wanted_decks(args)
     if args.dry_run:
+        would_bundle = deck_names_for_run(
+            wanted,
+            radical_items=radical_items,
+            leeches=leeches,
+            verb_pairs=verb_pairs,
+            confusables=confusables,
+            phonetic_families=phonetic_families,
+            reading_keywords=reading_keywords,
+            kanji_radical_items=kanji_radical_items,
+            pitch_index=pitch_index,
+        )
+        history_path = append_run_history(
+            output_dir,
+            build_run_history_row(
+                args,
+                user,
+                dry_run=True,
+                current_level=current_level,
+                next_level=next_level,
+                vocab_count=len(vocab_items),
+                kanji_count=len(kanji_items),
+                radical_count=len(radical_items),
+                leeches=leeches,
+                verb_pairs=verb_pairs,
+                confusables=confusables,
+                phonetic_families=phonetic_families,
+                reading_keywords=reading_keywords,
+                kanji_radical_items=kanji_radical_items,
+                radical_items=radical_items,
+                pitch_index=pitch_index,
+                bundled_deck_names=would_bundle,
+                bundled_in_wk_all=bool(would_bundle and not args.no_bundle),
+            ),
+        )
+        print(f"Run history: {history_path}")
         print_preview_report(
             args,
             leeches=leeches,
@@ -2784,10 +3075,6 @@ def main() -> None:
         return
     created: List[Path] = []
     built_decks: List[genanki.Deck] = []
-    wanted = {args.deck} if args.deck != "all" else {
-        "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
-    }
     if "radicals" in wanted and radical_items:
         path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, current_level, next_level)
         created.append(path)
@@ -2805,7 +3092,11 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
     if "phonetic-families" in wanted and phonetic_families:
-        path, deck = build_phonetic_family_deck(phonetic_families, output_dir)
+        path, deck = build_phonetic_family_deck(
+            phonetic_families,
+            keisei_databases.get("phonetic", {}),
+            output_dir,
+        )
         created.append(path)
         built_decks.append(deck)
     if "reading-keywords" in wanted and reading_keywords:
@@ -2828,6 +3119,30 @@ def main() -> None:
             created.append(path)
             built_decks.append(deck)
     if not created:
+        history_path = append_run_history(
+            output_dir,
+            build_run_history_row(
+                args,
+                user,
+                dry_run=False,
+                current_level=current_level,
+                next_level=next_level,
+                vocab_count=len(vocab_items),
+                kanji_count=len(kanji_items),
+                radical_count=len(radical_items),
+                leeches=leeches,
+                verb_pairs=verb_pairs,
+                confusables=confusables,
+                phonetic_families=phonetic_families,
+                reading_keywords=reading_keywords,
+                kanji_radical_items=kanji_radical_items,
+                radical_items=radical_items,
+                pitch_index=pitch_index,
+                bundled_deck_names=[],
+                bundled_in_wk_all=False,
+            ),
+        )
+        print(f"Run history: {history_path}")
         print("No decks created. Try lowering filters, refreshing cache, or adding pitch data.", file=sys.stderr)
         sys.exit(1)
     bundle_path: Optional[Path] = None
@@ -2837,6 +3152,29 @@ def main() -> None:
     settings_path = write_filtered_deck_suggestions(output_dir)
     filtered_json_path = write_filtered_decks_json(output_dir)
     instructions_path = write_import_instructions(output_dir)
+    history_path = append_run_history(
+        output_dir,
+        build_run_history_row(
+            args,
+            user,
+            dry_run=False,
+            current_level=current_level,
+            next_level=next_level,
+            vocab_count=len(vocab_items),
+            kanji_count=len(kanji_items),
+            radical_count=len(radical_items),
+            leeches=leeches,
+            verb_pairs=verb_pairs,
+            confusables=confusables,
+            phonetic_families=phonetic_families,
+            reading_keywords=reading_keywords,
+            kanji_radical_items=kanji_radical_items,
+            radical_items=radical_items,
+            pitch_index=pitch_index,
+            bundled_deck_names=[deck.name for deck in built_decks],
+            bundled_in_wk_all=bool(bundle_path),
+        ),
+    )
     print("Created:")
     if bundle_path:
         print(f"  {bundle_path}  ← recommended import")
@@ -2845,6 +3183,7 @@ def main() -> None:
     print(f"  {settings_path}")
     print(f"  {filtered_json_path}")
     print(f"  {instructions_path}")
+    print(f"  {history_path}")
     print_import_verification_help(bundle_path)
 
 

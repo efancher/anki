@@ -7,8 +7,13 @@ This runbook is for `wk_decks.py`, a multi-deck generator that creates update-sa
 1. **WaniKani Leech Fixes** — items you repeatedly miss, using WaniKani review statistics.
 2. **WaniKani Verb Pair Contrasts** — pairs like `上がる / 上げる`, `下がる / 下げる`, `閉まる / 閉める`.
 3. **WaniKani Confusable Vocabulary** — vocabulary groups sharing kanji or reading cues.
-4. **WaniKani Phonetic Families** — kanji grouped by likely phonetic components and shared on'yomi.
+4. **WaniKani Phonetic Families** — Keisei phonetic components → usual on'yomi + WK family kanji (skipped when no family has enough started kanji).
 5. **WaniKani Pitch Leeches** — leech items with pitch accent data, if pitch data is supplied.
+6. **WaniKani Current and Next Radicals** — radicals from your current and next WaniKani level.
+7. **WaniKani Reading Keywords** — high-confidence WK mnemonic phonetic keywords (e.g. `き` → key).
+8. **WaniKani Kanji Radical Breakdown** — kanji ↔ radical parts + meaning mnemonic.
+
+**Recommended import:** one bundled file, `out/wk_all.apkg`, updates every deck in a single Anki import. Individual `.apkg` files are also written for one-off use.
 
 ## One-time setup
 
@@ -49,7 +54,7 @@ python wk_decks.py --version
 Expected:
 
 ```text
-wk_decks.py v2.7.0 (2026-06-11)
+wk_decks.py v2.12.1 (2026-06-11)
 ```
 
 A normal run should also print a startup banner with the same version.
@@ -66,14 +71,23 @@ The output appears in:
 
 ```text
 out/
-  wk_leeches.apkg
+  wk_all.apkg                    ← import this (all decks in one file)
+  wk_run_history.csv             ← appended each run (counts + bundle contents)
+  anki_import_instructions.txt
+  anki_filtered_decks.json
+  wk_leeches.apkg                ← individual decks (optional)
   wk_verb_pairs.apkg
   wk_confusables.apkg
-  wk_phonetic_families.apkg
+  wk_phonetic_families.apkg      ← only when phonetic families qualify
   wk_pitch_leeches.apkg
+  wk_radicals_current_next.apkg
+  wk_reading_keywords.apkg
+  wk_kanji_radicals.apkg
 ```
 
-Import each `.apkg` into Anki.
+Import **`out/wk_all.apkg`** into Anki. When Anki asks about existing note types, choose **Update** (or **Always update** if templates look stale). Do not choose **Create new note type**.
+
+See `out/anki_import_instructions.txt` for current template versions and verification steps.
 
 ## Recommended weekly update
 
@@ -84,9 +98,26 @@ source venv/bin/activate
 python wk_decks.py --deck all --only-started
 ```
 
-Then import the regenerated `.apkg` files into Anki.
+Then import **`out/wk_all.apkg`** into Anki (note type **Update**).
+
+The script syncs WaniKani cache incrementally on every run (`updated_after` when a prior cache exists). Each run appends one row to `out/wk_run_history.csv` with deck counts and which decks were bundled — use this to confirm progress before importing.
+
+Preview without writing `.apkg` files:
+
+```bash
+python wk_decks.py --deck all --only-started --dry-run
+```
 
 The script uses stable note GUIDs. Regenerated notes should update existing notes rather than create duplicates, as long as you do not change the script's model IDs, field order, deck names, or GUID logic.
+
+### Verifying updates
+
+1. **Before import** — compare the latest `wk_run_history.csv` row to the previous row (counts should shift as you unlock WK content).
+2. **Check `bundled_decks`** — lists decks actually in `wk_all.apkg`. If `phonetic_families` is `0`, phonetics is not in the bundle.
+3. **After import** — Browse a deck and compare note count to the generator summary (e.g. `Kanji radical breakdown: 200`).
+4. **Template check** — open a leech card back; meta line should show the current template version from `anki_import_instructions.txt`.
+
+Re-importing `wk_all.apkg` adds new decks when they first qualify and updates existing notes. It does not remove cards that left a deck (e.g. leech fixed). Importing a standalone `.apkg` is only needed if that deck was skipped from `wk_all` at build time.
 
 ## Conservative mode
 
@@ -150,16 +181,24 @@ python wk_decks.py --deck confusables --only-started \
 
 ## Phonetic families only
 
+Uses the [Keisei phonetic DB](https://github.com/mwil/wanikani-userscripts) (auto-downloaded to `.wk_cache/keisei/` on first run). One card per phonetic component:
+
+- **Front:** phonetic piece (e.g. 化) — what on'yomi does it signal?
+- **Back:** Keisei usual readings + WK family kanji with meanings
+
+Families need at least `--min-family-size` started kanji in the same Keisei family (default 3). Early WK progress may produce **zero** families until more kanji unlock.
+
 ```bash
-python wk_decks.py --deck phonetic-families --only-started --min-srs 5
+python wk_decks.py --deck phonetic-families --only-started
 ```
 
-If you want only stronger patterns:
+If you want partial families sooner:
 
 ```bash
-python wk_decks.py --deck phonetic-families --only-started \
-  --min-family-size 4
+python wk_decks.py --deck phonetic-families --only-started --min-family-size 2
 ```
+
+If phonetics is missing from `wk_all.apkg`, check `phonetic_families` in `wk_run_history.csv` or import `wk_phonetic_families.apkg` separately.
 
 ## Cache behavior
 
@@ -167,18 +206,17 @@ The script caches WaniKani data in:
 
 ```text
 .wk_cache/
+  user.json
+  subjects_vocabulary_kanji_radical.json
+  assignments_*.json
+  review_statistics_*.json
+  study_materials.json
+  keisei/                         ← Keisei phonetic JSON (auto-downloaded)
 ```
 
-It caches:
+After the first full download, each run syncs assignments, subjects, and review statistics with `updated_after` (not only when the cache is older than 24 hours).
 
-```text
-subjects_vocabulary_kanji.json
-assignments_all.json
-review_statistics_all.json
-study_materials_all.json
-```
-
-To force fresh WaniKani data:
+To force fresh WaniKani and Keisei data:
 
 ```bash
 python wk_decks.py --deck all --only-started --refresh-cache
@@ -275,13 +313,13 @@ To avoid breaking update behavior:
 2. Install Anki and sync the same Anki profile on the new computer.
 3. Copy or git-clone the exact same `wk_decks.py`.
 4. Copy your pitch CSV or pitch dictionary zip if you use one.
-5. `.wk_cache/` is optional; copying it avoids re-downloading but is not required.
+5. `.wk_cache/` is optional; copying it avoids re-downloading but is not required. Keisei phonetic JSON is re-downloaded automatically if missing.
 
 Recommended:
 
 ```bash
 git init
-git add wk_decks.py pitch_template.csv
+git add wk_decks.py wk_anki_runbook.md pitch_template.csv
 git commit -m "WaniKani Anki generator"
 ```
 
@@ -350,19 +388,38 @@ python wk_decks.py --deck all --only-started --refresh-cache
 
 ### Duplicate notes appear in Anki
 
-Usually this means the script's GUID/model constants changed, or you imported into a different Anki profile.
+Usually this means the script's GUID/model constants changed, you imported into a different Anki profile, or you chose **Create new note type** on import. Use stable note type names (`WK Update-Safe Item`, etc.) and **Update** on re-import.
 
-Use the same script, same profile, and same deck/model constants.
+### Phonetic families missing after importing wk_all.apkg
+
+Check `phonetic_families` in `wk_run_history.csv`. If it is `0`, the deck was not built (not an Anki import issue). Import `wk_phonetic_families.apkg` separately after families qualify, or lower `--min-family-size`.
+
+
+## v2.12.1 — Keisei phonetic families, run history, bundled import
+
+### Phonetic families (Keisei-backed)
+
+Replaces the old substring heuristic (which often produced zero families). Uses Keisei `phonetic_esc.json` + your eligible WK kanji. GPL-3.0 data from mwil/wanikani-userscripts; auto-downloaded to `.wk_cache/keisei/`.
+
+### Run history CSV
+
+Each run appends a row to `out/wk_run_history.csv`:
+
+- WK level, filter flags, per-deck counts
+- `bundled_in_wk_all` and `bundled_decks` (what is actually in `wk_all.apkg`)
+
+Dry-runs also append a row (`dry_run=1`).
+
+### Bundled import
+
+`out/wk_all.apkg` is the recommended weekly import. Only decks with notes are included; empty decks (e.g. phonetics at low WK level) are omitted from the bundle.
 
 
 ## v2.4.1 note
 
 Confusable-family card fronts now show the vocabulary items and readings, not just the shared kanji. This makes the prompt useful for active comparison while keeping meanings/explanations on the back.
 
-
 ## v2.4.1 implemented changes
-
-### Verb contrast cards are less revealing
 
 The front now shows only the two written forms and readings, plus a prompt to explain the relationship. Meanings, WaniKani level, SRS, leech information, relationship labels, verb-type notes, and examples are on the back.
 
@@ -417,7 +474,6 @@ Pairs without curated examples still generate normally.
 
 - Yomitan pitch dictionary integration for leeches and confusables.
 - Frequency data from a local frequency dictionary.
-- Better phonetic-family generation using a real component table.
 
 ### Probably not worth it yet
 
@@ -631,7 +687,7 @@ User-specific collections now cache as:
 }
 ```
 
-After the cache age expires (24 hours by default), the script fetches only records changed since `synced_at` using the API's `updated_after` filter, then merges them into the local cache.
+After the cache age expires (24 hours by default), the script fetches only records changed since `synced_at` using the API's `updated_after` filter, then merges them into the local cache. As of v2.11+, assignments, subjects, and review statistics sync on **every run** when a prior cache exists (not only after 24 hours).
 
 Use `--refresh-cache` when you want a full re-download instead of an incremental update.
 
