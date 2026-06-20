@@ -8,11 +8,14 @@ Decks:
   - leeches: items you repeatedly miss in WaniKani
   - verb-pairs: transitive/intransitive and related contrast pairs
   - confusables: vocabulary sharing kanji/readings that are easy to mix up
-  - phonetic-families: Keisei phonetic + shared on'yomi reading → WK kanji in that sound group
+  - phonetic-families: per-kanji on'yomi drill via Keisei phonetic map (WK readings + component sounds)
   - pitch-leeches: leeches with pitch data, if pitch data is supplied
   - radicals: current-level and next-level radicals
   - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
   - kanji-radicals: kanji whose radical components are unlocked in WaniKani
+  - conjugations: common verb and adjective conjugation drills for learned WK vocabulary
+  - verb-types: recall godan / ichidan / irregular verb class for WK verbs
+  - adjective-types: recall い-adjective vs な-adjective for WK adjectives
   - all: all of the above
 
 Install:
@@ -28,6 +31,11 @@ With pitch CSV:
 Preview without writing decks:
   python wk_decks.py --deck all --only-started --dry-run
 
+Verify conjugation rules against curated fixtures and eligible vocab:
+  python wk_decks.py --verify-conjugations-only --only-started
+  python -m unittest tests.test_conjugations
+  pytest tests/test_conjugations.py
+
 Recommended weekly import (one file, all decks):
   python wk_decks.py --deck all --only-started
   # then import out/wk_all.apkg into Anki
@@ -40,7 +48,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.14.1"
+VERSION = "2.17.0"
 BUILD_DATE = "2026-06-11"
 
 import warnings
@@ -111,6 +119,10 @@ READING_MNEMONIC_PAIR_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 READING_MNEMONIC_PAREN_KANA_RE = re.compile(r"\(([ぁ-んー]+)\)|（([ぁ-んー]+)）")
+READING_MNEMONIC_WORD_BEFORE_KANA_RE = re.compile(
+    r"([a-z][a-z'-]*)\s*[\(（]([ぁ-んー]+)[\)）]",
+    re.IGNORECASE,
+)
 
 # Keep stable after first import.
 DECK_IDS = {
@@ -122,6 +134,9 @@ DECK_IDS = {
     "radicals": 2059400116,
     "reading-keywords": 2059400117,
     "kanji-radicals": 2059400118,
+    "conjugations": 2059400119,
+    "verb-types": 2059400120,
+    "adjective-types": 2059400121,
 }
 
 MODEL_IDS = {
@@ -132,6 +147,8 @@ MODEL_IDS = {
     "reading_keyword": 1865429016,
     "kanji_radical": 1865429017,
     "phonetic_drill": 1865429018,
+    "conjugation": 1865429019,
+    "word_class": 1865429020,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -141,9 +158,11 @@ MODEL_TEMPLATE_VERSIONS = {
     "pair": "v2",
     "family": "v1",
     "radical": "v2",
-    "reading_keyword": "v1",
+    "reading_keyword": "v3",
     "kanji_radical": "v1",
-    "phonetic_drill": "v2",
+    "phonetic_drill": "v4",
+    "conjugation": "v2",
+    "word_class": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -157,6 +176,8 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "reading_keyword": 4,
     "kanji_radical": 5,
     "phonetic_drill": 6,
+    "conjugation": 7,
+    "word_class": 8,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -171,6 +192,8 @@ NOTE_TYPE_NAMES = {
     "reading_keyword": "WK Update-Safe Reading Keyword",
     "kanji_radical": "WK Update-Safe Kanji Radicals",
     "phonetic_drill": "WK Update-Safe Phonetic Drill",
+    "conjugation": "WK Update-Safe Conjugation",
+    "word_class": "WK Update-Safe Word Class",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -199,6 +222,9 @@ RUN_HISTORY_COLUMNS = [
     "phonetic_families",
     "reading_keywords",
     "kanji_radical_breakdown",
+    "conjugation_drills",
+    "verb_type_cards",
+    "adjective_type_cards",
     "pitch_entries",
     "pitch_leeches",
     "bundled_in_wk_all",
@@ -260,6 +286,9 @@ DECK_NAMES = {
     "radicals": "WaniKani Current and Next Radicals",
     "reading-keywords": "WaniKani Reading Keywords",
     "kanji-radicals": "WaniKani Kanji Radical Breakdown",
+    "conjugations": "WaniKani Conjugation Practice",
+    "verb-types": "WaniKani Verb Type Practice",
+    "adjective-types": "WaniKani Adjective Type Practice",
 }
 
 PAIR_RULES = [
@@ -652,6 +681,16 @@ def get_cached_collection(
     return items
 
 
+def load_cache_items_only(collection: str, params_key: str = "all") -> Optional[List[dict]]:
+    """Read cached collection items without contacting the WaniKani API."""
+    path = cache_path(collection, params_key)
+    if not path.exists():
+        return None
+    envelope = json.loads(path.read_text(encoding="utf-8"))
+    items = envelope.get("items")
+    return items if isinstance(items, list) else None
+
+
 def fetch_review_statistics(
     subject_ids: Sequence[int],
     *,
@@ -1027,6 +1066,56 @@ def normalize_reading_keyword(raw: str) -> str:
     return text.strip()
 
 
+def canonical_reading_keyword(keyword: str) -> str:
+    """Collapse plural/possessive variants so eagle/eagles/eagle's count together."""
+    kw = keyword.strip().lower()
+    if not kw:
+        return kw
+    if kw.endswith("'s") and len(kw) > 3:
+        kw = kw[:-2]
+    if len(kw) > 4 and kw.endswith("s") and not kw.endswith(("ss", "us", "is", "as", "os")):
+        kw = kw[:-1]
+    return kw
+
+
+# WK <reading> tag shorthands when the story word is predictable and in the mnemonic text.
+WK_READING_TAG_HINTS: Dict[str, str] = {
+    "ea": "eagle",
+    "shee": "sheep",
+}
+
+
+def expand_reading_keyword_from_mnemonic(tag_keyword: str, kana: str, plain_mnemonic: str) -> str:
+    """Prefer full mnemonic words (sheep) over tag shorthand (shee) from WK HTML."""
+    if not tag_keyword or not kana:
+        return tag_keyword
+    plain_lower = plain_mnemonic.lower()
+    best: Optional[str] = None
+    for match in READING_MNEMONIC_WORD_BEFORE_KANA_RE.finditer(plain_mnemonic):
+        if match.group(2) != kana:
+            continue
+        word = normalize_reading_keyword(match.group(1))
+        if word.startswith(tag_keyword) or len(word) > len(tag_keyword):
+            if not best or len(word) > len(best):
+                best = word
+    if best and len(best) >= len(tag_keyword):
+        return canonical_reading_keyword(best)
+    prefix_matches = [
+        normalize_reading_keyword(candidate)
+        for candidate in re.findall(
+            rf"\b({re.escape(tag_keyword)}[a-z'-]*)",
+            plain_mnemonic,
+            flags=re.IGNORECASE,
+        )
+    ]
+    if prefix_matches:
+        return canonical_reading_keyword(max(prefix_matches, key=len))
+    hint = WK_READING_TAG_HINTS.get(tag_keyword)
+    if hint and hint in plain_lower:
+        return hint
+    return canonical_reading_keyword(tag_keyword)
+
+
 def primary_reading_list(subject: dict) -> List[str]:
     readings = subject["data"].get("readings") or []
     primary = [r["reading"] for r in readings if r.get("primary") or r.get("accepted_answer")]
@@ -1038,12 +1127,13 @@ def extract_reading_mnemonic_pairs(subject: dict) -> List[Tuple[str, str]]:
     if not mnemonic:
         return []
 
+    plain_mnemonic = strip_html(mnemonic)
     pairs: List[Tuple[str, str]] = []
     for match in READING_MNEMONIC_PAIR_RE.finditer(mnemonic):
         keyword = normalize_reading_keyword(match.group(1))
         kana = (match.group(2) or match.group(3) or "").strip()
         if keyword and kana:
-            pairs.append((kana, keyword))
+            pairs.append((kana, expand_reading_keyword_from_mnemonic(keyword, kana, plain_mnemonic)))
 
     if pairs:
         return pairs
@@ -1057,12 +1147,18 @@ def extract_reading_mnemonic_pairs(subject: dict) -> List[Tuple[str, str]]:
         for match in READING_MNEMONIC_PAREN_KANA_RE.finditer(mnemonic)
     ]
     if tags and kana_in_paren and len(tags) == len(kana_in_paren):
-        return [(kana.strip(), keyword) for kana, keyword in zip(kana_in_paren, tags) if kana and keyword]
+        return [
+            (kana.strip(), expand_reading_keyword_from_mnemonic(keyword, kana.strip(), plain_mnemonic))
+            for kana, keyword in zip(kana_in_paren, tags)
+            if kana and keyword
+        ]
     if len(tags) == 1 and len(kana_in_paren) == 1:
-        return [(kana_in_paren[0].strip(), tags[0])]
+        kana = kana_in_paren[0].strip()
+        return [(kana, expand_reading_keyword_from_mnemonic(tags[0], kana, plain_mnemonic))]
     primary = primary_reading_list(subject)
     if len(tags) == 1 and primary:
-        return [(primary[0], tags[0])]
+        kana = primary[0]
+        return [(kana, expand_reading_keyword_from_mnemonic(tags[0], kana, plain_mnemonic))]
     return []
 
 
@@ -1094,6 +1190,7 @@ def build_reading_keyword_catalog(
         if subject.get("object") not in ("kanji", "vocabulary"):
             continue
         for kana, keyword in extract_reading_mnemonic_pairs(subject):
+            keyword = canonical_reading_keyword(keyword)
             counts[kana][keyword] += 1
             key = (kana, keyword)
             if len(examples[key]) < READING_KEYWORD_EXAMPLE_LIMIT:
@@ -1460,6 +1557,706 @@ def verb_type(subject: dict) -> str:
     if expr:
         return "Likely Godan"
     return ""
+
+
+HIRAGANA_CHAR_RE = re.compile(r"^[ぁ-んー]$")
+KATAKANA_CHAR_RE = re.compile(r"^[ァ-ヶー]$")
+
+
+class ConjugationDrill(NamedTuple):
+    vocab: dict
+    form_key: str
+    prompt: str
+    dict_expr: str
+    dict_reading: str
+    conj_expr: str
+    conj_reading: str
+    word_class: str
+
+
+VERB_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
+    ("polite_present", "Polite present"),
+    ("polite_negative", "Polite negative"),
+    ("polite_past", "Polite past"),
+    ("plain_negative", "Plain negative"),
+    ("plain_past", "Plain past"),
+    ("te_form", "Te-form"),
+)
+
+I_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
+    ("plain_negative", "Plain negative"),
+    ("plain_past", "Plain past"),
+    ("plain_past_negative", "Plain past negative"),
+    ("polite", "Polite"),
+    ("polite_negative", "Polite negative"),
+    ("polite_past", "Polite past"),
+)
+
+NA_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
+    ("plain_negative", "Plain negative"),
+    ("plain_past", "Plain past"),
+    ("plain_past_negative", "Plain past negative"),
+    ("polite", "Polite"),
+    ("polite_negative", "Polite negative"),
+    ("polite_past", "Polite past"),
+)
+
+GODAN_POLITE_STEM_SUFFIX = {
+    "う": "い",
+    "く": "き",
+    "ぐ": "ぎ",
+    "す": "し",
+    "つ": "ち",
+    "ぬ": "に",
+    "ぶ": "び",
+    "む": "み",
+    "る": "り",
+}
+
+GODAN_NEGATIVE_STEM_SUFFIX = {
+    "う": "わ",
+    "く": "か",
+    "ぐ": "が",
+    "す": "さ",
+    "つ": "た",
+    "ぬ": "な",
+    "ぶ": "ば",
+    "む": "ま",
+    "る": "ら",
+}
+
+GODAN_TE_SUFFIX = {
+    "う": "って",
+    "く": "いて",
+    "ぐ": "いで",
+    "す": "して",
+    "つ": "って",
+    "ぬ": "んで",
+    "ぶ": "んで",
+    "む": "んで",
+    "る": "って",
+}
+
+GODAN_PAST_SUFFIX = {
+    "う": "った",
+    "く": "いた",
+    "ぐ": "いだ",
+    "す": "した",
+    "つ": "った",
+    "ぬ": "んだ",
+    "ぶ": "んだ",
+    "む": "んだ",
+    "る": "った",
+}
+
+IKU_READING_EXCEPTIONS = {
+    "いく": {
+        "polite_present": "いきます",
+        "polite_negative": "いきません",
+        "polite_past": "いきました",
+        "plain_negative": "いかない",
+        "plain_past": "いった",
+        "te_form": "いって",
+    },
+}
+
+
+def is_kana_char(ch: str) -> bool:
+    return bool(HIRAGANA_CHAR_RE.match(ch) or KATAKANA_CHAR_RE.match(ch))
+
+
+def kana_tail_length(expr: str) -> int:
+    length = 0
+    while length < len(expr):
+        ch = expr[-(length + 1)]
+        if not is_kana_char(ch):
+            break
+        length += 1
+    return length
+
+
+def is_all_kana(expr: str) -> bool:
+    return bool(expr) and all(is_kana_char(ch) for ch in expr)
+
+
+def split_word_stems(expr: str, reading: str) -> Optional[Tuple[str, str, str]]:
+    """Return (character stem, reading stem, dictionary okurigana suffix)."""
+    if not expr or not reading:
+        return None
+
+    if is_all_kana(expr):
+        if reading.endswith("する") and expr.endswith("する"):
+            return expr[:-2], reading[:-2], "する"
+        if reading in {"する", "くる"} and expr == reading:
+            return "", reading, expr
+        return expr, reading, ""
+
+    if expr.endswith("する") and reading.endswith("する") and len(expr) >= 2 and len(reading) >= 2:
+        return expr[:-2], reading[:-2], "する"
+
+    if expr.endswith("る") and reading.endswith("る") and len(expr) >= 2 and len(reading) >= 2:
+        return expr[:-1], reading[:-1], "る"
+
+    kana_len = kana_tail_length(expr)
+    if kana_len == 0:
+        return None
+
+    okurigana = expr[-kana_len:]
+    char_stem = expr[:-kana_len]
+    if okurigana and reading.endswith(okurigana):
+        reading_stem = reading[:-len(okurigana)]
+        return char_stem, reading_stem, okurigana
+
+    if len(okurigana) == 1 and okurigana in GODAN_POLITE_STEM_SUFFIX:
+        if len(reading) >= 2:
+            return char_stem, reading[:-1], okurigana
+
+    return None
+
+
+def surface_from_reading_stems(char_stem: str, reading_stem: str, conj_reading: str) -> str:
+    if conj_reading.startswith(reading_stem):
+        return char_stem + conj_reading[len(reading_stem):]
+    if is_all_kana(char_stem + reading_stem):
+        return conj_reading
+    return char_stem + conj_reading[len(reading_stem):]
+
+
+def conjugation_word_class(vocab: dict) -> Optional[str]:
+    pos = set(vocab["data"].get("parts_of_speech") or [])
+    if "い adjective" in pos:
+        return "i_adjective"
+    if "な adjective" in pos:
+        return "na_adjective"
+    if "する verb" in pos or (vocab["data"].get("characters") or "").endswith("する"):
+        return "suru_verb"
+    if "ichidan verb" in pos:
+        return "ichidan"
+    if "godan verb" in pos:
+        return "godan"
+    if "transitive verb" in pos or "intransitive verb" in pos:
+        reading = first_reading(vocab)
+        if reading in {"する", "くる"}:
+            return "irregular_verb"
+        if reading.endswith("する"):
+            return "suru_verb"
+        if reading.endswith("る") and len(reading) >= 2 and reading[-2] in "いきしちにひみりえけせてねへめれげぜでべぺ":
+            return "ichidan"
+        return "godan"
+    return None
+
+
+def conjugation_class_label(word_class: str) -> str:
+    return {
+        "godan": "Godan verb",
+        "ichidan": "Ichidan verb",
+        "suru_verb": "する verb",
+        "irregular_verb": "Irregular verb",
+        "i_adjective": "い-adjective",
+        "na_adjective": "な-adjective",
+    }.get(word_class, word_class)
+
+
+VERB_DRILL_CLASS_ANSWER: Dict[str, str] = {
+    "godan": "Godan verb (五段)",
+    "ichidan": "Ichidan verb (一段)",
+    "irregular": "Irregular verb (不規則)",
+}
+
+VERB_DRILL_CLASS_HINT: Dict[str, str] = {
+    "godan": "The last kana shifts before ます / て / た / ない (e.g. 話す → はなします, はなして).",
+    "ichidan": "Drop る and add the ending (e.g. 食べる → たべます, たべて).",
+    "irregular": "する and 来る break the usual rules; する compounds conjugate the する part.",
+}
+
+ADJECTIVE_DRILL_CLASS_ANSWER: Dict[str, str] = {
+    "i_adjective": "い-adjective",
+    "na_adjective": "な-adjective",
+}
+
+ADJECTIVE_DRILL_CLASS_HINT: Dict[str, str] = {
+    "i_adjective": "Ends in い; change the い tail (e.g. 高い → 高くない, 高かった, 高く).",
+    "na_adjective": "Use な before nouns; です / じゃない / だった (e.g. 静か → 静かな人, 静かだった).",
+}
+
+
+def verb_drill_class(vocab: dict) -> Optional[str]:
+    """Learner verb class for type drills: godan, ichidan, or irregular."""
+    word_class = conjugation_word_class(vocab)
+    if word_class == "godan":
+        return "godan"
+    if word_class == "ichidan":
+        return "ichidan"
+    if word_class in {"suru_verb", "irregular_verb"}:
+        return "irregular"
+    return None
+
+
+def adjective_drill_class(vocab: dict) -> Optional[str]:
+    word_class = conjugation_word_class(vocab)
+    if word_class in {"i_adjective", "na_adjective"}:
+        return word_class
+    return None
+
+
+def verb_type_drill_answer(vocab: dict, class_key: str) -> str:
+    answer = VERB_DRILL_CLASS_ANSWER[class_key]
+    word_class = conjugation_word_class(vocab)
+    if class_key == "irregular" and word_class == "suru_verb":
+        return answer + " · する"
+    if class_key == "irregular" and word_class == "irregular_verb":
+        expr = vocab["data"].get("characters") or ""
+        reading = first_reading(vocab)
+        if reading == "くる" or expr in {"来る", "くる"}:
+            return answer + " · 来る"
+    return answer
+
+
+def collect_verb_type_items(vocab_items: Sequence[dict], args: argparse.Namespace) -> List[dict]:
+    items = [
+        vocab
+        for vocab in sorted(
+            vocab_items,
+            key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or ""),
+        )
+        if verb_drill_class(vocab)
+    ]
+    return items[: args.max_cards]
+
+
+def collect_adjective_type_items(vocab_items: Sequence[dict], args: argparse.Namespace) -> List[dict]:
+    items = [
+        vocab
+        for vocab in sorted(
+            vocab_items,
+            key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or ""),
+        )
+        if adjective_drill_class(vocab)
+    ]
+    return items[: args.max_cards]
+
+
+def conjugate_godan(expr: str, reading: str, form_key: str) -> Optional[Tuple[str, str]]:
+    if reading in IKU_READING_EXCEPTIONS and form_key in IKU_READING_EXCEPTIONS[reading]:
+        conj_reading = IKU_READING_EXCEPTIONS[reading][form_key]
+        stems = split_word_stems(expr, reading)
+        if not stems:
+            return None
+        char_stem, reading_stem, _ = stems
+        return surface_from_reading_stems(char_stem, reading_stem, conj_reading), conj_reading
+
+    stems = split_word_stems(expr, reading)
+    if not stems:
+        return None
+    char_stem, reading_stem, okurigana = stems
+    if len(okurigana) != 1 or okurigana not in GODAN_POLITE_STEM_SUFFIX:
+        return None
+
+    ending = okurigana
+    if form_key == "polite_present":
+        conj_reading = reading_stem + GODAN_POLITE_STEM_SUFFIX[ending] + "ます"
+    elif form_key == "polite_negative":
+        conj_reading = reading_stem + GODAN_POLITE_STEM_SUFFIX[ending] + "ません"
+    elif form_key == "polite_past":
+        conj_reading = reading_stem + GODAN_POLITE_STEM_SUFFIX[ending] + "ました"
+    elif form_key == "plain_negative":
+        conj_reading = reading_stem + GODAN_NEGATIVE_STEM_SUFFIX[ending] + "ない"
+    elif form_key == "plain_past":
+        conj_reading = reading_stem + GODAN_PAST_SUFFIX[ending]
+    elif form_key == "te_form":
+        conj_reading = reading_stem + GODAN_TE_SUFFIX[ending]
+    else:
+        return None
+
+    return surface_from_reading_stems(char_stem, reading_stem, conj_reading), conj_reading
+
+
+def conjugate_ichidan(expr: str, reading: str, form_key: str) -> Optional[Tuple[str, str]]:
+    stems = split_word_stems(expr, reading)
+    if not stems:
+        return None
+    char_stem, reading_stem, okurigana = stems
+    if okurigana != "る" or not reading.endswith("る"):
+        return None
+
+    if form_key == "polite_present":
+        conj_reading = reading_stem + "ます"
+    elif form_key == "polite_negative":
+        conj_reading = reading_stem + "ません"
+    elif form_key == "polite_past":
+        conj_reading = reading_stem + "ました"
+    elif form_key == "plain_negative":
+        conj_reading = reading_stem + "ない"
+    elif form_key == "plain_past":
+        conj_reading = reading_stem + "た"
+    elif form_key == "te_form":
+        conj_reading = reading_stem + "て"
+    else:
+        return None
+
+    return surface_from_reading_stems(char_stem, reading_stem, conj_reading), conj_reading
+
+
+def conjugate_suru(expr: str, reading: str, form_key: str) -> Optional[Tuple[str, str]]:
+    if reading.endswith("する"):
+        char_stem = expr[:-2] if expr.endswith("する") else expr
+        reading_stem = reading[:-2]
+        suru_reading = "する"
+        suru_expr = "する"
+    elif reading == "する" and expr == "する":
+        char_stem = ""
+        reading_stem = ""
+        suru_reading = "する"
+        suru_expr = "する"
+    else:
+        return None
+
+    suru_forms = {
+        "polite_present": ("します", "します"),
+        "polite_negative": ("しません", "しません"),
+        "polite_past": ("しました", "しました"),
+        "plain_negative": ("しない", "しない"),
+        "plain_past": ("した", "した"),
+        "te_form": ("して", "して"),
+    }
+    if form_key not in suru_forms:
+        return None
+    conj_suffix, conj_reading_suffix = suru_forms[form_key]
+    conj_expr = char_stem + (suru_expr[:-2] + conj_suffix if suru_expr == "する" else conj_suffix)
+    if char_stem and expr.endswith("する"):
+        conj_expr = char_stem + conj_suffix
+    elif not char_stem:
+        conj_expr = conj_suffix
+    conj_reading = reading_stem + conj_reading_suffix
+    return conj_expr, conj_reading
+
+
+def conjugate_kuru(expr: str, reading: str, form_key: str) -> Optional[Tuple[str, str]]:
+    if reading != "くる" or expr not in {"来る", "くる"}:
+        return None
+    forms = {
+        "polite_present": ("来ます", "きます"),
+        "polite_negative": ("来ません", "きません"),
+        "polite_past": ("来ました", "きました"),
+        "plain_negative": ("来ない", "こない"),
+        "plain_past": ("来た", "きた"),
+        "te_form": ("来て", "きて"),
+    }
+    if form_key not in forms:
+        return None
+    return forms[form_key]
+
+
+def conjugate_i_adjective(expr: str, reading: str, form_key: str) -> Optional[Tuple[str, str]]:
+    if reading in {"いい", "よい"}:
+        irregular = {
+            "plain_negative": ("よくない", "よくない"),
+            "plain_past": ("よかった", "よかった"),
+            "plain_past_negative": ("よくなかった", "よくなかった"),
+            "polite": ("いいです", "いいです"),
+            "polite_negative": ("よくないです", "よくないです"),
+            "polite_past": ("よかったです", "よかったです"),
+        }
+        if form_key in irregular:
+            return irregular[form_key]
+        return None
+
+    if not reading.endswith("い") or not expr.endswith("い"):
+        return None
+
+    char_stem = expr[:-1]
+    reading_stem = reading[:-1]
+    forms = {
+        "plain_negative": ("くない", "くない"),
+        "plain_past": ("かった", "かった"),
+        "plain_past_negative": ("くなかった", "くなかった"),
+        "polite": ("いです", "いです"),
+        "polite_negative": ("くないです", "くないです"),
+        "polite_past": ("かったです", "かったです"),
+    }
+    if form_key not in forms:
+        return None
+    suffix, reading_suffix = forms[form_key]
+    return char_stem + suffix, reading_stem + reading_suffix
+
+
+def conjugate_na_adjective(expr: str, reading: str, form_key: str) -> Optional[Tuple[str, str]]:
+    forms = {
+        "plain_negative": ("じゃない", "じゃない"),
+        "plain_past": ("だった", "だった"),
+        "plain_past_negative": ("じゃなかった", "じゃなかった"),
+        "polite": ("です", "です"),
+        "polite_negative": ("じゃないです", "じゃないです"),
+        "polite_past": ("でした", "でした"),
+    }
+    if form_key not in forms:
+        return None
+    suffix, reading_suffix = forms[form_key]
+    return expr + suffix, reading + reading_suffix
+
+
+def conjugate_vocab_form(vocab: dict, word_class: str, form_key: str) -> Optional[Tuple[str, str]]:
+    expr = vocab["data"].get("characters") or ""
+    reading = first_reading(vocab)
+    if not expr or not reading:
+        return None
+
+    if word_class == "godan":
+        return conjugate_godan(expr, reading, form_key)
+    if word_class == "ichidan":
+        return conjugate_ichidan(expr, reading, form_key)
+    if word_class == "suru_verb":
+        return conjugate_suru(expr, reading, form_key)
+    if word_class == "irregular_verb":
+        if reading == "くる":
+            return conjugate_kuru(expr, reading, form_key)
+        if reading == "する":
+            return conjugate_suru(expr, reading, form_key)
+        return None
+    if word_class == "i_adjective":
+        return conjugate_i_adjective(expr, reading, form_key)
+    if word_class == "na_adjective":
+        return conjugate_na_adjective(expr, reading, form_key)
+    return None
+
+
+def conjugation_forms_for_class(word_class: str) -> Tuple[Tuple[str, str], ...]:
+    if word_class in {"godan", "ichidan", "suru_verb", "irregular_verb"}:
+        return VERB_CONJUGATION_FORMS
+    if word_class == "i_adjective":
+        return I_ADJECTIVE_CONJUGATION_FORMS
+    if word_class == "na_adjective":
+        return NA_ADJECTIVE_CONJUGATION_FORMS
+    return ()
+
+
+def collect_conjugation_drills(vocab_items: Sequence[dict], args: argparse.Namespace) -> List[ConjugationDrill]:
+    drills: List[ConjugationDrill] = []
+    for vocab in sorted(vocab_items, key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or "")):
+        word_class = conjugation_word_class(vocab)
+        if not word_class:
+            continue
+        expr = vocab["data"].get("characters") or ""
+        reading = first_reading(vocab)
+        for form_key, prompt in conjugation_forms_for_class(word_class):
+            result = conjugate_vocab_form(vocab, word_class, form_key)
+            if not result:
+                continue
+            conj_expr, conj_reading = result
+            if conj_expr == expr and conj_reading == reading:
+                continue
+            drills.append(
+                ConjugationDrill(
+                    vocab=vocab,
+                    form_key=form_key,
+                    prompt=prompt,
+                    dict_expr=expr,
+                    dict_reading=reading,
+                    conj_expr=conj_expr,
+                    conj_reading=conj_reading,
+                    word_class=word_class,
+                )
+            )
+    return drills[: args.max_cards]
+
+
+CONJUGATION_FIXTURES_FILENAME = "conjugation_fixtures.json"
+CONJUGATION_VERIFY_VOCAB_ISSUE_LIMIT = 50
+
+CONJUGATION_WORD_CLASS_POS: Dict[str, List[str]] = {
+    "godan": ["godan verb"],
+    "ichidan": ["ichidan verb"],
+    "suru_verb": ["する verb"],
+    "irregular_verb": ["intransitive verb"],
+    "i_adjective": ["い adjective"],
+    "na_adjective": ["な adjective"],
+}
+
+
+class ConjugationFixture(NamedTuple):
+    expr: str
+    reading: str
+    word_class: str
+    form_key: str
+    conj_expr: str
+    conj_reading: str
+    note: str
+
+
+class ConjugationVocabIssue(NamedTuple):
+    vocab: dict
+    issues: Tuple[str, ...]
+
+
+def conjugation_fixtures_path() -> Path:
+    return Path(__file__).resolve().parent / CONJUGATION_FIXTURES_FILENAME
+
+
+def load_conjugation_fixtures(path: Optional[Path] = None) -> List[ConjugationFixture]:
+    fixture_path = path or conjugation_fixtures_path()
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    fixtures: List[ConjugationFixture] = []
+    for row in payload.get("fixtures") or []:
+        fixtures.append(
+            ConjugationFixture(
+                expr=str(row.get("expr") or ""),
+                reading=str(row.get("reading") or ""),
+                word_class=str(row.get("word_class") or ""),
+                form_key=str(row.get("form_key") or ""),
+                conj_expr=str(row.get("conj_expr") or ""),
+                conj_reading=str(row.get("conj_reading") or ""),
+                note=str(row.get("note") or ""),
+            )
+        )
+    return fixtures
+
+
+def mock_vocab_for_conjugation(expr: str, reading: str, parts_of_speech: Sequence[str], vocab_id: int = 0) -> dict:
+    return {
+        "id": vocab_id,
+        "object": "vocabulary",
+        "data": {
+            "characters": expr,
+            "readings": [{"reading": reading, "primary": True}],
+            "parts_of_speech": list(parts_of_speech),
+            "level": 1,
+        },
+    }
+
+
+def conjugate_from_fixture(fixture: ConjugationFixture) -> Optional[Tuple[str, str]]:
+    parts = CONJUGATION_WORD_CLASS_POS.get(fixture.word_class, [])
+    vocab = mock_vocab_for_conjugation(fixture.expr, fixture.reading, parts)
+    detected = conjugation_word_class(vocab)
+    if detected != fixture.word_class:
+        return None
+    return conjugate_vocab_form(vocab, fixture.word_class, fixture.form_key)
+
+
+def run_conjugation_fixture_checks(fixtures: Optional[Sequence[ConjugationFixture]] = None) -> List[str]:
+    failures: List[str] = []
+    for fixture in fixtures or load_conjugation_fixtures():
+        result = conjugate_from_fixture(fixture)
+        expected = (fixture.conj_expr, fixture.conj_reading)
+        if result != expected:
+            failures.append(
+                f"{fixture.expr} ({fixture.reading}) {fixture.form_key} [{fixture.note}]: "
+                f"got {result}, expected {expected}"
+            )
+    return failures
+
+
+def conjugation_issues_for_vocab(vocab: dict) -> List[str]:
+    issues: List[str] = []
+    word_class = conjugation_word_class(vocab)
+    if not word_class:
+        return issues
+
+    expr = vocab["data"].get("characters") or ""
+    reading = first_reading(vocab)
+    if not expr:
+        issues.append("missing expression")
+    if not reading:
+        issues.append("missing reading")
+    if issues:
+        return issues
+
+    produced = 0
+    for form_key, _prompt in conjugation_forms_for_class(word_class):
+        result = conjugate_vocab_form(vocab, word_class, form_key)
+        if result is None:
+            issues.append(f"missing form: {form_key}")
+            continue
+        conj_expr, conj_reading = result
+        if not conj_expr or not conj_reading:
+            issues.append(f"empty result: {form_key}")
+            continue
+        if conj_expr == expr and conj_reading == reading:
+            issues.append(f"unchanged: {form_key}")
+            continue
+        produced += 1
+
+    if produced == 0:
+        issues.append("no conjugations produced")
+    return issues
+
+
+def scan_conjugation_vocab_issues(vocab_items: Sequence[dict]) -> List[ConjugationVocabIssue]:
+    flagged: List[ConjugationVocabIssue] = []
+    for vocab in vocab_items:
+        issues = conjugation_issues_for_vocab(vocab)
+        if issues:
+            flagged.append(ConjugationVocabIssue(vocab=vocab, issues=tuple(issues)))
+    return flagged
+
+
+def print_conjugation_verification_report(
+    fixture_failures: Sequence[str],
+    vocab_issues: Sequence[ConjugationVocabIssue],
+    *,
+    vocab_issue_limit: int = CONJUGATION_VERIFY_VOCAB_ISSUE_LIMIT,
+) -> bool:
+    """Print verification results. Returns True when no failures were found."""
+    fixture_count = len(load_conjugation_fixtures())
+    print("\nConjugation verification")
+    print("=" * 60)
+    print(f"Fixture checks: {fixture_count - len(fixture_failures)}/{fixture_count} passed")
+
+    if fixture_failures:
+        print("\nFixture failures:")
+        for line in fixture_failures:
+            print(f"  FAIL {line}")
+    else:
+        print("  All curated fixtures passed.")
+
+    print(f"\nEligible vocab scanned: {len(vocab_issues)} suspicious item(s)")
+    if not vocab_issues:
+        print("  No suspicious conjugation patterns in eligible vocabulary.")
+    else:
+        print(f"  Showing up to {vocab_issue_limit}:")
+        for entry in vocab_issues[:vocab_issue_limit]:
+            data = entry.vocab["data"]
+            expr = data.get("characters") or "?"
+            reading = first_reading(entry.vocab)
+            level = data.get("level", "?")
+            word_class = conjugation_word_class(entry.vocab) or "?"
+            issue_text = "; ".join(entry.issues)
+            print(f"  L{level} {expr} ({reading}) [{word_class}] — {issue_text}")
+        if len(vocab_issues) > vocab_issue_limit:
+            print(f"  ... and {len(vocab_issues) - vocab_issue_limit} more")
+
+    ok = not fixture_failures and not vocab_issues
+    if ok:
+        print("\nConjugation verification: PASSED")
+    else:
+        print("\nConjugation verification: FAILED")
+    return ok
+
+
+def run_verify_conjugations(
+    args: argparse.Namespace,
+    *,
+    vocab_items: Optional[Sequence[dict]] = None,
+    cache_only: bool = False,
+) -> bool:
+    fixture_failures = run_conjugation_fixture_checks()
+    vocab_issues: List[ConjugationVocabIssue] = []
+    if vocab_items is not None:
+        vocab_issues = scan_conjugation_vocab_issues(vocab_items)
+        print(f"\nScanned eligible vocab: {len(vocab_items)} items")
+    elif cache_only:
+        subjects = load_cache_items_only("subjects", "vocabulary_kanji_radical")
+        assignment_params = build_assignment_params(args)
+        assignment_key = assignment_params_key(assignment_params)
+        assignments = load_cache_items_only("assignments", assignment_key)
+        if subjects and assignments:
+            assignment_index = assignment_by_subject_id(assignments)
+            cached_vocab = vocab_subjects(subjects, assignment_index, args)
+            vocab_issues = scan_conjugation_vocab_issues(cached_vocab)
+            print(f"\nLoaded cached vocab for scan: {len(cached_vocab)} eligible items")
+        else:
+            print("\nSkipping eligible-vocab scan (no matching .wk_cache data). Fixture checks still ran.")
+    return print_conjugation_verification_report(fixture_failures, vocab_issues)
 
 
 PAIR_METADATA = {
@@ -1867,8 +2664,9 @@ def make_phonetic_drill_model() -> WkModel:
             {"name": "GuidKey"},
             {"name": "Kanji"},
             {"name": "Prompt"},
-            {"name": "ReadingAnswer"},
+            {"name": "WkReadings"},
             {"name": "PhoneticPiece"},
+            {"name": "PhoneticReadings"},
             {"name": "AnchorHtml"},
             {"name": "Meaning"},
             {"name": "Meta"},
@@ -1879,15 +2677,16 @@ def make_phonetic_drill_model() -> WkModel:
                 "qfmt": """
                 <div class="prompt">{{Prompt}}</div>
                 <div class="jp">{{Kanji}}</div>
-                <div class="meta">Predict the on'yomi using the phonetic component</div>
+                <div class="meta">Recall WK on'yomi; use the phonetic piece as a hint</div>
                 """,
                 "afmt": """
                 {{FrontSide}}
                 <hr>
-                <div class="reading answer">{{ReadingAnswer}}</div>
+                <div class="reading answer">WK on'yomi: {{WkReadings}}</div>
                 <div class="phonetic-piece">
                   <span class="meta">Phonetic component</span>
                   <span class="jp">{{PhoneticPiece}}</span>
+                  <div class="phonetic-map">Usually signals: <span class="reading">{{PhoneticReadings}}</span></div>
                 </div>
                 <div class="meaning">{{Meaning}}</div>
                 <div class="meta">{{Meta}}</div>
@@ -1900,6 +2699,8 @@ def make_phonetic_drill_model() -> WkModel:
             + """
 .phonetic-piece { margin: 12px 0; }
 .phonetic-piece .jp { font-size: 36px; }
+.phonetic-map { font-size: 16px; color: #bbb; margin-top: 6px; }
+.phonetic-map .reading { font-size: 22px; color: #d8d8d8; }
 .phonetic-anchor-footnote {
   font-size: 13px;
   font-weight: normal;
@@ -1925,6 +2726,100 @@ def make_phonetic_drill_model() -> WkModel:
         ),
     )
 
+
+def make_conjugation_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["conjugation"],
+        NOTE_TYPE_NAMES["conjugation"],
+        template_key="conjugation",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Prompt"},
+            {"name": "DictExpression"},
+            {"name": "DictReading"},
+            {"name": "Meaning"},
+            {"name": "WordClass"},
+            {"name": "ConjExpression"},
+            {"name": "ConjReading"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Conjugate",
+                "qfmt": """
+                <div class="prompt">{{Prompt}}</div>
+                <div class="jp">{{DictExpression}}</div>
+                <div class="reading">{{DictReading}}</div>
+                <div class="meaning">{{Meaning}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="jp answer">{{ConjExpression}}</div>
+                <div class="reading answer">{{ConjReading}}</div>
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+        ],
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.answer { margin-top: 8px; }
+.jp.answer { font-size: 40px; }
+""",
+            "conjugation",
+        ),
+    )
+
+
+def make_word_class_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["word_class"],
+        NOTE_TYPE_NAMES["word_class"],
+        template_key="word_class",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Prompt"},
+            {"name": "Expression"},
+            {"name": "Reading"},
+            {"name": "Meaning"},
+            {"name": "ClassAnswer"},
+            {"name": "ClassHint"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Word class",
+                "qfmt": """
+                <div class="prompt">{{Prompt}}</div>
+                <div class="jp">{{Expression}}</div>
+                <div class="reading">{{Reading}}</div>
+                <div class="meaning">{{Meaning}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="class-answer">{{ClassAnswer}}</div>
+                <div class="class-hint">{{ClassHint}}</div>
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+        ],
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.class-answer { font-size: 32px; margin: 12px 0; color: #e8e8e8; font-weight: 600; }
+.class-hint {
+  font-size: 15px;
+  color: #bbb;
+  margin: 8px auto;
+  max-width: 720px;
+  line-height: 1.4;
+}
+""",
+            "word_class",
+        ),
+    )
 
 
 def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
@@ -2262,7 +3157,46 @@ def find_phonetic_families(
 
 
 def phonetic_drill_note_count(families: Sequence[Tuple[str, str, List[dict]]]) -> int:
-    return sum(len(members) for _, _, members in families)
+    return len(collect_phonetic_drill_items(families))
+
+
+def collect_phonetic_drill_items(
+    families: Sequence[Tuple[str, str, List[dict]]],
+) -> List[Tuple[dict, str, List[dict]]]:
+    """One card per (kanji, phonetic component), not per reading branch."""
+    by_kanji_comp: Dict[Tuple[int, str], dict] = {}
+    comp_members: DefaultDict[str, Dict[int, dict]] = defaultdict(dict)
+    for comp, _reading, members in families:
+        for member in members:
+            comp_members[comp][member["id"]] = member
+            key = (member["id"], comp)
+            if key not in by_kanji_comp:
+                by_kanji_comp[key] = member
+    items: List[Tuple[dict, str, List[dict]]] = []
+    for (kanji_id, comp), kanji in by_kanji_comp.items():
+        members = sorted(
+            comp_members[comp].values(),
+            key=lambda item: item["data"].get("level", 999),
+        )
+        items.append((kanji, comp, members))
+    items.sort(
+        key=lambda item: (
+            item[0]["data"].get("level", 999),
+            item[1],
+            item[0]["data"].get("characters") or "",
+        ),
+    )
+    return items
+
+
+def wk_onyomi_label(kanji: dict) -> str:
+    onyomi = wk_onyomi_readings(kanji)
+    return "、".join(onyomi) if onyomi else "—"
+
+
+def phonetic_component_readings_label(comp: str, keisei_phonetic: dict) -> str:
+    readings = (keisei_phonetic.get(comp) or {}).get("readings") or []
+    return "、".join(reading for reading in readings if reading)
 
 
 def kanji_onyomi_label(kanji: dict, char: str, keisei_kanji: dict) -> str:
@@ -2613,6 +3547,7 @@ def build_confusables_deck(groups, indexes, pitch_index, output_dir: Path, subje
 
 def build_phonetic_family_deck(
     families: Sequence[Tuple[str, str, List[dict]]],
+    keisei_phonetic: dict,
     keisei_kanji: dict,
     started_kanji_ids: Set[int],
     all_kanji_by_char: Dict[str, dict],
@@ -2621,50 +3556,51 @@ def build_phonetic_family_deck(
     deck = genanki.Deck(DECK_IDS["phonetic-families"], DECK_NAMES["phonetic-families"])
     model = make_phonetic_drill_model()
     template_label = MODEL_TEMPLATE_VERSIONS["phonetic_drill"]
-    for comp, reading, members in families:
-        for kanji in members:
-            data = kanji["data"]
-            char = data.get("characters") or ""
-            is_started = kanji["id"] in started_kanji_ids
-            meaning = "; ".join(primary_meanings(kanji))
-            level = data.get("level", "?")
-            progress = "started" if is_started else "preview"
-            anchor_html = phonetic_anchor_back_html(
-                comp,
-                members,
-                kanji["id"],
-                started_kanji_ids,
-                all_kanji_by_char,
-                keisei_kanji,
-            )
-            meta = (
-                f"WK Level {level} · {progress} · {comp}→{reading} · "
-                f"template {template_label}"
-            )
-            guid = stable_guid("phonetic-drill", kanji["id"], comp, reading)
-            note = genanki.Note(
-                model=model,
-                fields=[
-                    guid,
-                    html.escape(char),
-                    "What is the on'yomi reading?",
-                    html.escape(reading),
-                    html.escape(comp),
-                    anchor_html,
-                    html.escape(meaning),
-                    html.escape(meta),
-                ],
-                tags=[
-                    "wanikani",
-                    "phonetic-drill",
-                    "phonetic-family",
-                    "priority-low",
-                    f"reading-{reading}",
-                    progress,
-                ],
-                guid=guid,
-            )
-            deck.add_note(note)
+    for kanji, comp, family_members in collect_phonetic_drill_items(families):
+        data = kanji["data"]
+        char = data.get("characters") or ""
+        is_started = kanji["id"] in started_kanji_ids
+        meaning = "; ".join(primary_meanings(kanji))
+        level = data.get("level", "?")
+        progress = "started" if is_started else "preview"
+        wk_readings = wk_onyomi_label(kanji)
+        comp_readings = phonetic_component_readings_label(comp, keisei_phonetic)
+        anchor_html = phonetic_anchor_back_html(
+            comp,
+            family_members,
+            kanji["id"],
+            started_kanji_ids,
+            all_kanji_by_char,
+            keisei_kanji,
+        )
+        meta = f"WK Level {level} · {progress} · phonetic {comp} · template {template_label}"
+        guid = stable_guid("phonetic-drill", kanji["id"], comp)
+        reading_tags = [f"reading-{r}" for r in wk_onyomi_readings(kanji)]
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(char),
+                "What is the on'yomi reading?",
+                html.escape(wk_readings),
+                html.escape(comp),
+                html.escape(comp_readings),
+                anchor_html,
+                html.escape(meaning),
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                "phonetic-drill",
+                "phonetic-family",
+                "priority-low",
+                f"phonetic-{comp}",
+                progress,
+                *reading_tags,
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
     out = output_dir / "wk_phonetic_families.apkg"
     write_apkg(deck, out)
     return out, deck
@@ -2755,6 +3691,120 @@ def build_kanji_radical_deck(
     return out, deck
 
 
+def build_conjugation_deck(
+    drills: Sequence[ConjugationDrill],
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
+    deck = genanki.Deck(DECK_IDS["conjugations"], DECK_NAMES["conjugations"])
+    model = make_conjugation_model()
+    template_label = MODEL_TEMPLATE_VERSIONS["conjugation"]
+    for drill in drills:
+        vocab = drill.vocab
+        level = vocab["data"].get("level", "?")
+        guid = stable_guid("conjugation", vocab["id"], drill.form_key)
+        meaning = "; ".join(primary_meanings(vocab))
+        class_label = conjugation_class_label(drill.word_class)
+        meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(drill.prompt),
+                html.escape(drill.dict_expr),
+                html.escape(drill.dict_reading),
+                html.escape(meaning),
+                html.escape(class_label),
+                html.escape(drill.conj_expr),
+                html.escape(drill.conj_reading),
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                "conjugation",
+                drill.word_class.replace("_", "-"),
+                drill.form_key,
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
+    out = output_dir / "wk_conjugations.apkg"
+    write_apkg(deck, out)
+    return out, deck
+
+
+def build_word_class_deck(
+    deck_key: str,
+    vocab_items: Sequence[dict],
+    output_dir: Path,
+    *,
+    drill_kind: str,
+) -> Tuple[Path, genanki.Deck]:
+    deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
+    model = make_word_class_model()
+    template_label = MODEL_TEMPLATE_VERSIONS["word_class"]
+    guid_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
+    tag_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
+    prompt = (
+        "What type of verb is this?"
+        if drill_kind == "verb"
+        else "What type of adjective is this?"
+    )
+    outfile = "wk_verb_types.apkg" if drill_kind == "verb" else "wk_adjective_types.apkg"
+
+    for vocab in vocab_items:
+        if drill_kind == "verb":
+            class_key = verb_drill_class(vocab)
+            if not class_key:
+                continue
+            class_answer = verb_type_drill_answer(vocab, class_key)
+            class_hint = VERB_DRILL_CLASS_HINT[class_key]
+        else:
+            class_key = adjective_drill_class(vocab)
+            if not class_key:
+                continue
+            class_answer = ADJECTIVE_DRILL_CLASS_ANSWER[class_key]
+            class_hint = ADJECTIVE_DRILL_CLASS_HINT[class_key]
+
+        data = vocab["data"]
+        expr = data.get("characters") or ""
+        reading = first_reading(vocab)
+        level = data.get("level", "?")
+        meaning = "; ".join(primary_meanings(vocab))
+        guid = stable_guid(guid_kind, vocab["id"])
+        meta = f"WK L{level} · template {template_label} · {class_key}"
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(prompt),
+                html.escape(expr),
+                html.escape(reading),
+                html.escape(meaning),
+                html.escape(class_answer),
+                html.escape(class_hint),
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                tag_kind,
+                class_key.replace("_", "-"),
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
+
+    out = output_dir / outfile
+    write_apkg(deck, out)
+    return out, deck
+
+
+def build_verb_type_deck(vocab_items: Sequence[dict], output_dir: Path) -> Tuple[Path, genanki.Deck]:
+    return build_word_class_deck("verb-types", vocab_items, output_dir, drill_kind="verb")
+
+
+def build_adjective_type_deck(vocab_items: Sequence[dict], output_dir: Path) -> Tuple[Path, genanki.Deck]:
+    return build_word_class_deck("adjective-types", vocab_items, output_dir, drill_kind="adjective")
+
 
 def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, str], dict]) -> int:
     return sum(
@@ -2776,6 +3826,9 @@ def wanted_decks(args: argparse.Namespace) -> Set[str]:
         "radicals",
         "reading-keywords",
         "kanji-radicals",
+        "conjugations",
+        "verb-types",
+        "adjective-types",
     }
 
 
@@ -2789,6 +3842,9 @@ def deck_names_for_run(
     phonetic_families: Sequence[Tuple[str, str, List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
+    conjugation_drills: Sequence[ConjugationDrill],
+    verb_type_items: Sequence[dict],
+    adjective_type_items: Sequence[dict],
     pitch_index: Dict[Tuple[str, str], dict],
 ) -> List[str]:
     names: List[str] = []
@@ -2806,6 +3862,12 @@ def deck_names_for_run(
         names.append(DECK_NAMES["reading-keywords"])
     if "kanji-radicals" in wanted and kanji_radical_items:
         names.append(DECK_NAMES["kanji-radicals"])
+    if "conjugations" in wanted and conjugation_drills:
+        names.append(DECK_NAMES["conjugations"])
+    if "verb-types" in wanted and verb_type_items:
+        names.append(DECK_NAMES["verb-types"])
+    if "adjective-types" in wanted and adjective_type_items:
+        names.append(DECK_NAMES["adjective-types"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -2828,6 +3890,9 @@ def build_run_history_row(
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
+    conjugation_drills: Sequence[ConjugationDrill],
+    verb_type_items: Sequence[dict],
+    adjective_type_items: Sequence[dict],
     pitch_index: Dict[Tuple[str, str], dict],
     bundled_deck_names: Sequence[str],
     bundled_in_wk_all: bool,
@@ -2856,6 +3921,9 @@ def build_run_history_row(
         "phonetic_families": len(phonetic_families),
         "reading_keywords": len(reading_keywords),
         "kanji_radical_breakdown": len(kanji_radical_items),
+        "conjugation_drills": len(conjugation_drills),
+        "verb_type_cards": len(verb_type_items),
+        "adjective_type_cards": len(adjective_type_items),
         "pitch_entries": len(pitch_index),
         "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
         "bundled_in_wk_all": int(bundled_in_wk_all),
@@ -3023,8 +4091,12 @@ def print_preview_report(
     verb_pairs: Sequence[Tuple[dict, dict]],
     confusables: Sequence[List[dict]],
     phonetic_families: Sequence[Tuple[str, str, List[dict]]],
+    keisei_phonetic: dict,
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
+    conjugation_drills: Sequence[ConjugationDrill],
+    verb_type_items: Sequence[dict],
+    adjective_type_items: Sequence[dict],
     radical_items: Sequence[dict],
     current_level: int,
     next_level: int,
@@ -3036,6 +4108,9 @@ def print_preview_report(
     wanted = {args.deck} if args.deck != "all" else {
         "leeches", "verb-pairs", "confusables", "phonetic-families",
         "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
+        "conjugations",
+        "verb-types",
+        "adjective-types",
     }
 
     if "leeches" in wanted:
@@ -3069,9 +4144,8 @@ def print_preview_report(
         preview_deck_section(
             DECK_NAMES["phonetic-families"],
             [
-                f"{m['data'].get('characters') or '?'} → {reading} via {comp}"
-                for comp, reading, members in phonetic_families
-                for m in members
+                f"{kanji['data'].get('characters') or '?'} · WK {wk_onyomi_label(kanji)} · phonetic {comp} → {phonetic_component_readings_label(comp, keisei_phonetic or {})}"
+                for kanji, comp, _ in collect_phonetic_drill_items(phonetic_families)
             ],
         )
     if "reading-keywords" in wanted:
@@ -3089,6 +4163,34 @@ def print_preview_report(
                 f"{kanji['data'].get('characters') or '?'} [L{kanji['data'].get('level', '?')}] "
                 f"{len(kanji['data'].get('component_subject_ids') or [])} radicals"
                 for kanji in kanji_radical_items
+            ],
+        )
+    if "conjugations" in wanted:
+        preview_deck_section(
+            DECK_NAMES["conjugations"],
+            [
+                f"{drill.dict_expr} ({drill.dict_reading}) → {drill.conj_expr} ({drill.conj_reading}) · {drill.prompt}"
+                for drill in conjugation_drills
+            ],
+        )
+    if "verb-types" in wanted:
+        preview_deck_section(
+            DECK_NAMES["verb-types"],
+            [
+                f"{v['data'].get('characters') or '?'} ({first_reading(v)}) → "
+                f"{verb_type_drill_answer(v, verb_drill_class(v) or '')}"
+                for v in verb_type_items
+                if verb_drill_class(v)
+            ],
+        )
+    if "adjective-types" in wanted:
+        preview_deck_section(
+            DECK_NAMES["adjective-types"],
+            [
+                f"{v['data'].get('characters') or '?'} ({first_reading(v)}) → "
+                f"{ADJECTIVE_DRILL_CLASS_ANSWER.get(adjective_drill_class(v) or '', '?')}"
+                for v in adjective_type_items
+                if adjective_drill_class(v)
             ],
         )
     if "radicals" in wanted:
@@ -3114,7 +4216,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals", "all",
+        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
+        "conjugations", "verb-types", "adjective-types", "all",
     ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
@@ -3136,6 +4239,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-confusable-group-size", type=int, default=7)
     parser.add_argument("--min-family-size", type=int, default=3)
     parser.add_argument("--max-family-members", type=int, default=12)
+    parser.add_argument(
+        "--verify-conjugations",
+        action="store_true",
+        help="Run curated conjugation fixture checks and flag suspicious forms in eligible vocab.",
+    )
+    parser.add_argument(
+        "--verify-conjugations-only",
+        action="store_true",
+        help="Run --verify-conjugations and exit without writing decks.",
+    )
     return parser.parse_args()
 
 
@@ -3154,6 +4267,12 @@ def main() -> None:
     print()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.verify_conjugations_only:
+        ok = run_verify_conjugations(args, cache_only=True)
+        if not ok:
+            sys.exit(1)
+        return
 
     user = get_cached_user(refresh=args.refresh_cache)
     subjects = get_cached_collection(
@@ -3193,6 +4312,9 @@ def main() -> None:
     kanji_items = kanji_subjects(subjects, indexes["assignments"], args)
     radical_items = radical_subjects(subjects, args)
     current_level, next_level = selected_radical_levels(user, subjects, indexes["assignments"], args)
+    if args.verify_conjugations:
+        if not run_verify_conjugations(args, vocab_items=vocab_items):
+            sys.exit(1)
     print(f"WaniKani user level: {user.get('level', '?')}")
     if args.write_pitch_template:
         write_pitch_template(vocab_items, args.write_pitch_template)
@@ -3217,6 +4339,9 @@ def main() -> None:
     all_kanji_by_char = kanji_by_char(all_wk_kanji_subjects(subjects, args))
     reading_keywords = build_reading_keyword_catalog(subjects)
     kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
+    conjugation_drills = collect_conjugation_drills(vocab_items, args)
+    verb_type_items = collect_verb_type_items(vocab_items, args)
+    adjective_type_items = collect_adjective_type_items(vocab_items, args)
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
@@ -3227,6 +4352,9 @@ def main() -> None:
     print(f"Phonetic families: {len(phonetic_families)} ({phonetic_drill_note_count(phonetic_families)} drill cards)")
     print(f"Reading keywords: {len(reading_keywords)}")
     print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
+    print(f"Conjugation drills: {len(conjugation_drills)}")
+    print(f"Verb type cards: {len(verb_type_items)}")
+    print(f"Adjective type cards: {len(adjective_type_items)}")
     print(f"Pitch entries loaded: {len(pitch_index)}")
     wanted = wanted_decks(args)
     if args.dry_run:
@@ -3239,6 +4367,9 @@ def main() -> None:
             phonetic_families=phonetic_families,
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
+            conjugation_drills=conjugation_drills,
+            verb_type_items=verb_type_items,
+            adjective_type_items=adjective_type_items,
             pitch_index=pitch_index,
         )
         history_path = append_run_history(
@@ -3259,6 +4390,9 @@ def main() -> None:
                 reading_keywords=reading_keywords,
                 kanji_radical_items=kanji_radical_items,
                 radical_items=radical_items,
+                conjugation_drills=conjugation_drills,
+                verb_type_items=verb_type_items,
+                adjective_type_items=adjective_type_items,
                 pitch_index=pitch_index,
                 bundled_deck_names=would_bundle,
                 bundled_in_wk_all=bool(would_bundle and not args.no_bundle),
@@ -3271,8 +4405,12 @@ def main() -> None:
             verb_pairs=verb_pairs,
             confusables=confusables,
             phonetic_families=phonetic_families,
+            keisei_phonetic=keisei_databases.get("phonetic", {}),
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
+            conjugation_drills=conjugation_drills,
+            verb_type_items=verb_type_items,
+            adjective_type_items=adjective_type_items,
             radical_items=radical_items,
             current_level=current_level,
             next_level=next_level,
@@ -3301,6 +4439,7 @@ def main() -> None:
     if "phonetic-families" in wanted and phonetic_families:
         path, deck = build_phonetic_family_deck(
             phonetic_families,
+            keisei_databases.get("phonetic", {}),
             keisei_databases.get("kanji", {}),
             started_kanji_ids,
             all_kanji_by_char,
@@ -3319,6 +4458,18 @@ def main() -> None:
             indexes["assignments"],
             output_dir,
         )
+        created.append(path)
+        built_decks.append(deck)
+    if "conjugations" in wanted and conjugation_drills:
+        path, deck = build_conjugation_deck(conjugation_drills, output_dir)
+        created.append(path)
+        built_decks.append(deck)
+    if "verb-types" in wanted and verb_type_items:
+        path, deck = build_verb_type_deck(verb_type_items, output_dir)
+        created.append(path)
+        built_decks.append(deck)
+    if "adjective-types" in wanted and adjective_type_items:
+        path, deck = build_adjective_type_deck(adjective_type_items, output_dir)
         created.append(path)
         built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
@@ -3346,6 +4497,9 @@ def main() -> None:
                 reading_keywords=reading_keywords,
                 kanji_radical_items=kanji_radical_items,
                 radical_items=radical_items,
+                conjugation_drills=conjugation_drills,
+                verb_type_items=verb_type_items,
+                adjective_type_items=adjective_type_items,
                 pitch_index=pitch_index,
                 bundled_deck_names=[],
                 bundled_in_wk_all=False,
@@ -3379,6 +4533,9 @@ def main() -> None:
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
             radical_items=radical_items,
+            conjugation_drills=conjugation_drills,
+            verb_type_items=verb_type_items,
+            adjective_type_items=adjective_type_items,
             pitch_index=pitch_index,
             bundled_deck_names=[deck.name for deck in built_decks],
             bundled_in_wk_all=bool(bundle_path),
