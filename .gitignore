@@ -1,6 +1,9 @@
 # WaniKani API cache
 .wk_cache/
 
+# Local helper scripts (may contain API tokens)
+gen_all.sh
+
 # Generated Anki packages and helper files
 out/
 
