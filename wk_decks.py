@@ -16,6 +16,7 @@ Decks:
   - conjugations: common verb and adjective conjugation drills for learned WK vocabulary
   - verb-types: recall godan / ichidan / irregular verb class for WK verbs
   - adjective-types: recall い-adjective vs な-adjective for WK adjectives
+  - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
   - all: all of the above
 
 Install:
@@ -40,6 +41,14 @@ Recommended weekly import (one file, all decks):
   python wk_decks.py --deck all --only-started
   # then import out/wk_all.apkg into Anki
 
+Vocabulary context cloze (reading production in WK sentences, Master+ default):
+  python wk_decks.py --deck vocab-cloze --only-started
+  # uses --vocab-cloze-min-srs 7 by default; enable FSRS on the deck in Anki
+
+With sentence audio (edge-tts, on by default; cached in .wk_cache/sentence_audio/):
+  python wk_decks.py --deck vocab-cloze --only-started
+  python wk_decks.py --deck vocab-cloze --only-started --no-sentence-audio  # skip TTS
+
 With Yomitan pitch dictionary zip/folder:
   python wk_decks.py --deck all --only-started --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
 
@@ -48,8 +57,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.17.0"
-BUILD_DATE = "2026-06-11"
+VERSION = "2.20.0"
+BUILD_DATE = "2026-06-24"
 
 import warnings
 
@@ -59,12 +68,14 @@ warnings.filterwarnings(
 )
 
 import argparse
+import asyncio
 import csv
 import hashlib
 import html
 import json
 import os
 import re
+import shutil
 import sys
 import time
 import zipfile
@@ -78,6 +89,8 @@ import requests
 
 WK_API_BASE = "https://api.wanikani.com/v2"
 WK_REVISION = "20170710"
+WK_CLOUDFLARE_RETRY_WAIT_SECONDS = 5
+WK_CLOUDFLARE_MAX_RETRIES = 2
 CACHE_DIR = Path(".wk_cache")
 CACHE_MAX_AGE_HOURS = 24
 OUTPUT_DIR = Path("out")
@@ -107,6 +120,14 @@ LEECH_STREAK_PENALTY_MAX = 5
 LEECH_STREAK_PENALTY_STEP = 0.2
 LEECH_WEAK_SIDE_MIN_INCORRECT = 2
 CONTEXT_SENTENCE_LIMIT = 3
+# WaniKani assignment SRS stages (API srs_stage): 5–6 Guru, 7 Master, 8 Enlightened, 9 Burned.
+WK_SRS_STAGE_GURU_1 = 5
+WK_SRS_STAGE_MASTER = 7
+VOCAB_CLOZE_DEFAULT_MIN_SRS = WK_SRS_STAGE_MASTER
+CLOZE_BLANK_DISPLAY = "＿＿＿"
+SENTENCE_AUDIO_CACHE_DIR = CACHE_DIR / "sentence_audio"
+DEFAULT_SENTENCE_AUDIO_VOICE = "ja-JP-NanamiNeural"
+VOCAB_CLOZE_MEDIA_SUBDIR = "media/vocab_cloze"
 SECONDS_PER_DAY = 86400
 REVIEW_STATS_BATCH_SIZE = 100
 READING_KEYWORD_MIN_USES = 5
@@ -123,6 +144,9 @@ READING_MNEMONIC_WORD_BEFORE_KANA_RE = re.compile(
     r"([a-z][a-z'-]*)\s*[\(（]([ぁ-んー]+)[\)）]",
     re.IGNORECASE,
 )
+WK_PAREN_READING_RE = re.compile(
+    r"([\u4e00-\u9fff々〆ヵヶ]+)[（(]([ぁ-んーゔゕゖ]+)[）)]"
+)
 
 # Keep stable after first import.
 DECK_IDS = {
@@ -137,6 +161,7 @@ DECK_IDS = {
     "conjugations": 2059400119,
     "verb-types": 2059400120,
     "adjective-types": 2059400121,
+    "vocab-cloze": 2059400122,
 }
 
 MODEL_IDS = {
@@ -149,6 +174,7 @@ MODEL_IDS = {
     "phonetic_drill": 1865429018,
     "conjugation": 1865429019,
     "word_class": 1865429020,
+    "vocab_cloze": 1865429021,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -163,6 +189,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "phonetic_drill": "v4",
     "conjugation": "v2",
     "word_class": "v1",
+    "vocab_cloze": "v3",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -178,6 +205,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "phonetic_drill": 6,
     "conjugation": 7,
     "word_class": 8,
+    "vocab_cloze": 9,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -194,6 +222,7 @@ NOTE_TYPE_NAMES = {
     "phonetic_drill": "WK Update-Safe Phonetic Drill",
     "conjugation": "WK Update-Safe Conjugation",
     "word_class": "WK Update-Safe Word Class",
+    "vocab_cloze": "WK Update-Safe Vocab Cloze",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -225,6 +254,7 @@ RUN_HISTORY_COLUMNS = [
     "conjugation_drills",
     "verb_type_cards",
     "adjective_type_cards",
+    "vocab_cloze",
     "pitch_entries",
     "pitch_leeches",
     "bundled_in_wk_all",
@@ -275,6 +305,12 @@ FILTERED_DECK_DEFINITIONS = [
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
+    {
+        "name": "WK::Vocab Context",
+        "search": 'deck:"WaniKani Vocabulary Context"',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
 ]
 
 DECK_NAMES = {
@@ -289,6 +325,7 @@ DECK_NAMES = {
     "conjugations": "WaniKani Conjugation Practice",
     "verb-types": "WaniKani Verb Type Practice",
     "adjective-types": "WaniKani Adjective Type Practice",
+    "vocab-cloze": "WaniKani Vocabulary Context",
 }
 
 PAIR_RULES = [
@@ -563,35 +600,122 @@ def wk_headers() -> dict:
     token = os.environ.get("WANIKANI_API_TOKEN")
     if not token:
         raise RuntimeError("Set WANIKANI_API_TOKEN first.")
-    return {"Authorization": f"Bearer {token}", "Wanikani-Revision": WK_REVISION}
+    return {
+        "Authorization": f"Bearer {token.strip()}",
+        "Wanikani-Revision": WK_REVISION,
+        "Accept": "application/json",
+        "User-Agent": f"wk-decks/{VERSION} (+https://www.wanikani.com; personal-deck-generator)",
+    }
 
 
-def wk_get_resource(resource: str) -> dict:
-    response = requests.get(f"{WK_API_BASE}/{resource}", headers=wk_headers(), timeout=45)
-    if response.status_code == 429:
-        retry_after = int(response.headers.get("Retry-After", "5"))
-        print(f"Rate limited by WaniKani. Waiting {retry_after}s...")
-        time.sleep(retry_after)
-        return wk_get_resource(resource)
-    response.raise_for_status()
-    return response.json()
+def wk_is_cloudflare_block(response: requests.Response) -> bool:
+    if response.status_code not in (403, 503):
+        return False
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if "application/json" in content_type:
+        return False
+    snippet = (response.text or "")[:500].lower()
+    return (
+        "just a moment" in snippet
+        or "cloudflare" in snippet
+        or snippet.lstrip().startswith("<!doctype html")
+    )
 
 
-def wk_get_all(collection: str, params: Optional[dict] = None) -> List[dict]:
-    url = f"{WK_API_BASE}/{collection}"
-    out: List[dict] = []
-    while url:
+def wk_warn_use_cached_api_data(collection: str, response: requests.Response, cached_count: int) -> None:
+    if wk_is_cloudflare_block(response):
+        reason = "Cloudflare blocked the WaniKani API request"
+    else:
+        reason = f"WaniKani returned {response.status_code} for {collection}"
+    print(f"Warning: {reason}; using cached {cached_count} items.", file=sys.stderr)
+    print(
+        "  Try again in a few minutes. Use --refresh-cache when the API is reachable.",
+        file=sys.stderr,
+    )
+
+
+def wk_http_get(
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    context: str = "WaniKani API",
+) -> requests.Response:
+    response: Optional[requests.Response] = None
+    for attempt in range(WK_CLOUDFLARE_MAX_RETRIES + 1):
         response = requests.get(url, headers=wk_headers(), params=params, timeout=45)
         if response.status_code == 429:
             retry_after = int(response.headers.get("Retry-After", "5"))
             print(f"Rate limited by WaniKani. Waiting {retry_after}s...")
             time.sleep(retry_after)
             continue
-        response.raise_for_status()
+        if wk_is_cloudflare_block(response) and attempt < WK_CLOUDFLARE_MAX_RETRIES:
+            wait = WK_CLOUDFLARE_RETRY_WAIT_SECONDS * (attempt + 1)
+            print(f"Cloudflare challenge on {context}; retrying in {wait}s...")
+            time.sleep(wait)
+            continue
+        return response
+    assert response is not None
+    return response
+
+
+def wk_get_all_with_cache_fallback(
+    collection: str,
+    params: Optional[dict],
+    cached_items: Optional[Sequence[dict]],
+) -> Tuple[List[dict], bool]:
+    """Return (items, used_cache). used_cache is True when cached_items were returned."""
+    try:
+        return wk_get_all(collection, params=params), False
+    except requests.HTTPError as exc:
+        if (
+            cached_items is not None
+            and exc.response is not None
+            and exc.response.status_code == 403
+        ):
+            wk_warn_use_cached_api_data(collection, exc.response, len(cached_items))
+            return list(cached_items), True
+        raise
+
+
+def wk_get_resource(resource: str) -> dict:
+    response = wk_http_get(f"{WK_API_BASE}/{resource}", context=resource)
+    wk_raise_for_status(response, context=resource)
+    return response.json()
+
+
+def wk_response_error_detail(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+        for key in ("error", "message", "code"):
+            value = payload.get(key)
+            if value:
+                return str(value)
+    except ValueError:
+        pass
+    text = (response.text or "").strip()
+    return text[:240] if text else response.reason or "Unknown error"
+
+
+def wk_raise_for_status(response: requests.Response, *, context: str) -> None:
+    if response.ok:
+        return
+    detail = wk_response_error_detail(response)
+    message = f"{response.status_code} {response.reason} for {context}: {detail}"
+    raise requests.HTTPError(message, response=response)
+
+
+def wk_get_all(collection: str, params: Optional[dict] = None) -> List[dict]:
+    url = f"{WK_API_BASE}/{collection}"
+    out: List[dict] = []
+    page = 1
+    while url:
+        response = wk_http_get(url, params=params, context=f"{collection} (page {page})")
+        wk_raise_for_status(response, context=f"{collection} (page {page})")
         payload = response.json()
         out.extend(payload.get("data", []))
         url = payload.get("pages", {}).get("next_url")
         params = None
+        page += 1
     return out
 
 
@@ -633,7 +757,15 @@ def get_cached_user(refresh: bool = False) -> dict:
         print(f"Using cached user: {path}")
         return cached
     print("Downloading WaniKani user...")
-    payload = wk_get_resource("user")
+    try:
+        payload = wk_get_resource("user")
+    except requests.HTTPError as exc:
+        if refresh and path.exists() and exc.response is not None and exc.response.status_code == 403:
+            with path.open("r", encoding="utf-8") as f:
+                cached = json.load(f)
+            wk_warn_use_cached_api_data("user", exc.response, 1)
+            return cached
+        raise
     user = payload["data"]
     save_json_cache(path, user)
     print(f"Saved user cache: {path}")
@@ -649,10 +781,13 @@ def get_cached_collection(
 ) -> List[dict]:
     path = cache_path(collection, params_key)
     envelope, is_stale = load_cache_envelope(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
+    cached_items = envelope["items"] if envelope else load_cache_items_only(collection, params_key)
 
     if refresh or envelope is None:
         print(f"Downloading WaniKani {collection}...")
-        items = wk_get_all(collection, params=params)
+        items, used_cache = wk_get_all_with_cache_fallback(collection, params, cached_items)
+        if used_cache:
+            return items
         save_cache_envelope(path, items)
         print(f"Saved {collection} cache: {path} ({len(items)} items)")
         return items
@@ -661,7 +796,13 @@ def get_cached_collection(
         print(f"Syncing {collection} since {envelope['synced_at']}...")
         sync_params = dict(params or {})
         sync_params["updated_after"] = envelope["synced_at"]
-        delta = wk_get_all(collection, params=sync_params)
+        delta, used_cache = wk_get_all_with_cache_fallback(
+            collection,
+            sync_params,
+            envelope["items"],
+        )
+        if used_cache:
+            return delta
         items = merge_records(envelope["items"], delta)
         save_cache_envelope(path, items)
         if delta:
@@ -675,7 +816,9 @@ def get_cached_collection(
         return envelope["items"]
 
     print(f"Downloading WaniKani {collection}...")
-    items = wk_get_all(collection, params=params)
+    items, used_cache = wk_get_all_with_cache_fallback(collection, params, envelope["items"])
+    if used_cache:
+        return items
     save_cache_envelope(path, items)
     print(f"Saved {collection} cache: {path} ({len(items)} items)")
     return items
@@ -695,23 +838,46 @@ def fetch_review_statistics(
     subject_ids: Sequence[int],
     *,
     updated_after: Optional[str] = None,
-) -> List[dict]:
+    cached_items: Optional[Sequence[dict]] = None,
+) -> Tuple[List[dict], bool]:
     if updated_after:
-        return wk_get_all(
+        return wk_get_all_with_cache_fallback(
             "review_statistics",
-            params={
+            {
                 "subject_types": "kanji,vocabulary",
                 "updated_after": updated_after,
             },
+            cached_items,
         )
 
     if not subject_ids:
-        return wk_get_all(
+        return wk_get_all_with_cache_fallback(
             "review_statistics",
-            params={"subject_types": "kanji,vocabulary"},
+            {"subject_types": "kanji,vocabulary"},
+            cached_items,
         )
 
-    out: List[dict] = []
+    if cached_items is not None:
+        try:
+            out: List[dict] = []
+            for batch in batched(list(subject_ids), REVIEW_STATS_BATCH_SIZE):
+                out.extend(
+                    wk_get_all(
+                        "review_statistics",
+                        params={
+                            "subject_ids": ",".join(str(subject_id) for subject_id in batch),
+                            "subject_types": "kanji,vocabulary",
+                        },
+                    )
+                )
+            return merge_records([], out), False
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 403:
+                wk_warn_use_cached_api_data("review_statistics", exc.response, len(cached_items))
+                return list(cached_items), True
+            raise
+
+    out = []
     for batch in batched(list(subject_ids), REVIEW_STATS_BATCH_SIZE):
         out.extend(
             wk_get_all(
@@ -722,7 +888,7 @@ def fetch_review_statistics(
                 },
             )
         )
-    return merge_records([], out)
+    return merge_records([], out), False
 
 
 def get_cached_review_statistics(
@@ -736,14 +902,23 @@ def get_cached_review_statistics(
 
     if refresh or envelope is None:
         print("Downloading WaniKani review_statistics...")
-        items = fetch_review_statistics(subject_ids)
+        cached_items = load_cache_items_only("review_statistics", params_key) if refresh else None
+        items, used_cache = fetch_review_statistics(subject_ids, cached_items=cached_items)
+        if used_cache:
+            return items
         save_cache_envelope(path, items)
         print(f"Saved review_statistics cache: {path} ({len(items)} items)")
         return items
 
     if envelope.get("synced_at"):
         print(f"Syncing review_statistics since {envelope['synced_at']}...")
-        delta = fetch_review_statistics(subject_ids, updated_after=envelope["synced_at"])
+        delta, used_cache = fetch_review_statistics(
+            subject_ids,
+            updated_after=envelope["synced_at"],
+            cached_items=envelope["items"],
+        )
+        if used_cache:
+            return delta
         items = merge_records(envelope["items"], delta)
         save_cache_envelope(path, items)
         if delta:
@@ -757,7 +932,9 @@ def get_cached_review_statistics(
         return envelope["items"]
 
     print("Downloading WaniKani review_statistics...")
-    items = fetch_review_statistics(subject_ids)
+    items, used_cache = fetch_review_statistics(subject_ids, cached_items=envelope["items"])
+    if used_cache:
+        return items
     save_cache_envelope(path, items)
     print(f"Saved review_statistics cache: {path} ({len(items)} items)")
     return items
@@ -800,12 +977,20 @@ def package_write_timestamp(models: Iterable[genanki.Model]) -> float:
     return max(epochs) + 1.0
 
 
-def write_apkg(deck: genanki.Deck, path: Path) -> None:
+def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence[str]] = None) -> None:
     models = list(deck.models.values())
-    genanki.Package(deck).write_to_file(str(path), timestamp=package_write_timestamp(models))
+    package = genanki.Package(deck)
+    if media_files:
+        package.media_files = list(media_files)
+    package.write_to_file(str(path), timestamp=package_write_timestamp(models))
 
 
-def write_bundled_apkg(decks: Sequence[genanki.Deck], path: Path) -> None:
+def write_bundled_apkg(
+    decks: Sequence[genanki.Deck],
+    path: Path,
+    *,
+    media_files: Optional[Sequence[str]] = None,
+) -> None:
     if not decks:
         return
     all_models: List[genanki.Model] = []
@@ -813,6 +998,8 @@ def write_bundled_apkg(decks: Sequence[genanki.Deck], path: Path) -> None:
         all_models.extend(deck.models.values())
     package = genanki.Package(decks[0])
     package.decks = list(decks)
+    if media_files:
+        package.media_files = list(media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
 
 
@@ -1268,6 +1455,168 @@ def context_sentences_html(subject: dict) -> str:
         if ja:
             parts.append(f'<div class="context"><div class="jp">{ja}</div><div class="meaning">{en}</div></div>')
     return "".join(parts)
+
+
+def vocab_cloze_blank_targets(vocab: dict) -> List[str]:
+    """Return expression/reading strings to match in a sentence, longest first."""
+    data = vocab["data"]
+    chars = (data.get("characters") or "").strip()
+    targets: List[str] = []
+    if chars:
+        targets.append(chars)
+        if chars.endswith("する") and len(chars) > 2:
+            targets.append(chars[:-2])
+    reading = first_reading(vocab)
+    if reading:
+        targets.append(reading)
+    deduped = sorted({target for target in targets if target}, key=len, reverse=True)
+    return deduped
+
+
+def blank_target_in_sentence(sentence: str, targets: Sequence[str]) -> Optional[Tuple[str, str]]:
+    """Replace the first matching target with a blank. Returns (cloze, full) or None."""
+    plain = strip_html(sentence)
+    if not plain:
+        return None
+    for target in targets:
+        idx = plain.find(target)
+        if idx >= 0:
+            cloze = plain[:idx] + CLOZE_BLANK_DISPLAY + plain[idx + len(target):]
+            return cloze, plain
+    return None
+
+
+def select_vocab_cloze_sentence(vocab: dict) -> Optional[Tuple[dict, str, str]]:
+    """Pick the first WK context sentence where the vocab can be blanked."""
+    if vocab.get("object") != "vocabulary":
+        return None
+    targets = vocab_cloze_blank_targets(vocab)
+    if not targets:
+        return None
+    for sentence in vocab["data"].get("context_sentences") or []:
+        blanked = blank_target_in_sentence(sentence.get("ja") or "", targets)
+        if blanked:
+            cloze, full = blanked
+            return sentence, cloze, full
+    return None
+
+
+class VocabClozeItem(NamedTuple):
+    vocab: dict
+    cloze_sentence: str
+    full_sentence: str
+    sentence_en: str
+    source_ja: str
+
+
+def collect_vocab_cloze_items(
+    vocab_items: Sequence[dict],
+    assignment_index: Dict[int, dict],
+    *,
+    min_srs: int,
+) -> List[VocabClozeItem]:
+    items: List[VocabClozeItem] = []
+    for vocab in sorted(
+        vocab_items,
+        key=lambda item: (item["data"].get("level", 999), item["data"].get("characters") or ""),
+    ):
+        if srs_stage(vocab, assignment_index) < min_srs:
+            continue
+        selected = select_vocab_cloze_sentence(vocab)
+        if not selected:
+            continue
+        sentence, cloze, full = selected
+        items.append(
+            VocabClozeItem(
+                vocab=vocab,
+                cloze_sentence=cloze,
+                full_sentence=full,
+                sentence_en=strip_html(sentence.get("en")),
+                source_ja=sentence.get("ja") or "",
+            )
+        )
+    return items
+
+
+def apply_wk_paren_readings(text: str) -> str:
+    """Replace WK-style 漢字（かんじ） hints with かんじ for TTS."""
+    return WK_PAREN_READING_RE.sub(lambda match: match.group(2), text)
+
+
+def prepare_sentence_for_tts(plain_sentence: str, vocab: dict, *, source_ja: str = "") -> str:
+    """Build kana-biased sentence text for TTS; card display keeps kanji."""
+    base = strip_html(source_ja) if source_ja else plain_sentence
+    text = apply_wk_paren_readings(base)
+    if text == base:
+        text = apply_wk_paren_readings(plain_sentence)
+    expr = (vocab["data"].get("characters") or "").strip()
+    reading = first_reading(vocab)
+    if expr and reading:
+        for target in vocab_cloze_blank_targets(vocab):
+            if target in text:
+                text = text.replace(target, reading, 1)
+                break
+    return text
+
+
+def sentence_audio_cache_key(text: str, voice: str) -> str:
+    raw = f"{voice}\0{text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def sentence_audio_cache_path(text: str, voice: str) -> Path:
+    return SENTENCE_AUDIO_CACHE_DIR / f"{sentence_audio_cache_key(text, voice)}.mp3"
+
+
+def vocab_cloze_audio_basename(vocab_id: int) -> str:
+    return f"wk_vocab_cloze_{vocab_id}.mp3"
+
+
+def require_edge_tts():
+    try:
+        import edge_tts  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            "edge-tts is required for sentence audio (on by default). "
+            "Install it: pip install edge-tts — or pass --no-sentence-audio."
+        ) from exc
+
+
+async def _write_edge_tts_mp3(text: str, voice: str, path: Path) -> None:
+    import edge_tts
+
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(str(path))
+
+
+def generate_sentence_audio_cache(text: str, voice: str, cache_path: Path) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    asyncio.run(_write_edge_tts_mp3(text, voice, cache_path))
+
+
+def ensure_sentence_audio_file(
+    text: str,
+    voice: str,
+    dest_path: Path,
+    *,
+    refresh: bool = False,
+) -> Tuple[bool, bool]:
+    """Return (success, was_cached). was_cached is True when TTS was skipped."""
+    plain = strip_html(text).strip()
+    if not plain:
+        return False, False
+    cache_path = sentence_audio_cache_path(plain, voice)
+    try:
+        was_cached = cache_path.is_file() and not refresh
+        if not was_cached:
+            generate_sentence_audio_cache(plain, voice, cache_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cache_path, dest_path)
+        ok = dest_path.is_file() and dest_path.stat().st_size > 0
+        return ok, was_cached and ok
+    except Exception as exc:
+        print(f"  Warning: sentence audio failed ({plain[:40]}…): {exc}", file=sys.stderr)
+        return False, False
 
 
 def meaning_synonyms(subject: dict, study_index: Dict[int, dict]) -> List[str]:
@@ -2822,6 +3171,61 @@ def make_word_class_model() -> WkModel:
     )
 
 
+def make_vocab_cloze_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["vocab_cloze"],
+        NOTE_TYPE_NAMES["vocab_cloze"],
+        template_key="vocab_cloze",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "ClozeSentence"},
+            {"name": "Hint"},
+            {"name": "Expression"},
+            {"name": "Reading"},
+            {"name": "Meaning"},
+            {"name": "FullSentence"},
+            {"name": "SentenceEnglish"},
+            {"name": "SentenceAudio"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Reading cloze",
+                "qfmt": """
+                {{#SentenceAudio}}<div class="sentence-audio">{{SentenceAudio}}</div>{{/SentenceAudio}}
+                <div class="prompt">Type the missing word</div>
+                <div class="jp cloze">{{ClozeSentence}}</div>
+                <div class="meaning hint">{{Hint}}</div>
+                <div class="type-answer">{{type:Expression}}</div>
+                <div class="meta">{{Meta}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="reading answer">{{Reading}}</div>
+                <div class="meaning answer">{{Meaning}}</div>
+                <div class="context">
+                  <div class="jp">{{FullSentence}}</div>
+                  <div class="meaning">{{SentenceEnglish}}</div>
+                </div>
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+        ],
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.cloze { font-size: 34px; line-height: 1.55; }
+.hint { font-size: 17px; margin-top: 10px; color: #bbb; font-style: italic; }
+.type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
+.jp.answer { font-size: 40px; }
+.sentence-audio { margin-bottom: 12px; }
+""",
+            "vocab_cloze",
+        ),
+    )
+
+
 def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
     max_level = min(args.max_level, 60)
     return [
@@ -3806,6 +4210,91 @@ def build_adjective_type_deck(vocab_items: Sequence[dict], output_dir: Path) -> 
     return build_word_class_deck("adjective-types", vocab_items, output_dir, drill_kind="adjective")
 
 
+def build_vocab_cloze_deck(
+    cloze_items: Sequence[VocabClozeItem],
+    assignment_index: Dict[int, dict],
+    output_dir: Path,
+    *,
+    sentence_audio: bool = True,
+    sentence_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    refresh_sentence_audio: bool = False,
+) -> Tuple[Path, genanki.Deck, List[str]]:
+    deck = genanki.Deck(DECK_IDS["vocab-cloze"], DECK_NAMES["vocab-cloze"])
+    model = make_vocab_cloze_model()
+    template_label = MODEL_TEMPLATE_VERSIONS["vocab_cloze"]
+    media_dir = output_dir / VOCAB_CLOZE_MEDIA_SUBDIR
+    media_files: List[str] = []
+    audio_ok = 0
+    audio_cached = 0
+    audio_new = 0
+    if sentence_audio:
+        require_edge_tts()
+        print(f"Sentence audio (voice={sentence_audio_voice}, cache={SENTENCE_AUDIO_CACHE_DIR})...")
+    for item in cloze_items:
+        vocab = item.vocab
+        data = vocab["data"]
+        expr = data.get("characters") or ""
+        reading = first_reading(vocab)
+        meaning = "; ".join(primary_meanings(vocab))
+        level = data.get("level", "?")
+        srs = srs_stage(vocab, assignment_index)
+        guid = stable_guid("vocab-cloze", vocab["id"])
+        meta = f"WK L{level} · SRS {srs} · template {template_label}"
+        sentence_audio_field = ""
+        if sentence_audio:
+            basename = vocab_cloze_audio_basename(vocab["id"])
+            dest = media_dir / basename
+            tts_text = prepare_sentence_for_tts(
+                item.full_sentence,
+                item.vocab,
+                source_ja=item.source_ja,
+            )
+            ok, was_cached = ensure_sentence_audio_file(
+                tts_text,
+                sentence_audio_voice,
+                dest,
+                refresh=refresh_sentence_audio,
+            )
+            if ok:
+                sentence_audio_field = f"[sound:{basename}]"
+                media_files.append(str(dest.resolve()))
+                audio_ok += 1
+                if was_cached:
+                    audio_cached += 1
+                else:
+                    audio_new += 1
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(item.cloze_sentence),
+                html.escape(meaning),
+                html.escape(expr),
+                html.escape(reading),
+                html.escape(meaning),
+                html.escape(item.full_sentence),
+                html.escape(item.sentence_en),
+                sentence_audio_field,
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                "vocab-cloze",
+                f"wk-level-{level}",
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
+    if sentence_audio:
+        print(
+            f"Sentence audio: {audio_ok}/{len(cloze_items)} cards "
+            f"({audio_new} new, {audio_cached} cached)"
+        )
+    out = output_dir / "wk_vocab_cloze.apkg"
+    write_apkg(deck, out, media_files=media_files or None)
+    return out, deck, media_files
+
+
 def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, str], dict]) -> int:
     return sum(
         1
@@ -3829,6 +4318,7 @@ def wanted_decks(args: argparse.Namespace) -> Set[str]:
         "conjugations",
         "verb-types",
         "adjective-types",
+        "vocab-cloze",
     }
 
 
@@ -3845,6 +4335,7 @@ def deck_names_for_run(
     conjugation_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
+    vocab_cloze_items: Sequence[VocabClozeItem],
     pitch_index: Dict[Tuple[str, str], dict],
 ) -> List[str]:
     names: List[str] = []
@@ -3868,6 +4359,8 @@ def deck_names_for_run(
         names.append(DECK_NAMES["verb-types"])
     if "adjective-types" in wanted and adjective_type_items:
         names.append(DECK_NAMES["adjective-types"])
+    if "vocab-cloze" in wanted and vocab_cloze_items:
+        names.append(DECK_NAMES["vocab-cloze"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -3893,6 +4386,7 @@ def build_run_history_row(
     conjugation_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
+    vocab_cloze_items: Sequence[VocabClozeItem],
     pitch_index: Dict[Tuple[str, str], dict],
     bundled_deck_names: Sequence[str],
     bundled_in_wk_all: bool,
@@ -3924,6 +4418,7 @@ def build_run_history_row(
         "conjugation_drills": len(conjugation_drills),
         "verb_type_cards": len(verb_type_items),
         "adjective_type_cards": len(adjective_type_items),
+        "vocab_cloze": len(vocab_cloze_items),
         "pitch_entries": len(pitch_index),
         "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
         "bundled_in_wk_all": int(bundled_in_wk_all),
@@ -4097,6 +4592,7 @@ def print_preview_report(
     conjugation_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
+    vocab_cloze_items: Sequence[VocabClozeItem],
     radical_items: Sequence[dict],
     current_level: int,
     next_level: int,
@@ -4111,6 +4607,7 @@ def print_preview_report(
         "conjugations",
         "verb-types",
         "adjective-types",
+        "vocab-cloze",
     }
 
     if "leeches" in wanted:
@@ -4193,6 +4690,14 @@ def print_preview_report(
                 if adjective_drill_class(v)
             ],
         )
+    if "vocab-cloze" in wanted:
+        preview_deck_section(
+            DECK_NAMES["vocab-cloze"],
+            [
+                f"{item.vocab['data'].get('characters') or '?'} · {item.cloze_sentence}"
+                for item in vocab_cloze_items
+            ],
+        )
     if "radicals" in wanted:
         selected = [
             r for r in radical_items
@@ -4208,6 +4713,11 @@ def print_preview_report(
 
     print("\nLeech filters:")
     print(f"  incorrect_min={args.leech_incorrect_min}, streak_max={args.leech_streak_max}, score_min={args.leech_score_min}")
+    print(f"\nVocab cloze filter: min_srs={args.vocab_cloze_min_srs} (Master+ when 7, Guru+ when 5)")
+    if args.sentence_audio:
+        print(f"Sentence audio: on (voice={args.sentence_audio_voice})")
+    else:
+        print("Sentence audio: off (--no-sentence-audio)")
     print("\nRe-run without --dry-run to write decks.")
 
 
@@ -4217,7 +4727,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
         "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
-        "conjugations", "verb-types", "adjective-types", "all",
+        "conjugations", "verb-types", "adjective-types", "vocab-cloze", "all",
     ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
@@ -4232,6 +4742,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--only-burned", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Preview generated deck contents without writing .apkg files.")
     parser.add_argument("--no-bundle", action="store_true", help="Do not write the combined out/wk_all.apkg file.")
+    parser.add_argument(
+        "--vocab-cloze-min-srs",
+        type=int,
+        default=VOCAB_CLOZE_DEFAULT_MIN_SRS,
+        help="Minimum WK SRS stage for vocabulary context cloze cards (7 = Master+, 5 = Guru+).",
+    )
+    parser.add_argument(
+        "--sentence-audio",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Generate sentence audio for vocab-cloze cards via edge-tts (default: on).",
+    )
+    parser.add_argument(
+        "--sentence-audio-voice",
+        default=DEFAULT_SENTENCE_AUDIO_VOICE,
+        help=f"edge-tts voice for sentence audio (default: {DEFAULT_SENTENCE_AUDIO_VOICE}).",
+    )
+    parser.add_argument(
+        "--refresh-sentence-audio",
+        action="store_true",
+        help="Re-download sentence audio instead of using the local TTS cache.",
+    )
     parser.add_argument("--leech-incorrect-min", type=int, default=3)
     parser.add_argument("--leech-streak-max", type=int, default=5)
     parser.add_argument("--leech-score-min", type=float, default=1.0, help="Minimum composite leech score after incorrect/streak filters.")
@@ -4342,6 +4874,11 @@ def main() -> None:
     conjugation_drills = collect_conjugation_drills(vocab_items, args)
     verb_type_items = collect_verb_type_items(vocab_items, args)
     adjective_type_items = collect_adjective_type_items(vocab_items, args)
+    vocab_cloze_items = collect_vocab_cloze_items(
+        vocab_items,
+        indexes["assignments"],
+        min_srs=args.vocab_cloze_min_srs,
+    )
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
@@ -4355,6 +4892,7 @@ def main() -> None:
     print(f"Conjugation drills: {len(conjugation_drills)}")
     print(f"Verb type cards: {len(verb_type_items)}")
     print(f"Adjective type cards: {len(adjective_type_items)}")
+    print(f"Vocabulary context cloze: {len(vocab_cloze_items)} (min SRS {args.vocab_cloze_min_srs})")
     print(f"Pitch entries loaded: {len(pitch_index)}")
     wanted = wanted_decks(args)
     if args.dry_run:
@@ -4370,6 +4908,7 @@ def main() -> None:
             conjugation_drills=conjugation_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
+            vocab_cloze_items=vocab_cloze_items,
             pitch_index=pitch_index,
         )
         history_path = append_run_history(
@@ -4393,6 +4932,7 @@ def main() -> None:
                 conjugation_drills=conjugation_drills,
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
+                vocab_cloze_items=vocab_cloze_items,
                 pitch_index=pitch_index,
                 bundled_deck_names=would_bundle,
                 bundled_in_wk_all=bool(would_bundle and not args.no_bundle),
@@ -4411,6 +4951,7 @@ def main() -> None:
             conjugation_drills=conjugation_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
+            vocab_cloze_items=vocab_cloze_items,
             radical_items=radical_items,
             current_level=current_level,
             next_level=next_level,
@@ -4420,6 +4961,7 @@ def main() -> None:
         return
     created: List[Path] = []
     built_decks: List[genanki.Deck] = []
+    bundled_media_files: List[str] = []
     if "radicals" in wanted and radical_items:
         path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, current_level, next_level)
         created.append(path)
@@ -4472,6 +5014,18 @@ def main() -> None:
         path, deck = build_adjective_type_deck(adjective_type_items, output_dir)
         created.append(path)
         built_decks.append(deck)
+    if "vocab-cloze" in wanted and vocab_cloze_items:
+        path, deck, media = build_vocab_cloze_deck(
+            vocab_cloze_items,
+            indexes["assignments"],
+            output_dir,
+            sentence_audio=args.sentence_audio,
+            sentence_audio_voice=args.sentence_audio_voice,
+            refresh_sentence_audio=args.refresh_sentence_audio,
+        )
+        created.append(path)
+        built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "pitch-leeches" in wanted and leeches:
         maybe = build_pitch_leeches_deck(leeches, indexes, pitch_index, output_dir)
         if maybe:
@@ -4500,6 +5054,7 @@ def main() -> None:
                 conjugation_drills=conjugation_drills,
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
+                vocab_cloze_items=vocab_cloze_items,
                 pitch_index=pitch_index,
                 bundled_deck_names=[],
                 bundled_in_wk_all=False,
@@ -4511,7 +5066,11 @@ def main() -> None:
     bundle_path: Optional[Path] = None
     if built_decks and not args.no_bundle:
         bundle_path = output_dir / BUNDLE_FILENAME
-        write_bundled_apkg(built_decks, bundle_path)
+        write_bundled_apkg(
+            built_decks,
+            bundle_path,
+            media_files=bundled_media_files or None,
+        )
     settings_path = write_filtered_deck_suggestions(output_dir)
     filtered_json_path = write_filtered_decks_json(output_dir)
     instructions_path = write_import_instructions(output_dir)
@@ -4536,6 +5095,7 @@ def main() -> None:
             conjugation_drills=conjugation_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
+            vocab_cloze_items=vocab_cloze_items,
             pitch_index=pitch_index,
             bundled_deck_names=[deck.name for deck in built_decks],
             bundled_in_wk_all=bool(bundle_path),
