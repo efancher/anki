@@ -114,7 +114,7 @@ class ConjugationIssueDetectionTests(unittest.TestCase):
             max_cards = 100
 
         vocab = mock_vocab_for_conjugation("食べる", "たべる", ["ichidan verb"])
-        drills = collect_conjugation_drills([vocab], Args())
+        drills = collect_conjugation_drills([vocab], {}, Args(), min_srs=0)
         self.assertGreater(len(drills), 0)
         for drill in drills:
             self.assertNotEqual((drill.dict_expr, drill.dict_reading), (drill.conj_expr, drill.conj_reading))

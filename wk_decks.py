@@ -13,8 +13,10 @@ Decks:
   - radicals: current-level and next-level radicals
   - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
   - kanji-radicals: kanji whose radical components are unlocked in WaniKani
-  - conjugations: common verb and adjective conjugation drills for learned WK vocabulary
-  - conjugations-reverse: conjugated verb on front, dictionary form on back
+  - conjugations-verbs: verb conjugation drills (type-in answer, Master+ by default)
+  - conjugations-adjectives: adjective conjugation drills (type-in answer, Master+ by default)
+  - conjugations: alias for both conjugations-verbs and conjugations-adjectives
+  - conjugations-reverse: conjugated verb on front, dictionary form on back (type-in)
   - verb-types: recall godan / ichidan / irregular verb class for WK verbs
   - adjective-types: recall い-adjective vs な-adjective for WK adjectives
   - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
@@ -44,7 +46,11 @@ Recommended weekly import (one file, all decks):
 
 Vocabulary context cloze (reading production in WK sentences, Master+ default):
   python wk_decks.py --deck vocab-cloze --only-started
-  # uses --vocab-cloze-min-srs 7 by default; enable FSRS on the deck in Anki
+  # uses --vocab-cloze-min-srs 7 by default; run Tools → WK Apply Deck Options after import
+
+Conjugation drills (type-in, Master+ default):
+  python wk_decks.py --deck conjugations-verbs --only-started
+  python wk_decks.py --deck conjugations-adjectives --only-started
 
 With sentence audio (edge-tts, on by default; cached in .wk_cache/sentence_audio/):
   python wk_decks.py --deck vocab-cloze --only-started
@@ -58,8 +64,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.21.0"
-BUILD_DATE = "2026-06-24"
+VERSION = "2.22.0"
+BUILD_DATE = "2026-06-11"
 
 import warnings
 
@@ -77,7 +83,9 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import sys
+import tempfile
 import time
 import zipfile
 from collections import Counter, defaultdict
@@ -126,6 +134,7 @@ CONTEXT_SENTENCE_LIMIT = 3
 WK_SRS_STAGE_GURU_1 = 5
 WK_SRS_STAGE_MASTER = 7
 VOCAB_CLOZE_DEFAULT_MIN_SRS = WK_SRS_STAGE_MASTER
+CONJUGATION_DEFAULT_MIN_SRS = WK_SRS_STAGE_MASTER
 CLOZE_BLANK_DISPLAY = "＿＿＿"
 SENTENCE_AUDIO_CACHE_DIR = CACHE_DIR / "sentence_audio"
 DEFAULT_SENTENCE_AUDIO_VOICE = "ja-JP-NanamiNeural"
@@ -175,11 +184,12 @@ DECK_IDS = {
     "radicals": 2059400116,
     "reading-keywords": 2059400117,
     "kanji-radicals": 2059400118,
-    "conjugations": 2059400119,
+    "conjugations-verbs": 2059400119,
     "verb-types": 2059400120,
     "adjective-types": 2059400121,
     "vocab-cloze": 2059400122,
     "conjugations-reverse": 2059400123,
+    "conjugations-adjectives": 2059400124,
 }
 
 MODEL_IDS = {
@@ -206,10 +216,10 @@ MODEL_TEMPLATE_VERSIONS = {
     "reading_keyword": "v3",
     "kanji_radical": "v1",
     "phonetic_drill": "v4",
-    "conjugation": "v2",
+    "conjugation": "v3",
     "word_class": "v1",
     "vocab_cloze": "v4",
-    "conjugation_reverse": "v2",
+    "conjugation_reverse": "v3",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -250,6 +260,12 @@ NOTE_TYPE_NAMES = {
 BUNDLE_FILENAME = "wk_all.apkg"
 RUN_HISTORY_FILENAME = "wk_run_history.csv"
 FILTERED_DECKS_JSON = "anki_filtered_decks.json"
+DECK_OPTIONS_JSON = "anki_deck_options.json"
+WK_FSRS_PRESET_NAME = "WK FSRS"
+WK_FSRS_DECK_CONFIG_ID = 2059400100
+WK_FSRS_DEFAULT_RETENTION = 0.9
+WK_FSRS_DEFAULT_NEW_PER_DAY = 15
+WK_FSRS_DEFAULT_REVIEWS_PER_DAY = 200
 RUN_HISTORY_COLUMNS = [
     "run_at",
     "generator_version",
@@ -273,7 +289,8 @@ RUN_HISTORY_COLUMNS = [
     "phonetic_families",
     "reading_keywords",
     "kanji_radical_breakdown",
-    "conjugation_drills",
+    "conjugation_verb_drills",
+    "conjugation_adjective_drills",
     "conjugation_reverse_drills",
     "verb_type_cards",
     "adjective_type_cards",
@@ -345,7 +362,8 @@ DECK_NAMES = {
     "radicals": "WaniKani Current and Next Radicals",
     "reading-keywords": "WaniKani Reading Keywords",
     "kanji-radicals": "WaniKani Kanji Radical Breakdown",
-    "conjugations": "WaniKani Conjugation Practice",
+    "conjugations-verbs": "WaniKani Verb Conjugation Practice",
+    "conjugations-adjectives": "WaniKani Adjective Conjugation Practice",
     "conjugations-reverse": "WaniKani Verb Conjugation Reverse",
     "verb-types": "WaniKani Verb Type Practice",
     "adjective-types": "WaniKani Adjective Type Practice",
@@ -1030,14 +1048,6 @@ def merge_package_media_files(
     package.media_files = existing
 
 
-def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence[str]] = None) -> None:
-    models = list(deck.models.values())
-    package = genanki.Package(deck)
-    attach_deck_media(package, [deck])
-    merge_package_media_files(package, media_files)
-    package.write_to_file(str(path), timestamp=package_write_timestamp(models))
-
-
 def write_bundled_apkg(
     decks: Sequence[genanki.Deck],
     path: Path,
@@ -1054,6 +1064,126 @@ def write_bundled_apkg(
     attach_deck_media(package, decks)
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
+    patch_apkg_deck_options(path)
+
+
+# Default FSRS-5 weights shipped with Anki 23.10+ (used when preset is created on import).
+WK_FSRS_DEFAULT_WEIGHTS: Tuple[float, ...] = (
+    0.40255,
+    1.18385,
+    3.173,
+    15.69105,
+    7.1949,
+    0.5345,
+    1.4604,
+    0.0046,
+    1.54575,
+    0.1192,
+    1.01925,
+    1.9395,
+    0.11,
+    0.29605,
+    2.2698,
+    0.2315,
+    2.9898,
+    0.51655,
+    0.662,
+)
+
+
+def wk_fsrs_dconf_entry() -> dict:
+    return {
+        "autoplay": True,
+        "id": WK_FSRS_DECK_CONFIG_ID,
+        "lapse": {
+            "delays": [10],
+            "leechAction": 1,
+            "leechFails": 8,
+            "minInt": 1,
+            "mult": 0,
+        },
+        "maxTaken": 60,
+        "mod": 0,
+        "name": WK_FSRS_PRESET_NAME,
+        "new": {
+            "bury": True,
+            "delays": [1, 10],
+            "initialFactor": 2500,
+            "ints": [1, 4, 0],
+            "order": 1,
+            "perDay": WK_FSRS_DEFAULT_NEW_PER_DAY,
+            "separate": True,
+        },
+        "replayq": True,
+        "rev": {
+            "bury": True,
+            "ease4": 1.3,
+            "fuzz": 0.05,
+            "ivlFct": 1,
+            "maxIvl": 36500,
+            "minSpace": 1,
+            "perDay": WK_FSRS_DEFAULT_REVIEWS_PER_DAY,
+        },
+        "timer": 0,
+        "usn": 0,
+        "desiredRetention": WK_FSRS_DEFAULT_RETENTION,
+        "w": list(WK_FSRS_DEFAULT_WEIGHTS),
+    }
+
+
+def patch_apkg_deck_options(apkg_path: Path) -> None:
+    """Assign every deck in an .apkg to the WK FSRS preset (for Anki import)."""
+    apkg_path = Path(apkg_path)
+    if not apkg_path.exists():
+        return
+
+    with zipfile.ZipFile(apkg_path, "r") as archive:
+        if "collection.anki2" not in archive.namelist():
+            return
+        db_bytes = archive.read("collection.anki2")
+        other_entries = {
+            name: archive.read(name)
+            for name in archive.namelist()
+            if name != "collection.anki2"
+        }
+
+    with tempfile.NamedTemporaryFile(suffix=".anki2", delete=False) as tmp_db:
+        tmp_db.write(db_bytes)
+        tmp_db_path = tmp_db.name
+
+    try:
+        conn = sqlite3.connect(tmp_db_path)
+        decks_str, dconf_str = conn.execute("SELECT decks, dconf FROM col").fetchone()
+        decks = json.loads(decks_str)
+        dconf = json.loads(dconf_str)
+        dconf[str(WK_FSRS_DECK_CONFIG_ID)] = wk_fsrs_dconf_entry()
+        for deck in decks.values():
+            deck["conf"] = WK_FSRS_DECK_CONFIG_ID
+        conn.execute(
+            "UPDATE col SET decks = ?, dconf = ?",
+            (json.dumps(decks), json.dumps(dconf)),
+        )
+        conn.commit()
+        conn.close()
+
+        patched_bytes = Path(tmp_db_path).read_bytes()
+        tmp_apkg = apkg_path.with_suffix(".patching.apkg")
+        with zipfile.ZipFile(tmp_apkg, "w", compression=zipfile.ZIP_DEFLATED) as outzip:
+            outzip.writestr("collection.anki2", patched_bytes)
+            for name, payload in other_entries.items():
+                outzip.writestr(name, payload)
+        tmp_apkg.replace(apkg_path)
+    finally:
+        Path(tmp_db_path).unlink(missing_ok=True)
+
+
+def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence[str]] = None) -> None:
+    models = list(deck.models.values())
+    package = genanki.Package(deck)
+    attach_deck_media(package, [deck])
+    merge_package_media_files(package, media_files)
+    package.write_to_file(str(path), timestamp=package_write_timestamp(models))
+    patch_apkg_deck_options(path)
 
 
 def primary_meanings(subject: dict) -> List[str]:
@@ -2073,6 +2203,11 @@ VERB_CONJUGATION_WORD_CLASSES: Set[str] = {
     "irregular_verb",
 }
 
+ADJECTIVE_CONJUGATION_WORD_CLASSES: Set[str] = {
+    "i_adjective",
+    "na_adjective",
+}
+
 GODAN_POLITE_STEM_SUFFIX = {
     "う": "い",
     "く": "き",
@@ -2504,12 +2639,16 @@ def conjugation_forms_for_class(word_class: str) -> Tuple[Tuple[str, str], ...]:
 
 def collect_conjugation_drills(
     vocab_items: Sequence[dict],
+    assignment_index: Dict[int, dict],
     args: argparse.Namespace,
     *,
+    min_srs: int,
     word_classes: Optional[Set[str]] = None,
 ) -> List[ConjugationDrill]:
     drills: List[ConjugationDrill] = []
     for vocab in sorted(vocab_items, key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or "")):
+        if srs_stage(vocab, assignment_index) < min_srs:
+            continue
         word_class = conjugation_word_class(vocab)
         if not word_class:
             continue
@@ -3219,6 +3358,7 @@ def make_conjugation_model() -> WkModel:
             {"name": "Meaning"},
             {"name": "WordClass"},
             {"name": "ConjExpression"},
+            {"name": "TypeConjExpression"},
             {"name": "ConjReading"},
             {"name": "Meta"},
         ],
@@ -3230,6 +3370,7 @@ def make_conjugation_model() -> WkModel:
                 <div class="jp">{{DictExpression}}</div>
                 <div class="reading">{{DictReading}}</div>
                 <div class="meaning">{{Meaning}}</div>
+                <div class="type-answer">{{type:TypeConjExpression}}</div>
                 """,
                 "afmt": """
                 {{FrontSide}}
@@ -3243,6 +3384,7 @@ def make_conjugation_model() -> WkModel:
         css=versioned_css(
             COMMON_CSS
             + """
+.type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .answer { margin-top: 8px; }
 .jp.answer { font-size: 40px; }
 """,
@@ -3260,6 +3402,7 @@ def make_conjugation_reverse_model() -> WkModel:
             {"name": "GuidKey"},
             {"name": "Prompt"},
             {"name": "DictExpression"},
+            {"name": "TypeDictExpression"},
             {"name": "DictReading"},
             {"name": "Meaning"},
             {"name": "ConjExpression"},
@@ -3272,6 +3415,7 @@ def make_conjugation_reverse_model() -> WkModel:
                 "qfmt": """
                 <div class="prompt">What is the dictionary form?</div>
                 <div class="jp">{{ConjExpression}}</div>
+                <div class="type-answer">{{type:TypeDictExpression}}</div>
                 """,
                 "afmt": """
                 {{FrontSide}}
@@ -3287,6 +3431,7 @@ def make_conjugation_reverse_model() -> WkModel:
         css=versioned_css(
             COMMON_CSS
             + """
+.type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .answer { margin-top: 8px; }
 .jp.answer { font-size: 40px; }
 .form-label { margin-bottom: 8px; font-style: italic; }
@@ -4444,16 +4589,24 @@ def build_kanji_radical_deck(
 
 
 def build_conjugation_deck(
+    deck_key: str,
     drills: Sequence[ConjugationDrill],
     output_dir: Path,
+    *,
+    tag_kind: str,
 ) -> Tuple[Path, genanki.Deck]:
-    deck = genanki.Deck(DECK_IDS["conjugations"], DECK_NAMES["conjugations"])
+    deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_conjugation_model()
     template_label = MODEL_TEMPLATE_VERSIONS["conjugation"]
+    outfile = (
+        "wk_conjugations_verbs.apkg"
+        if deck_key == "conjugations-verbs"
+        else "wk_conjugations_adjectives.apkg"
+    )
     for drill in drills:
         vocab = drill.vocab
         level = vocab["data"].get("level", "?")
-        guid = stable_guid("conjugation", vocab["id"], drill.form_key)
+        guid = stable_guid(tag_kind, vocab["id"], drill.form_key)
         meaning = "; ".join(primary_meanings(vocab))
         class_label = conjugation_class_label(drill.word_class)
         meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
@@ -4467,21 +4620,46 @@ def build_conjugation_deck(
                 html.escape(meaning),
                 html.escape(class_label),
                 html.escape(drill.conj_expr),
+                html.escape(drill.conj_expr),
                 html.escape(drill.conj_reading),
                 html.escape(meta),
             ],
             tags=[
                 "wanikani",
-                "conjugation",
+                tag_kind,
                 drill.word_class.replace("_", "-"),
                 drill.form_key,
             ],
             guid=guid,
         )
         deck.add_note(note)
-    out = output_dir / "wk_conjugations.apkg"
+    out = output_dir / outfile
     write_apkg(deck, out)
     return out, deck
+
+
+def build_conjugation_verb_deck(
+    drills: Sequence[ConjugationDrill],
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
+    return build_conjugation_deck(
+        "conjugations-verbs",
+        drills,
+        output_dir,
+        tag_kind="conjugation-verb",
+    )
+
+
+def build_conjugation_adjective_deck(
+    drills: Sequence[ConjugationDrill],
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
+    return build_conjugation_deck(
+        "conjugations-adjectives",
+        drills,
+        output_dir,
+        tag_kind="conjugation-adjective",
+    )
 
 
 def build_conjugation_reverse_deck(
@@ -4503,6 +4681,7 @@ def build_conjugation_reverse_deck(
             fields=[
                 guid,
                 html.escape(drill.prompt),
+                html.escape(drill.dict_expr),
                 html.escape(drill.dict_expr),
                 html.escape(drill.dict_reading),
                 html.escape(meaning),
@@ -4701,10 +4880,19 @@ def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, st
     )
 
 
+def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
+    normalized = set(wanted)
+    if "conjugations" in normalized:
+        normalized.discard("conjugations")
+        normalized.add("conjugations-verbs")
+        normalized.add("conjugations-adjectives")
+    return normalized
+
+
 def wanted_decks(args: argparse.Namespace) -> Set[str]:
     if args.deck != "all":
-        return {args.deck}
-    return {
+        return normalize_wanted_decks({args.deck})
+    return normalize_wanted_decks({
         "leeches",
         "verb-pairs",
         "confusables",
@@ -4713,12 +4901,13 @@ def wanted_decks(args: argparse.Namespace) -> Set[str]:
         "radicals",
         "reading-keywords",
         "kanji-radicals",
-        "conjugations",
+        "conjugations-verbs",
+        "conjugations-adjectives",
         "conjugations-reverse",
         "verb-types",
         "adjective-types",
         "vocab-cloze",
-    }
+    })
 
 
 def deck_names_for_run(
@@ -4731,7 +4920,8 @@ def deck_names_for_run(
     phonetic_families: Sequence[Tuple[str, str, List[dict]]],
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
-    conjugation_drills: Sequence[ConjugationDrill],
+    conjugation_verb_drills: Sequence[ConjugationDrill],
+    conjugation_adjective_drills: Sequence[ConjugationDrill],
     conjugation_reverse_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
@@ -4753,8 +4943,10 @@ def deck_names_for_run(
         names.append(DECK_NAMES["reading-keywords"])
     if "kanji-radicals" in wanted and kanji_radical_items:
         names.append(DECK_NAMES["kanji-radicals"])
-    if "conjugations" in wanted and conjugation_drills:
-        names.append(DECK_NAMES["conjugations"])
+    if "conjugations-verbs" in wanted and conjugation_verb_drills:
+        names.append(DECK_NAMES["conjugations-verbs"])
+    if "conjugations-adjectives" in wanted and conjugation_adjective_drills:
+        names.append(DECK_NAMES["conjugations-adjectives"])
     if "conjugations-reverse" in wanted and conjugation_reverse_drills:
         names.append(DECK_NAMES["conjugations-reverse"])
     if "verb-types" in wanted and verb_type_items:
@@ -4785,7 +4977,8 @@ def build_run_history_row(
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
-    conjugation_drills: Sequence[ConjugationDrill],
+    conjugation_verb_drills: Sequence[ConjugationDrill],
+    conjugation_adjective_drills: Sequence[ConjugationDrill],
     conjugation_reverse_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
@@ -4818,7 +5011,8 @@ def build_run_history_row(
         "phonetic_families": len(phonetic_families),
         "reading_keywords": len(reading_keywords),
         "kanji_radical_breakdown": len(kanji_radical_items),
-        "conjugation_drills": len(conjugation_drills),
+        "conjugation_verb_drills": len(conjugation_verb_drills),
+        "conjugation_adjective_drills": len(conjugation_adjective_drills),
         "conjugation_reverse_drills": len(conjugation_reverse_drills),
         "verb_type_cards": len(verb_type_items),
         "adjective_type_cards": len(adjective_type_items),
@@ -4883,6 +5077,22 @@ def write_filtered_decks_json(output_dir: Path) -> Path:
     return path
 
 
+def write_deck_options_json(output_dir: Path) -> Path:
+    path = output_dir / DECK_OPTIONS_JSON
+    payload = {
+        "generator_version": VERSION,
+        "preset": {
+            "name": WK_FSRS_PRESET_NAME,
+            "desired_retention": WK_FSRS_DEFAULT_RETENTION,
+            "new_per_day": WK_FSRS_DEFAULT_NEW_PER_DAY,
+            "reviews_per_day": WK_FSRS_DEFAULT_REVIEWS_PER_DAY,
+        },
+        "deck_names": sorted(DECK_NAMES.values()),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 
 def format_template_versions() -> str:
     lines = [f"  {NOTE_TYPE_NAMES[key]}: template {MODEL_TEMPLATE_VERSIONS[key]}" for key in MODEL_TEMPLATE_VERSIONS]
@@ -4934,6 +5144,10 @@ Filtered decks (WK::Daily Priority, etc.) cannot be bundled in .apkg files.
 After importing, run Tools → WK Setup Filtered Decks in Anki using the add-on
 in anki_addon/wk_filtered_decks (reads {FILTERED_DECKS_JSON}).
 
+Deck options: each .apkg embeds the "{WK_FSRS_PRESET_NAME}" preset. After import,
+run Tools → WK Apply Deck Options (anki_addon/wk_deck_options, reads {DECK_OPTIONS_JSON})
+to assign that preset to all WK decks. Enable FSRS globally in Anki if prompted.
+
 If templates still do not update after import:
   1. Tools → Manage Note Types → Cards — confirm CSS starts with WK template comment
   2. Re-import with "Always update" for the note type
@@ -4954,6 +5168,7 @@ def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
     print(f"  Verb pair note type: {NOTE_TYPE_NAMES['pair']} · template {MODEL_TEMPLATE_VERSIONS['pair']}")
     print(f"  Full instructions: out/anki_import_instructions.txt")
     print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
+    print(f"  Deck options: install anki_addon/wk_deck_options, then Tools → WK Apply Deck Options")
 
 
 def subject_summary(subject: dict, review_index: Dict[int, dict]) -> str:
@@ -4993,7 +5208,8 @@ def print_preview_report(
     keisei_phonetic: dict,
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
-    conjugation_drills: Sequence[ConjugationDrill],
+    conjugation_verb_drills: Sequence[ConjugationDrill],
+    conjugation_adjective_drills: Sequence[ConjugationDrill],
     conjugation_reverse_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
@@ -5007,15 +5223,7 @@ def print_preview_report(
 ) -> None:
     print("\nDRY RUN — no .apkg files will be written")
     print("=" * 60)
-    wanted = {args.deck} if args.deck != "all" else {
-        "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords",         "kanji-radicals",
-        "conjugations",
-        "conjugations-reverse",
-        "verb-types",
-        "adjective-types",
-        "vocab-cloze",
-    }
+    wanted = wanted_decks(args)
 
     if "leeches" in wanted:
         preview_deck_section(
@@ -5069,12 +5277,20 @@ def print_preview_report(
                 for kanji in kanji_radical_items
             ],
         )
-    if "conjugations" in wanted:
+    if "conjugations-verbs" in wanted:
         preview_deck_section(
-            DECK_NAMES["conjugations"],
+            DECK_NAMES["conjugations-verbs"],
             [
                 f"{drill.dict_expr} ({drill.dict_reading}) → {drill.conj_expr} ({drill.conj_reading}) · {drill.prompt}"
-                for drill in conjugation_drills
+                for drill in conjugation_verb_drills
+            ],
+        )
+    if "conjugations-adjectives" in wanted:
+        preview_deck_section(
+            DECK_NAMES["conjugations-adjectives"],
+            [
+                f"{drill.dict_expr} ({drill.dict_reading}) → {drill.conj_expr} ({drill.conj_reading}) · {drill.prompt}"
+                for drill in conjugation_adjective_drills
             ],
         )
     if "conjugations-reverse" in wanted:
@@ -5137,6 +5353,10 @@ def print_preview_report(
     print("\nLeech filters:")
     print(f"  incorrect_min={args.leech_incorrect_min}, streak_max={args.leech_streak_max}, score_min={args.leech_score_min}")
     print(f"\nVocab cloze filter: min_srs={args.vocab_cloze_min_srs} (Master+ when 7, Guru+ when 5)")
+    print(
+        f"Conjugation filter: min_srs={args.conjugation_min_srs} "
+        f"(Master+ when {WK_SRS_STAGE_MASTER}, Guru+ when {WK_SRS_STAGE_GURU_1})"
+    )
     if args.sentence_audio:
         print(f"Sentence audio: on (voice={args.sentence_audio_voice})")
     else:
@@ -5149,8 +5369,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
-        "conjugations", "conjugations-reverse", "verb-types", "adjective-types", "vocab-cloze", "all",
+        "pitch-leeches", "radicals", "reading-keywords",         "kanji-radicals",
+        "conjugations",
+        "conjugations-verbs",
+        "conjugations-adjectives",
+        "conjugations-reverse",
+        "verb-types", "adjective-types", "vocab-cloze", "all",
     ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
@@ -5170,6 +5394,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=VOCAB_CLOZE_DEFAULT_MIN_SRS,
         help="Minimum WK SRS stage for vocabulary context cloze cards (7 = Master+, 5 = Guru+).",
+    )
+    parser.add_argument(
+        "--conjugation-min-srs",
+        type=int,
+        default=CONJUGATION_DEFAULT_MIN_SRS,
+        help="Minimum WK SRS stage for conjugation decks (7 = Master+, 5 = Guru+).",
     )
     parser.add_argument(
         "--sentence-audio",
@@ -5294,10 +5524,25 @@ def main() -> None:
     all_kanji_by_char = kanji_by_char(all_wk_kanji_subjects(subjects, args))
     reading_keywords = build_reading_keyword_catalog(subjects)
     kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
-    conjugation_drills = collect_conjugation_drills(vocab_items, args)
+    conjugation_verb_drills = collect_conjugation_drills(
+        vocab_items,
+        indexes["assignments"],
+        args,
+        min_srs=args.conjugation_min_srs,
+        word_classes=VERB_CONJUGATION_WORD_CLASSES,
+    )
+    conjugation_adjective_drills = collect_conjugation_drills(
+        vocab_items,
+        indexes["assignments"],
+        args,
+        min_srs=args.conjugation_min_srs,
+        word_classes=ADJECTIVE_CONJUGATION_WORD_CLASSES,
+    )
     conjugation_reverse_drills = collect_conjugation_drills(
         vocab_items,
+        indexes["assignments"],
         args,
+        min_srs=args.conjugation_min_srs,
         word_classes=VERB_CONJUGATION_WORD_CLASSES,
     )
     verb_type_items = collect_verb_type_items(vocab_items, args)
@@ -5318,8 +5563,9 @@ def main() -> None:
     print(f"Phonetic families: {len(phonetic_families)} ({phonetic_drill_note_count(phonetic_families)} drill cards)")
     print(f"Reading keywords: {len(reading_keywords)}")
     print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
-    print(f"Conjugation drills: {len(conjugation_drills)}")
-    print(f"Verb conjugation reverse drills: {len(conjugation_reverse_drills)}")
+    print(f"Verb conjugation drills: {len(conjugation_verb_drills)} (min SRS {args.conjugation_min_srs})")
+    print(f"Adjective conjugation drills: {len(conjugation_adjective_drills)} (min SRS {args.conjugation_min_srs})")
+    print(f"Verb conjugation reverse drills: {len(conjugation_reverse_drills)} (min SRS {args.conjugation_min_srs})")
     print(f"Verb type cards: {len(verb_type_items)}")
     print(f"Adjective type cards: {len(adjective_type_items)}")
     print(f"Vocabulary context cloze: {len(vocab_cloze_items)} (min SRS {args.vocab_cloze_min_srs})")
@@ -5335,7 +5581,8 @@ def main() -> None:
             phonetic_families=phonetic_families,
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
-            conjugation_drills=conjugation_drills,
+            conjugation_verb_drills=conjugation_verb_drills,
+            conjugation_adjective_drills=conjugation_adjective_drills,
             conjugation_reverse_drills=conjugation_reverse_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
@@ -5360,7 +5607,8 @@ def main() -> None:
                 reading_keywords=reading_keywords,
                 kanji_radical_items=kanji_radical_items,
                 radical_items=radical_items,
-                conjugation_drills=conjugation_drills,
+                conjugation_verb_drills=conjugation_verb_drills,
+                conjugation_adjective_drills=conjugation_adjective_drills,
                 conjugation_reverse_drills=conjugation_reverse_drills,
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
@@ -5380,7 +5628,8 @@ def main() -> None:
             keisei_phonetic=keisei_databases.get("phonetic", {}),
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
-            conjugation_drills=conjugation_drills,
+            conjugation_verb_drills=conjugation_verb_drills,
+            conjugation_adjective_drills=conjugation_adjective_drills,
             conjugation_reverse_drills=conjugation_reverse_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
@@ -5436,8 +5685,12 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
-    if "conjugations" in wanted and conjugation_drills:
-        path, deck = build_conjugation_deck(conjugation_drills, output_dir)
+    if "conjugations-verbs" in wanted and conjugation_verb_drills:
+        path, deck = build_conjugation_verb_deck(conjugation_verb_drills, output_dir)
+        created.append(path)
+        built_decks.append(deck)
+    if "conjugations-adjectives" in wanted and conjugation_adjective_drills:
+        path, deck = build_conjugation_adjective_deck(conjugation_adjective_drills, output_dir)
         created.append(path)
         built_decks.append(deck)
     if "conjugations-reverse" in wanted and conjugation_reverse_drills:
@@ -5490,7 +5743,8 @@ def main() -> None:
                 reading_keywords=reading_keywords,
                 kanji_radical_items=kanji_radical_items,
                 radical_items=radical_items,
-                conjugation_drills=conjugation_drills,
+                conjugation_verb_drills=conjugation_verb_drills,
+                conjugation_adjective_drills=conjugation_adjective_drills,
                 conjugation_reverse_drills=conjugation_reverse_drills,
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
@@ -5513,6 +5767,7 @@ def main() -> None:
         )
     settings_path = write_filtered_deck_suggestions(output_dir)
     filtered_json_path = write_filtered_decks_json(output_dir)
+    deck_options_json_path = write_deck_options_json(output_dir)
     instructions_path = write_import_instructions(output_dir)
     history_path = append_run_history(
         output_dir,
@@ -5532,7 +5787,8 @@ def main() -> None:
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
             radical_items=radical_items,
-            conjugation_drills=conjugation_drills,
+            conjugation_verb_drills=conjugation_verb_drills,
+            conjugation_adjective_drills=conjugation_adjective_drills,
             conjugation_reverse_drills=conjugation_reverse_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
@@ -5549,6 +5805,7 @@ def main() -> None:
         print(f"  {path}")
     print(f"  {settings_path}")
     print(f"  {filtered_json_path}")
+    print(f"  {deck_options_json_path}")
     print(f"  {instructions_path}")
     print(f"  {history_path}")
     print_import_verification_help(bundle_path)

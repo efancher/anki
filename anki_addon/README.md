@@ -41,3 +41,29 @@ export WK_FILTERED_DECKS_JSON="$HOME/anki/out/anki_filtered_decks.json"
 ```
 
 Then the menu command finds the file automatically.
+
+---
+
+# WK Deck Options Setup (Anki add-on)
+
+Each generated `.apkg` embeds a **WK FSRS** deck-options preset. This add-on assigns
+that preset to every WaniKani deck in your profile and tries to enable FSRS if it is
+not already on.
+
+## Install once
+
+Copy the `wk_deck_options` folder into Anki's add-ons folder (same path as above),
+then restart Anki.
+
+## Weekly workflow
+
+After importing `out/wk_all.apkg`:
+
+1. **Tools → WK Apply Deck Options**
+2. Select `out/anki_deck_options.json` if prompted (or set `WK_DECK_OPTIONS_JSON`)
+
+## Optional: default JSON path
+
+```bash
+export WK_DECK_OPTIONS_JSON="$HOME/anki/out/anki_deck_options.json"
+```
