@@ -102,6 +102,7 @@ python wk_decks.py --deck all --only-started --refresh-cache
 | `--vocab-cloze-min-srs` | 7 (Master+) | Vocab context deck only |
 | `--conjugation-min-srs` | 7 (Master+) | Conjugation decks only |
 | `--grammar-max-jlpt` | N2 | Grammar through this JLPT level |
+| `--grammar-max-tae-kim-section` | 6 | Grammar through this Tae Kim section (3=Basic, 4=Essential, 5=Special, 6=Advanced) |
 | `--grammar-max-examples` | 2 | Example cards per grammar point |
 | `--grammar-max-unknown-kanji` | 5 | Skip examples with too many unknown WK kanji |
 | `--grammar-no-wk-filter` | off | Include all Hanabira examples regardless of WK |
@@ -122,9 +123,35 @@ Radicals include **three levels**: current, next, and locked-next.
 
 **Card type:** English hint + cloze sentence → type the missing grammar chunk (e.g. `けれども`).
 
-**Ordering:** JLPT N5 → N1 (within level by Hanabira `s_tag`).
+**Ordering:** Tae Kim subsection (reading order on [Basic Grammar](https://guidetojapanese.org/learn/grammar/basic)), then JLPT within each lesson.
 
-**WK integration:** Examples prefer sentences whose kanji mostly match your started WK vocab. Use `--grammar-no-wk-filter` to disable.
+**Subsections use the page titles, not numbers.** After reading *Introduction to Particles*, review cards tagged:
+
+`tag:tk-lesson-basic-introduction-to-particles`
+
+| Subsection (Basic Grammar) | Anki tag |
+|----------------------------|----------|
+| Expressing state-of-being | `tag:tk-lesson-basic-expressing-state-of-being` |
+| Introduction to Particles | `tag:tk-lesson-basic-introduction-to-particles` |
+| Adjectives | `tag:tk-lesson-basic-adjectives` |
+| Verb Basics | `tag:tk-lesson-basic-verb-basics` |
+| … | (see `tae_kim_lessons.json`) |
+
+Practice-exercise pages (*State-of-being Practice Exercises*, etc.) have no Hanabira cards — do those on the site.
+
+**Read-then-review workflow:**
+
+```bash
+# After "Introduction to Particles" (includes that lesson and earlier ones)
+python wk_decks.py --deck grammar --grammar-max-tae-kim-lesson introduction-to-particles
+
+# Same thing, explicit chapter prefix
+python wk_decks.py --deck grammar --grammar-max-tae-kim-lesson basic:introduction-to-particles
+```
+
+In Anki: **Browse → `tag:tk-lesson-basic-introduction-to-particles`**, or edit filtered deck **WK::Grammar · Current Tae Kim lesson** to match whatever subsection you just read.
+
+Chapter-level caps (coarser, whole Basic Grammar at once) still work via `--grammar-max-tae-kim-section 3`.
 
 ```bash
 # Grammar-only (no WK token required)
@@ -184,7 +211,8 @@ Written to `out/anki_filtered_decks.json`:
 |------|---------|
 | **WK::Radicals Preview** | Current/next radicals |
 | **WK::Vocab Context** | Daily vocab production |
-| **WK::Grammar** | N5/N4 grammar (adjust search as you progress) |
+| **WK::Grammar** | Early Basic subsections (state-of-being, particles, adjectives) |
+| **WK::Grammar · Current Tae Kim lesson** | Edit search to match the subsection you just read |
 | **WK::Phonetic Families** | Low-priority phonetic drill |
 
 Rebuild filtered decks after each import.
@@ -213,6 +241,15 @@ out/
 ## Troubleshooting
 
 **403 / Cloudflare on WK API:** Generator falls back to `.wk_cache/` if present. Run once on a network that can reach the API, or use existing cache.
+
+**246 notes could not be imported:** This is exactly the conjugation deck count (168 verb/adj + 78 reverse). Anki kept an old note type without the type-in fields. Re-import `wk_all.apkg` and choose **Always update** for:
+
+- `WK Update-Safe Conjugation` (template v3)
+- `WK Update-Safe Conjugation Reverse` (template v3)
+
+Also update if prompted: `WK Update-Safe Vocab Cloze` (v4), `WK Update-Safe Grammar Cloze` (v1).
+
+Do **not** choose “Keep old note type” or “Create new note type”.
 
 **Templates not updating:** Re-import with “Always update note type”. Check card Meta for template version (e.g. `v4` vocab-cloze).
 

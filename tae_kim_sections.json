@@ -1,0 +1,47 @@
+{
+  "source": "Tae Kim's Guide to Japanese Grammar (guidetojapanese.org)",
+  "sections": [
+    {
+      "num": 1,
+      "slug": "before-you-start",
+      "name": "Before You Start",
+      "guide_url": "https://guidetojapanese.org/learn/grammar"
+    },
+    {
+      "num": 2,
+      "slug": "writing-system",
+      "name": "The Writing System",
+      "guide_url": "https://guidetojapanese.org/learn/grammar"
+    },
+    {
+      "num": 3,
+      "slug": "basic-grammar",
+      "name": "Basic Grammar",
+      "guide_url": "https://www.guidetojapanese.org/basicgram.html"
+    },
+    {
+      "num": 4,
+      "slug": "essential-grammar",
+      "name": "Essential Grammar",
+      "guide_url": "https://guidetojapanese.org/essential.html"
+    },
+    {
+      "num": 5,
+      "slug": "special-expressions",
+      "name": "Special Expressions",
+      "guide_url": "https://guidetojapanese.org/special.html"
+    },
+    {
+      "num": 6,
+      "slug": "advanced-topics",
+      "name": "Advanced Topics",
+      "guide_url": "https://guidetojapanese.org/advanced.html"
+    },
+    {
+      "num": 7,
+      "slug": "misc",
+      "name": "Misc.",
+      "guide_url": "https://guidetojapanese.org/learn/grammar"
+    }
+  ]
+}

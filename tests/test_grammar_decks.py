@@ -11,6 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tae_kim_mapping import (
+    map_grammar_point_to_tae_kim_section,
+    tae_kim_section_within_cap,
+)
 from grammar_decks import (
     blank_grammar_in_sentence,
     collect_grammar_cards,
@@ -77,6 +81,39 @@ class GrammarDeckTests(unittest.TestCase):
         first = grammar_point_id(SAMPLE_POINT, 0)
         second = grammar_point_id(SAMPLE_POINT, 0)
         self.assertEqual(first, second)
+
+    def test_tae_kim_section_mapping_keredomo(self) -> None:
+        section = map_grammar_point_to_tae_kim_section(SAMPLE_POINT)
+        self.assertEqual(section.num, 3)
+        self.assertEqual(section.slug, "basic-grammar")
+
+    def test_tae_kim_section_cap(self) -> None:
+        self.assertTrue(tae_kim_section_within_cap(3, 3))
+        self.assertFalse(tae_kim_section_within_cap(4, 3))
+        self.assertTrue(tae_kim_section_within_cap(4, 6))
+
+    def test_collect_respects_tae_kim_section_cap(self) -> None:
+        cache_path = hanabira_grammar_cache_path("N5")
+        if not cache_path.is_file():
+            self.skipTest("Hanabira cache not present; run wk_decks.py --deck grammar once")
+        basic_only = collect_grammar_cards(
+            max_jlpt="N5",
+            max_tae_kim_section=3,
+            max_examples_per_point=1,
+            max_unknown_kanji=99,
+            known_kanji=set(),
+            refresh=False,
+        )
+        through_essential = collect_grammar_cards(
+            max_jlpt="N5",
+            max_tae_kim_section=4,
+            max_examples_per_point=1,
+            max_unknown_kanji=99,
+            known_kanji=set(),
+            refresh=False,
+        )
+        self.assertGreater(len(through_essential), len(basic_only))
+        self.assertTrue(all(card.tae_kim_section.num == 3 for card in basic_only))
 
 
 if __name__ == "__main__":

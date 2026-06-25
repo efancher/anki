@@ -318,8 +318,14 @@ FILTERED_DECK_DEFINITIONS = [
     },
     {
         "name": "WK::Grammar",
-        "search": 'deck:"Japanese Grammar Context" tag:jlpt-n5 OR tag:jlpt-n4',
+        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-expressing-state-of-being OR tag:tk-lesson-basic-introduction-to-particles OR tag:tk-lesson-basic-adjectives',
         "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Grammar · Current Tae Kim lesson",
+        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-introduction-to-particles',
+        "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
@@ -5140,6 +5146,16 @@ When Anki asks about existing note types:
   - Use "Always update" if templates still look stale
   - Do NOT choose "Create new note type" or "Keep old note type"
 
+If Anki reports notes could not be imported (often exactly 246 notes):
+  That count matches the conjugation + conjugation-reverse decks. It usually means
+  Anki kept an older note type schema without the type-in fields (TypeConjExpression,
+  TypeDictExpression). Re-import and choose "Always update" for:
+    - {NOTE_TYPE_NAMES['conjugation']} (template {MODEL_TEMPLATE_VERSIONS['conjugation']})
+    - {NOTE_TYPE_NAMES['conjugation_reverse']} (template {MODEL_TEMPLATE_VERSIONS['conjugation_reverse']})
+  Also update if prompted:
+    - {NOTE_TYPE_NAMES['vocab_cloze']} (template {MODEL_TEMPLATE_VERSIONS['vocab_cloze']})
+    - {NOTE_TYPE_NAMES['grammar_cloze']} (template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']})
+
 Expected note type names (stable — no version suffix):
   {note_types}
 
@@ -5187,8 +5203,9 @@ def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
     if bundle_path:
         print(f"  Recommended: import {bundle_path.name} (all decks in one file)")
     print("  When Anki asks about an existing note type, choose UPDATE — not create new.")
-    print(f"  Leech note type: {NOTE_TYPE_NAMES['item']} · template {MODEL_TEMPLATE_VERSIONS['item']}")
-    print(f"  Verb pair note type: {NOTE_TYPE_NAMES['pair']} · template {MODEL_TEMPLATE_VERSIONS['pair']}")
+    print("  If ~246 notes fail: update Conjugation + Conjugation Reverse note types (type-in fields).")
+    print(f"  Conjugation: {NOTE_TYPE_NAMES['conjugation']} · template {MODEL_TEMPLATE_VERSIONS['conjugation']}")
+    print(f"  Grammar: {NOTE_TYPE_NAMES['grammar_cloze']} · template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}")
     print(f"  Full instructions: out/anki_import_instructions.txt")
     print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
     print(f"  Deck options: install anki_addon/wk_deck_options, then Tools → WK Apply Deck Options")
@@ -5395,6 +5412,8 @@ def print_preview_report(
     if "grammar" in wanted:
         print(
             f"Grammar filter: max_jlpt={args.grammar_max_jlpt}, "
+            f"max_tae_kim_section={args.grammar_max_tae_kim_section}, "
+            f"max_tae_kim_lesson={args.grammar_max_tae_kim_lesson or 'off'}, "
             f"examples_per_point={args.grammar_max_examples}, "
             f"max_unknown_kanji={args.grammar_max_unknown_kanji}"
         )
@@ -5409,9 +5428,11 @@ def parse_args() -> argparse.Namespace:
     from grammar_decks import (
         GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
         GRAMMAR_DEFAULT_MAX_JLPT,
+        GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION,
         GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
         JLPT_LEVELS,
     )
+    from tae_kim_mapping import load_tae_kim_sections
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="store_true", help="Print version and exit")
@@ -5471,6 +5492,26 @@ def parse_args() -> argparse.Namespace:
         default=GRAMMAR_DEFAULT_MAX_JLPT,
         help="Include grammar points through this JLPT level (default: N2).",
     )
+    tae_kim_section_nums = [str(section.num) for section in load_tae_kim_sections()]
+    parser.add_argument(
+        "--grammar-max-tae-kim-section",
+        type=int,
+        choices=[int(num) for num in tae_kim_section_nums],
+        default=GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION,
+        help=(
+            "Include grammar through this Tae Kim chapter (3=Basic Grammar, "
+            "4=Essential, 5=Special, 6=Advanced; default: 6)."
+        ),
+    )
+    parser.add_argument(
+        "--grammar-max-tae-kim-lesson",
+        default=None,
+        metavar="CHAPTER:SUBSECTION",
+        help=(
+            "Cap at a guidetojapanese.org subsection title, e.g. "
+            "basic:introduction-to-particles or introduction-to-particles."
+        ),
+    )
     parser.add_argument(
         "--grammar-max-examples",
         type=int,
@@ -5514,6 +5555,8 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
 
     grammar_cards = collect_grammar_cards(
         max_jlpt=args.grammar_max_jlpt,
+        max_tae_kim_section=args.grammar_max_tae_kim_section,
+        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
         max_examples_per_point=args.grammar_max_examples,
         max_unknown_kanji=args.grammar_max_unknown_kanji,
         known_kanji=set(),
@@ -5521,7 +5564,8 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
     )
     print(
         f"Grammar context cloze: {len(grammar_cards)} "
-        f"(JLPT ≤ {args.grammar_max_jlpt}, {args.grammar_max_examples} ex/point)"
+        f"(JLPT ≤ {args.grammar_max_jlpt}, Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
+        f"{args.grammar_max_examples} ex/point)"
     )
     if args.dry_run:
         preview_deck_section(
@@ -5712,6 +5756,8 @@ def main() -> None:
 
         grammar_cards = collect_grammar_cards(
             max_jlpt=args.grammar_max_jlpt,
+            max_tae_kim_section=args.grammar_max_tae_kim_section,
+            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
             max_examples_per_point=args.grammar_max_examples,
             max_unknown_kanji=args.grammar_max_unknown_kanji,
             known_kanji=set()
@@ -5751,7 +5797,8 @@ def main() -> None:
     if grammar_cards:
         print(
             f"Grammar context cloze: {len(grammar_cards)} "
-            f"(JLPT ≤ {args.grammar_max_jlpt}, {args.grammar_max_examples} ex/point)"
+            f"(JLPT ≤ {args.grammar_max_jlpt}, Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
+            f"{args.grammar_max_examples} ex/point)"
         )
     print(f"Pitch entries loaded: {len(pitch_index)}")
     if args.dry_run:

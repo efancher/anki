@@ -1,0 +1,116 @@
+{
+  "source": "https://guidetojapanese.org/learn/grammar/",
+  "note": "Lessons match guidetojapanese.org sidebar subsections. Practice-exercise pages have no Hanabira cards; use Tae Kim's exercises there.",
+  "chapters": [
+    {
+      "slug": "basic",
+      "name": "Basic Grammar",
+      "section_num": 3,
+      "guide_url": "https://guidetojapanese.org/learn/grammar/basic",
+      "lessons": [
+        {
+          "num": 1,
+          "slug": "expressing-state-of-being",
+          "name": "Expressing state-of-being",
+          "has_cards": true
+        },
+        {
+          "num": 2,
+          "slug": "state-of-being-practice",
+          "name": "State-of-being Practice Exercises",
+          "has_cards": false
+        },
+        {
+          "num": 3,
+          "slug": "introduction-to-particles",
+          "name": "Introduction to Particles",
+          "has_cards": true
+        },
+        {
+          "num": 4,
+          "slug": "particle-practice",
+          "name": "Particle Practice Exercises",
+          "has_cards": false
+        },
+        {
+          "num": 5,
+          "slug": "adjectives",
+          "name": "Adjectives",
+          "has_cards": true
+        },
+        {
+          "num": 6,
+          "slug": "adjective-practice",
+          "name": "Adjective Practice Exercises",
+          "has_cards": false
+        },
+        {
+          "num": 7,
+          "slug": "verb-basics",
+          "name": "Verb Basics",
+          "has_cards": true
+        },
+        {
+          "num": 8,
+          "slug": "verb-practice",
+          "name": "Verb Practice Exercises",
+          "has_cards": false
+        },
+        {
+          "num": 9,
+          "slug": "negative-verbs",
+          "name": "Negative Verbs",
+          "has_cards": true
+        },
+        {
+          "num": 10,
+          "slug": "negative-verb-practice",
+          "name": "Negative Verb Practice Exercises",
+          "has_cards": false
+        },
+        {
+          "num": 11,
+          "slug": "past-tense",
+          "name": "Past Tense",
+          "has_cards": true
+        },
+        {
+          "num": 12,
+          "slug": "past-verb-practice",
+          "name": "Past Verb Practice Exercises",
+          "has_cards": false
+        },
+        {
+          "num": 13,
+          "slug": "particles-used-with-verbs",
+          "name": "Particles used with verbs",
+          "has_cards": true
+        },
+        {
+          "num": 14,
+          "slug": "transitive-intransitive-verbs",
+          "name": "Transitive and Intransitive Verbs",
+          "has_cards": true
+        },
+        {
+          "num": 15,
+          "slug": "relative-clauses",
+          "name": "Relative Clauses and Sentence Order",
+          "has_cards": true
+        },
+        {
+          "num": 16,
+          "slug": "noun-related-particles",
+          "name": "Noun-related Particles",
+          "has_cards": true
+        },
+        {
+          "num": 17,
+          "slug": "adverbs-sentence-ending-particles",
+          "name": "Adverbs and Sentence-ending particles",
+          "has_cards": true
+        }
+      ]
+    }
+  ]
+}

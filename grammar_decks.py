@@ -5,11 +5,13 @@ Build Japanese grammar context cloze decks from Hanabira open grammar data
 (https://github.com/tristcoil/hanabira.org, CC-licensed content).
 
 Cards: production cloze on example sentences (type the missing grammar chunk).
-Ordered JLPT N5 → N1; default cap at N2. Optional WK kanji readiness filter.
+Ordered by Tae Kim section (3 Basic → 6 Advanced), then JLPT N5 → N1.
+Optional cap via --grammar-max-tae-kim-section to match your reading progress.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import urllib.error
@@ -20,6 +22,16 @@ from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 import genanki
 import html
 
+from tae_kim_mapping import (
+    TaeKimLesson,
+    TaeKimSection,
+    map_grammar_point_to_tae_kim_lesson,
+    map_grammar_point_to_tae_kim_section,
+    parse_tae_kim_lesson_cap,
+    tae_kim_card_tags,
+    tae_kim_lesson_within_cap,
+    tae_kim_section_within_cap,
+)
 from wk_decks import (
     CLOZE_BLANK_DISPLAY,
     CACHE_DIR,
@@ -43,6 +55,7 @@ JLPT_RANK = {"N5": 5, "N4": 4, "N3": 3, "N2": 2, "N1": 1}
 GRAMMAR_DEFAULT_MAX_JLPT = "N2"
 GRAMMAR_DEFAULT_EXAMPLES_PER_POINT = 2
 GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI = 5
+GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION = 6
 GRAMMAR_DECK_ID = 2059400125
 GRAMMAR_MODEL_ID = 1865429023
 GRAMMAR_DECK_NAME = DECK_NAMES["grammar"]
@@ -66,6 +79,8 @@ class GrammarCardItem(NamedTuple):
     full_sentence: str
     sentence_en: str
     type_expression: str
+    tae_kim_section: TaeKimSection
+    tae_kim_lesson: Optional[TaeKimLesson]
 
 
 def hanabira_grammar_cache_path(jlpt: str) -> Path:
@@ -96,10 +111,13 @@ def fetch_hanabira_grammar_level(jlpt: str, *, refresh: bool = False) -> List[di
 
 def load_hanabira_grammar_points(*, refresh: bool = False) -> List[dict]:
     points: List[dict] = []
+    batch = 0
     for jlpt in JLPT_LEVELS:
         for entry in fetch_hanabira_grammar_level(jlpt, refresh=refresh):
             enriched = dict(entry)
             enriched["_jlpt"] = jlpt
+            enriched["_batch"] = batch
+            batch += 1
             points.append(enriched)
     return points
 
@@ -107,8 +125,10 @@ def load_hanabira_grammar_points(*, refresh: bool = False) -> List[dict]:
 def grammar_point_id(point: dict, example_index: int) -> str:
     jlpt = point.get("_jlpt") or point.get("p_tag", "").replace("JLPT_", "") or "?"
     order = int(point.get("s_tag") or 0)
-    slug = re.sub(r"[^a-z0-9]+", "-", (point.get("title") or "point").lower()).strip("-")[:40]
-    return f"{jlpt}-{order:03d}-{slug}-{example_index}"
+    batch = int(point.get("_batch") or 0)
+    title = (point.get("title") or "").strip()
+    title_key = hashlib.sha1(title.encode("utf-8")).hexdigest()[:10]
+    return f"{jlpt}-{order:03d}-{title_key}-{batch}-{example_index}"
 
 
 def grammar_blank_tokens(point: dict) -> List[str]:
@@ -162,6 +182,8 @@ def jlpt_within_cap(jlpt: str, max_jlpt: str) -> bool:
 def collect_grammar_cards(
     *,
     max_jlpt: str = GRAMMAR_DEFAULT_MAX_JLPT,
+    max_tae_kim_section: int = GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION,
+    max_tae_kim_lesson: Optional[str] = None,
     max_examples_per_point: int = GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
     max_unknown_kanji: int = GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
     known_kanji: Optional[Set[str]] = None,
@@ -169,10 +191,26 @@ def collect_grammar_cards(
 ) -> List[GrammarCardItem]:
     cards: List[GrammarCardItem] = []
     kanji_filter = known_kanji or set()
+    lesson_cap: Optional[Tuple[str, int]] = None
+    if max_tae_kim_lesson:
+        lesson_cap = parse_tae_kim_lesson_cap(max_tae_kim_lesson)
     for point in load_hanabira_grammar_points(refresh=refresh):
         jlpt = point.get("_jlpt") or "N1"
         if not jlpt_within_cap(jlpt, max_jlpt):
             continue
+        tae_kim = map_grammar_point_to_tae_kim_section(point)
+        if not tae_kim_section_within_cap(tae_kim.num, max_tae_kim_section):
+            continue
+        lesson = map_grammar_point_to_tae_kim_lesson(point, section=tae_kim)
+        if lesson_cap is not None:
+            chapter, max_lesson_num = lesson_cap
+            if not tae_kim_lesson_within_cap(
+                lesson,
+                tae_kim,
+                max_chapter=chapter,
+                max_lesson_num=max_lesson_num,
+            ):
+                continue
         tokens = grammar_blank_tokens(point)
         if not tokens:
             continue
@@ -206,10 +244,21 @@ def collect_grammar_cards(
                     full_sentence=jp,
                     sentence_en=en,
                     type_expression=chunk,
+                    tae_kim_section=tae_kim,
+                    tae_kim_lesson=lesson,
                 )
             )
             added += 1
-    cards.sort(key=lambda item: (-JLPT_RANK[item.jlpt], item.order, item.title, item.point_id))
+    cards.sort(
+        key=lambda item: (
+            item.tae_kim_section.num,
+            item.tae_kim_lesson.num if item.tae_kim_lesson else 999,
+            -JLPT_RANK[item.jlpt],
+            item.order,
+            item.title,
+            item.point_id,
+        )
+    )
     return cards
 
 
@@ -275,7 +324,18 @@ def build_grammar_deck(
     template_label = GRAMMAR_TEMPLATE_VERSION
     for item in cards:
         guid = stable_guid("grammar", item.point_id)
-        meta = f"JLPT {item.jlpt} · order {item.order} · Hanabira · template {template_label}"
+        tk = item.tae_kim_section
+        lesson = item.tae_kim_lesson
+        if lesson is not None:
+            meta = (
+                f"Tae Kim {lesson.chapter_name} · {lesson.num:02d} {lesson.name} · "
+                f"JLPT {item.jlpt} · Hanabira · template {template_label}"
+            )
+        else:
+            meta = (
+                f"Tae Kim §{tk.num} {tk.name} · JLPT {item.jlpt} · order {item.order} · "
+                f"Hanabira · template {template_label}"
+            )
         note = genanki.Note(
             model=model,
             fields=[
@@ -295,6 +355,7 @@ def build_grammar_deck(
                 f"jlpt-{item.jlpt.lower()}",
                 f"grammar-order-{item.order:03d}",
                 "priority-medium",
+                *tae_kim_card_tags(tk, lesson),
             ],
             guid=guid,
         )
