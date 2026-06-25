@@ -14,6 +14,7 @@ Decks:
   - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
   - kanji-radicals: kanji whose radical components are unlocked in WaniKani
   - conjugations: common verb and adjective conjugation drills for learned WK vocabulary
+  - conjugations-reverse: conjugated verb on front, dictionary form on back
   - verb-types: recall godan / ichidan / irregular verb class for WK verbs
   - adjective-types: recall い-adjective vs な-adjective for WK adjectives
   - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
@@ -103,6 +104,7 @@ KEISEI_DB_BASE = (
     "/wanikani-phonetic-compounds/db"
 )
 KEISEI_CACHE_DIR = CACHE_DIR / "keisei"
+RADICAL_MEDIA_CACHE_DIR = CACHE_DIR / "radical_media"
 KEISEI_DB_FILES = {
     "kanji": "kanji_esc.json",
     "phonetic": "phonetic_esc.json",
@@ -151,6 +153,18 @@ WK_PAREN_READING_RE = re.compile(
 WK_KANA_PREFIX_KANJI_SUFFIX_RE = re.compile(r"^([ぁ-んー]+)([\u4e00-\u9fff]+)$")
 VOCAB_TYPE_HONORIFIC_PREFIXES = ("お", "ご", "御")
 
+RADICAL_IMAGE_STYLE_PREFERENCE: Tuple[str, ...] = (
+    "128px",
+    "256px",
+    "512px",
+    "64px",
+    "1024px",
+    "original",
+)
+WANIKANI_CDN_SUBJECT_IMAGE_URL = (
+    "https://cdn.wanikani.com/subjects/images/{subject_id}-{slug}-large.png"
+)
+
 # Keep stable after first import.
 DECK_IDS = {
     "leeches": 2059400111,
@@ -165,6 +179,7 @@ DECK_IDS = {
     "verb-types": 2059400120,
     "adjective-types": 2059400121,
     "vocab-cloze": 2059400122,
+    "conjugations-reverse": 2059400123,
 }
 
 MODEL_IDS = {
@@ -178,6 +193,7 @@ MODEL_IDS = {
     "conjugation": 1865429019,
     "word_class": 1865429020,
     "vocab_cloze": 1865429021,
+    "conjugation_reverse": 1865429022,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -186,13 +202,14 @@ MODEL_TEMPLATE_VERSIONS = {
     "item": "v5",
     "pair": "v2",
     "family": "v1",
-    "radical": "v2",
+    "radical": "v4",
     "reading_keyword": "v3",
     "kanji_radical": "v1",
     "phonetic_drill": "v4",
     "conjugation": "v2",
     "word_class": "v1",
     "vocab_cloze": "v4",
+    "conjugation_reverse": "v2",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -209,6 +226,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "conjugation": 7,
     "word_class": 8,
     "vocab_cloze": 9,
+    "conjugation_reverse": 10,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -226,6 +244,7 @@ NOTE_TYPE_NAMES = {
     "conjugation": "WK Update-Safe Conjugation",
     "word_class": "WK Update-Safe Word Class",
     "vocab_cloze": "WK Update-Safe Vocab Cloze",
+    "conjugation_reverse": "WK Update-Safe Conjugation Reverse",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -255,6 +274,7 @@ RUN_HISTORY_COLUMNS = [
     "reading_keywords",
     "kanji_radical_breakdown",
     "conjugation_drills",
+    "conjugation_reverse_drills",
     "verb_type_cards",
     "adjective_type_cards",
     "vocab_cloze",
@@ -326,6 +346,7 @@ DECK_NAMES = {
     "reading-keywords": "WaniKani Reading Keywords",
     "kanji-radicals": "WaniKani Kanji Radical Breakdown",
     "conjugations": "WaniKani Conjugation Practice",
+    "conjugations-reverse": "WaniKani Verb Conjugation Reverse",
     "verb-types": "WaniKani Verb Type Practice",
     "adjective-types": "WaniKani Adjective Type Practice",
     "vocab-cloze": "WaniKani Vocabulary Context",
@@ -980,11 +1001,40 @@ def package_write_timestamp(models: Iterable[genanki.Model]) -> float:
     return max(epochs) + 1.0
 
 
+def attach_deck_media(package: genanki.Package, decks: Sequence[genanki.Deck]) -> None:
+    media_paths: List[str] = []
+    seen: Set[str] = set()
+    for deck in decks:
+        for media_path in getattr(deck, "wk_media_files", []) or []:
+            path_str = str(media_path)
+            if path_str not in seen:
+                seen.add(path_str)
+                media_paths.append(path_str)
+    if media_paths:
+        package.media_files = media_paths
+
+
+def merge_package_media_files(
+    package: genanki.Package,
+    media_files: Optional[Sequence[str]],
+) -> None:
+    if not media_files:
+        return
+    existing = list(package.media_files or [])
+    seen = set(existing)
+    for media_path in media_files:
+        path_str = str(media_path)
+        if path_str not in seen:
+            seen.add(path_str)
+            existing.append(path_str)
+    package.media_files = existing
+
+
 def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence[str]] = None) -> None:
     models = list(deck.models.values())
     package = genanki.Package(deck)
-    if media_files:
-        package.media_files = list(media_files)
+    attach_deck_media(package, [deck])
+    merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(models))
 
 
@@ -1001,8 +1051,8 @@ def write_bundled_apkg(
         all_models.extend(deck.models.values())
     package = genanki.Package(decks[0])
     package.decks = list(decks)
-    if media_files:
-        package.media_files = list(media_files)
+    attach_deck_media(package, decks)
+    merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
 
 
@@ -1834,7 +1884,7 @@ def make_radical_model() -> WkModel:
                 "name": "Radical Meaning",
                 "qfmt": """
                 <div class='prompt'>Radical meaning?</div>
-                <div class='jp'>{{Radical}}</div>
+                <div class='radical-display'>{{Radical}}</div>
                 <div class='meta'>{{Status}} · WK Level {{Level}}</div>
                 """,
                 "afmt": """
@@ -1846,7 +1896,20 @@ def make_radical_model() -> WkModel:
                 """,
             }
         ],
-        css=versioned_css(COMMON_CSS, "radical"),
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.radical-display { margin: 12px 0; }
+.radical-display .jp { font-size: 42px; }
+.radical-img {
+  max-height: 128px;
+  max-width: 128px;
+  vertical-align: middle;
+}
+.radical-text { font-size: 32px; color: #cfcfcf; }
+""",
+            "radical",
+        ),
     )
 
 
@@ -2002,6 +2065,13 @@ NA_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
     ("polite_negative", "Polite negative"),
     ("polite_past", "Polite past"),
 )
+
+VERB_CONJUGATION_WORD_CLASSES: Set[str] = {
+    "godan",
+    "ichidan",
+    "suru_verb",
+    "irregular_verb",
+}
 
 GODAN_POLITE_STEM_SUFFIX = {
     "う": "い",
@@ -2432,11 +2502,18 @@ def conjugation_forms_for_class(word_class: str) -> Tuple[Tuple[str, str], ...]:
     return ()
 
 
-def collect_conjugation_drills(vocab_items: Sequence[dict], args: argparse.Namespace) -> List[ConjugationDrill]:
+def collect_conjugation_drills(
+    vocab_items: Sequence[dict],
+    args: argparse.Namespace,
+    *,
+    word_classes: Optional[Set[str]] = None,
+) -> List[ConjugationDrill]:
     drills: List[ConjugationDrill] = []
     for vocab in sorted(vocab_items, key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or "")):
         word_class = conjugation_word_class(vocab)
         if not word_class:
+            continue
+        if word_classes is not None and word_class not in word_classes:
             continue
         expr = vocab["data"].get("characters") or ""
         reading = first_reading(vocab)
@@ -3174,6 +3251,51 @@ def make_conjugation_model() -> WkModel:
     )
 
 
+def make_conjugation_reverse_model() -> WkModel:
+    return WkModel(
+        MODEL_IDS["conjugation_reverse"],
+        NOTE_TYPE_NAMES["conjugation_reverse"],
+        template_key="conjugation_reverse",
+        fields=[
+            {"name": "GuidKey"},
+            {"name": "Prompt"},
+            {"name": "DictExpression"},
+            {"name": "DictReading"},
+            {"name": "Meaning"},
+            {"name": "ConjExpression"},
+            {"name": "ConjReading"},
+            {"name": "Meta"},
+        ],
+        templates=[
+            {
+                "name": "Conjugated → Dictionary",
+                "qfmt": """
+                <div class="prompt">What is the dictionary form?</div>
+                <div class="jp">{{ConjExpression}}</div>
+                """,
+                "afmt": """
+                {{FrontSide}}
+                <hr>
+                <div class="meta form-label">{{Prompt}}</div>
+                <div class="jp answer">{{DictExpression}}</div>
+                <div class="reading answer">{{DictReading}}</div>
+                <div class="meaning">{{Meaning}}</div>
+                <div class="meta">{{Meta}}</div>
+                """,
+            },
+        ],
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.answer { margin-top: 8px; }
+.jp.answer { font-size: 40px; }
+.form-label { margin-bottom: 8px; font-style: italic; }
+""",
+            "conjugation_reverse",
+        ),
+    )
+
+
 def make_word_class_model() -> WkModel:
     return WkModel(
         MODEL_IDS["word_class"],
@@ -3347,6 +3469,157 @@ def radical_display(radical: dict) -> str:
     return radical["data"].get("slug") or "radical"
 
 
+def radical_image_content_extension(image: dict) -> str:
+    content_type = str(image.get("content_type") or "").lower()
+    if "svg" in content_type:
+        return "svg"
+    if "png" in content_type:
+        return "png"
+    url = str(image.get("url") or "").lower()
+    if url.endswith(".svg"):
+        return "svg"
+    return "png"
+
+
+def wanikani_files_url_is_downloadable(url: str, content_type: str = "") -> bool:
+    """PNG assets on files.wanikani.com return 403; SVG URLs work with Referer."""
+    if "files.wanikani.com" not in url:
+        return True
+    return "svg" in content_type.lower()
+
+
+def radical_image_download_candidates(radical: dict) -> List[Tuple[str, str]]:
+    """Return (url, file_extension) pairs to try, best first."""
+    candidates: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+    images = radical["data"].get("character_images") or []
+    slug = radical["data"].get("slug") or ""
+    subject_id = radical["id"]
+
+    def add(url: str, ext: str) -> None:
+        if url and url not in seen:
+            seen.add(url)
+            candidates.append((url, ext))
+
+    for image in images:
+        if not isinstance(image, dict):
+            continue
+        url = str(image.get("url") or "")
+        content_type = str(image.get("content_type") or "")
+        ext = radical_image_content_extension(image)
+        if ext == "svg" and wanikani_files_url_is_downloadable(url, content_type):
+            add(url, ext)
+
+    if slug:
+        add(
+            WANIKANI_CDN_SUBJECT_IMAGE_URL.format(subject_id=subject_id, slug=slug),
+            "png",
+        )
+
+    by_style = {
+        (img.get("metadata") or {}).get("style_name"): img
+        for img in images
+        if isinstance(img, dict)
+    }
+    for style in RADICAL_IMAGE_STYLE_PREFERENCE:
+        image = by_style.get(style)
+        if not image:
+            continue
+        url = str(image.get("url") or "")
+        content_type = str(image.get("content_type") or "")
+        if wanikani_files_url_is_downloadable(url, content_type):
+            add(url, radical_image_content_extension(image))
+
+    for image in images:
+        if not isinstance(image, dict):
+            continue
+        url = str(image.get("url") or "")
+        content_type = str(image.get("content_type") or "")
+        if wanikani_files_url_is_downloadable(url, content_type):
+            add(url, radical_image_content_extension(image))
+
+    return candidates
+
+
+def radical_image_media_name(radical_id: int, ext: str = "png") -> str:
+    return f"wk-radical-{radical_id}.{ext}"
+
+
+def radical_image_request_headers() -> dict:
+    return {
+        "User-Agent": f"Mozilla/5.0 (compatible; wk_decks/{VERSION})",
+        "Referer": "https://www.wanikani.com/",
+    }
+
+
+def ensure_radical_image_media(radical: dict) -> Optional[Tuple[str, Path]]:
+    """Download WK radical image into cache; return Anki media basename and local path."""
+    radical_id = radical["id"]
+    RADICAL_MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    for ext in ("svg", "png"):
+        media_name = radical_image_media_name(radical_id, ext)
+        path = RADICAL_MEDIA_CACHE_DIR / media_name
+        if path.exists() and path.stat().st_size > 0:
+            return media_name, path
+
+    candidates = radical_image_download_candidates(radical)
+    if not candidates:
+        return None
+
+    errors: List[str] = []
+    headers = radical_image_request_headers()
+    for url, ext in candidates:
+        media_name = radical_image_media_name(radical_id, ext)
+        path = RADICAL_MEDIA_CACHE_DIR / media_name
+        try:
+            response = requests.get(url, headers=headers, timeout=45)
+            response.raise_for_status()
+            if not response.content:
+                errors.append(f"{url}: empty response")
+                continue
+            path.write_bytes(response.content)
+            return media_name, path
+        except requests.RequestException as exc:
+            errors.append(f"{url}: {exc}")
+            continue
+
+    slug = radical["data"].get("slug") or radical_id
+    print(
+        f"Warning: could not download radical image for {slug}: {errors[0]}",
+        file=sys.stderr,
+    )
+    return None
+
+
+def ensure_radical_media_files(radicals: Iterable[dict]) -> Tuple[Dict[int, str], List[str]]:
+    media_names: Dict[int, str] = {}
+    media_paths: List[str] = []
+    for radical in radicals:
+        if radical["data"].get("characters"):
+            continue
+        cached = ensure_radical_image_media(radical)
+        if not cached:
+            continue
+        media_name, path = cached
+        media_names[radical["id"]] = media_name
+        path_str = str(path)
+        if path_str not in media_paths:
+            media_paths.append(path_str)
+    return media_names, media_paths
+
+
+def radical_display_html(radical: dict, media_names: Optional[Dict[int, str]] = None) -> str:
+    chars = radical["data"].get("characters")
+    if chars:
+        return f"<span class='jp'>{html.escape(chars)}</span>"
+    slug = radical["data"].get("slug") or "radical"
+    alt = html.escape(slug)
+    media_name = (media_names or {}).get(radical["id"])
+    if media_name:
+        return f'<img class="radical-img" src="{html.escape(media_name)}" alt="{alt}">'
+    return f"<span class='radical-text'>{html.escape(slug)}</span>"
+
+
 def radical_description_html(radical: dict) -> str:
     mnemonic = strip_html(radical["data"].get("meaning_mnemonic"))
     return html.escape(mnemonic) if mnemonic else ""
@@ -3365,28 +3638,36 @@ def kanji_has_unlocked_radicals_only(kanji: dict, unlocked_radical_ids: Set[int]
     return bool(component_ids) and all(component_id in unlocked_radical_ids for component_id in component_ids)
 
 
-def kanji_radicals_back_html(kanji: dict, radical_index: Dict[int, dict]) -> str:
+def kanji_radicals_back_html(
+    kanji: dict,
+    radical_index: Dict[int, dict],
+    media_names: Optional[Dict[int, str]] = None,
+) -> str:
     rows: List[str] = []
     for component_id in kanji["data"].get("component_subject_ids") or []:
         radical = radical_index.get(component_id)
         if not radical:
             continue
-        display = html.escape(radical_display(radical))
+        display = radical_display_html(radical, media_names)
         meaning = html.escape("; ".join(primary_meanings(radical)))
         rows.append(
-            f"<div class='radical-piece'><span class='jp'>{display}</span> "
+            f"<div class='radical-piece'>{display} "
             f"<span class='meaning'>{meaning}</span></div>"
         )
     return f"<div class='radical-breakdown'>{''.join(rows)}</div>" if rows else ""
 
 
-def kanji_radicals_front_html(kanji: dict, radical_index: Dict[int, dict]) -> str:
+def kanji_radicals_front_html(
+    kanji: dict,
+    radical_index: Dict[int, dict],
+    media_names: Optional[Dict[int, str]] = None,
+) -> str:
     pieces: List[str] = []
     for component_id in kanji["data"].get("component_subject_ids") or []:
         radical = radical_index.get(component_id)
         if not radical:
             continue
-        display = html.escape(radical_display(radical))
+        display = radical_display_html(radical, media_names)
         meaning = html.escape("; ".join(primary_meanings(radical)))
         pieces.append(
             f"<span class='radicals-front-piece'>{display}"
@@ -3842,6 +4123,8 @@ def build_radical_deck(
 
     deck = genanki.Deck(DECK_IDS["radicals"], DECK_NAMES["radicals"])
     model = make_radical_model()
+    media_names, media_paths = ensure_radical_media_files(selected)
+    deck.wk_media_files = media_paths
 
     for radical in sorted(selected, key=lambda r: (r["data"].get("level", 999), radical_display(r))):
         data = radical["data"]
@@ -3851,7 +4134,7 @@ def build_radical_deck(
             status += " · started"
 
         meanings = html.escape("; ".join(primary_meanings(radical)))
-        radical_text = html.escape(radical_display(radical))
+        radical_text = radical_display_html(radical, media_names)
         preview_kanji = kanji_using_radical(kanji_items, radical, max_level=min(level + 3, 60), limit=12)
         kanji_html = ""
         if preview_kanji:
@@ -4110,10 +4393,18 @@ def build_kanji_radical_deck(
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["kanji-radicals"], DECK_NAMES["kanji-radicals"])
     model = make_kanji_radical_model()
+    component_radicals = [
+        radical_index[component_id]
+        for kanji in kanji_items
+        for component_id in kanji["data"].get("component_subject_ids") or []
+        if component_id in radical_index
+    ]
+    media_names, media_paths = ensure_radical_media_files(component_radicals)
+    deck.wk_media_files = media_paths
     for kanji in kanji_items:
         data = kanji["data"]
         guid = stable_guid("kanji-radical", kanji["id"])
-        radicals_back = kanji_radicals_back_html(kanji, radical_index)
+        radicals_back = kanji_radicals_back_html(kanji, radical_index, media_names)
         if not radicals_back:
             continue
         level = data.get("level", "?")
@@ -4132,7 +4423,7 @@ def build_kanji_radical_deck(
             fields=[
                 guid,
                 html.escape(data.get("characters") or ""),
-                kanji_radicals_front_html(kanji, radical_index),
+                kanji_radicals_front_html(kanji, radical_index, media_names),
                 radicals_back,
                 meaning_mnemonic_html(kanji),
                 html.escape(meta),
@@ -4189,6 +4480,46 @@ def build_conjugation_deck(
         )
         deck.add_note(note)
     out = output_dir / "wk_conjugations.apkg"
+    write_apkg(deck, out)
+    return out, deck
+
+
+def build_conjugation_reverse_deck(
+    drills: Sequence[ConjugationDrill],
+    output_dir: Path,
+) -> Tuple[Path, genanki.Deck]:
+    deck = genanki.Deck(DECK_IDS["conjugations-reverse"], DECK_NAMES["conjugations-reverse"])
+    model = make_conjugation_reverse_model()
+    template_label = MODEL_TEMPLATE_VERSIONS["conjugation_reverse"]
+    for drill in drills:
+        vocab = drill.vocab
+        level = vocab["data"].get("level", "?")
+        guid = stable_guid("conjugation-reverse", vocab["id"], drill.form_key)
+        meaning = "; ".join(primary_meanings(vocab))
+        class_label = conjugation_class_label(drill.word_class)
+        meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
+        note = genanki.Note(
+            model=model,
+            fields=[
+                guid,
+                html.escape(drill.prompt),
+                html.escape(drill.dict_expr),
+                html.escape(drill.dict_reading),
+                html.escape(meaning),
+                html.escape(drill.conj_expr),
+                html.escape(drill.conj_reading),
+                html.escape(meta),
+            ],
+            tags=[
+                "wanikani",
+                "conjugation-reverse",
+                drill.word_class.replace("_", "-"),
+                drill.form_key,
+            ],
+            guid=guid,
+        )
+        deck.add_note(note)
+    out = output_dir / "wk_conjugations_reverse.apkg"
     write_apkg(deck, out)
     return out, deck
 
@@ -4383,6 +4714,7 @@ def wanted_decks(args: argparse.Namespace) -> Set[str]:
         "reading-keywords",
         "kanji-radicals",
         "conjugations",
+        "conjugations-reverse",
         "verb-types",
         "adjective-types",
         "vocab-cloze",
@@ -4400,6 +4732,7 @@ def deck_names_for_run(
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     conjugation_drills: Sequence[ConjugationDrill],
+    conjugation_reverse_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
@@ -4422,6 +4755,8 @@ def deck_names_for_run(
         names.append(DECK_NAMES["kanji-radicals"])
     if "conjugations" in wanted and conjugation_drills:
         names.append(DECK_NAMES["conjugations"])
+    if "conjugations-reverse" in wanted and conjugation_reverse_drills:
+        names.append(DECK_NAMES["conjugations-reverse"])
     if "verb-types" in wanted and verb_type_items:
         names.append(DECK_NAMES["verb-types"])
     if "adjective-types" in wanted and adjective_type_items:
@@ -4451,6 +4786,7 @@ def build_run_history_row(
     kanji_radical_items: Sequence[dict],
     radical_items: Sequence[dict],
     conjugation_drills: Sequence[ConjugationDrill],
+    conjugation_reverse_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
@@ -4483,6 +4819,7 @@ def build_run_history_row(
         "reading_keywords": len(reading_keywords),
         "kanji_radical_breakdown": len(kanji_radical_items),
         "conjugation_drills": len(conjugation_drills),
+        "conjugation_reverse_drills": len(conjugation_reverse_drills),
         "verb_type_cards": len(verb_type_items),
         "adjective_type_cards": len(adjective_type_items),
         "vocab_cloze": len(vocab_cloze_items),
@@ -4657,6 +4994,7 @@ def print_preview_report(
     reading_keywords: Sequence[ReadingKeywordEntry],
     kanji_radical_items: Sequence[dict],
     conjugation_drills: Sequence[ConjugationDrill],
+    conjugation_reverse_drills: Sequence[ConjugationDrill],
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
@@ -4671,8 +5009,9 @@ def print_preview_report(
     print("=" * 60)
     wanted = {args.deck} if args.deck != "all" else {
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
+        "pitch-leeches", "radicals", "reading-keywords",         "kanji-radicals",
         "conjugations",
+        "conjugations-reverse",
         "verb-types",
         "adjective-types",
         "vocab-cloze",
@@ -4736,6 +5075,14 @@ def print_preview_report(
             [
                 f"{drill.dict_expr} ({drill.dict_reading}) → {drill.conj_expr} ({drill.conj_reading}) · {drill.prompt}"
                 for drill in conjugation_drills
+            ],
+        )
+    if "conjugations-reverse" in wanted:
+        preview_deck_section(
+            DECK_NAMES["conjugations-reverse"],
+            [
+                f"{drill.conj_expr} ({drill.conj_reading}) → {drill.dict_expr} ({drill.dict_reading}) · {drill.prompt}"
+                for drill in conjugation_reverse_drills
             ],
         )
     if "verb-types" in wanted:
@@ -4803,7 +5150,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
         "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
-        "conjugations", "verb-types", "adjective-types", "vocab-cloze", "all",
+        "conjugations", "conjugations-reverse", "verb-types", "adjective-types", "vocab-cloze", "all",
     ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
@@ -4948,6 +5295,11 @@ def main() -> None:
     reading_keywords = build_reading_keyword_catalog(subjects)
     kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
     conjugation_drills = collect_conjugation_drills(vocab_items, args)
+    conjugation_reverse_drills = collect_conjugation_drills(
+        vocab_items,
+        args,
+        word_classes=VERB_CONJUGATION_WORD_CLASSES,
+    )
     verb_type_items = collect_verb_type_items(vocab_items, args)
     adjective_type_items = collect_adjective_type_items(vocab_items, args)
     vocab_cloze_items = collect_vocab_cloze_items(
@@ -4967,6 +5319,7 @@ def main() -> None:
     print(f"Reading keywords: {len(reading_keywords)}")
     print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
     print(f"Conjugation drills: {len(conjugation_drills)}")
+    print(f"Verb conjugation reverse drills: {len(conjugation_reverse_drills)}")
     print(f"Verb type cards: {len(verb_type_items)}")
     print(f"Adjective type cards: {len(adjective_type_items)}")
     print(f"Vocabulary context cloze: {len(vocab_cloze_items)} (min SRS {args.vocab_cloze_min_srs})")
@@ -4983,6 +5336,7 @@ def main() -> None:
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
             conjugation_drills=conjugation_drills,
+            conjugation_reverse_drills=conjugation_reverse_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
@@ -5007,6 +5361,7 @@ def main() -> None:
                 kanji_radical_items=kanji_radical_items,
                 radical_items=radical_items,
                 conjugation_drills=conjugation_drills,
+                conjugation_reverse_drills=conjugation_reverse_drills,
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
@@ -5026,6 +5381,7 @@ def main() -> None:
             reading_keywords=reading_keywords,
             kanji_radical_items=kanji_radical_items,
             conjugation_drills=conjugation_drills,
+            conjugation_reverse_drills=conjugation_reverse_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
@@ -5084,6 +5440,10 @@ def main() -> None:
         path, deck = build_conjugation_deck(conjugation_drills, output_dir)
         created.append(path)
         built_decks.append(deck)
+    if "conjugations-reverse" in wanted and conjugation_reverse_drills:
+        path, deck = build_conjugation_reverse_deck(conjugation_reverse_drills, output_dir)
+        created.append(path)
+        built_decks.append(deck)
     if "verb-types" in wanted and verb_type_items:
         path, deck = build_verb_type_deck(verb_type_items, output_dir)
         created.append(path)
@@ -5131,6 +5491,7 @@ def main() -> None:
                 kanji_radical_items=kanji_radical_items,
                 radical_items=radical_items,
                 conjugation_drills=conjugation_drills,
+                conjugation_reverse_drills=conjugation_reverse_drills,
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
@@ -5172,6 +5533,7 @@ def main() -> None:
             kanji_radical_items=kanji_radical_items,
             radical_items=radical_items,
             conjugation_drills=conjugation_drills,
+            conjugation_reverse_drills=conjugation_reverse_drills,
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
