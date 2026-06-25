@@ -57,7 +57,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.20.0"
+VERSION = "2.21.0"
 BUILD_DATE = "2026-06-24"
 
 import warnings
@@ -147,6 +147,9 @@ READING_MNEMONIC_WORD_BEFORE_KANA_RE = re.compile(
 WK_PAREN_READING_RE = re.compile(
     r"([\u4e00-\u9fff々〆ヵヶ]+)[（(]([ぁ-んーゔゕゖ]+)[）)]"
 )
+# WK sometimes defers kanji early (e.g. ふじ山) before teaching the full form (富士山).
+WK_KANA_PREFIX_KANJI_SUFFIX_RE = re.compile(r"^([ぁ-んー]+)([\u4e00-\u9fff]+)$")
+VOCAB_TYPE_HONORIFIC_PREFIXES = ("お", "ご", "御")
 
 # Keep stable after first import.
 DECK_IDS = {
@@ -189,7 +192,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "phonetic_drill": "v4",
     "conjugation": "v2",
     "word_class": "v1",
-    "vocab_cloze": "v3",
+    "vocab_cloze": "v4",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -1455,6 +1458,56 @@ def context_sentences_html(subject: dict) -> str:
         if ja:
             parts.append(f'<div class="context"><div class="jp">{ja}</div><div class="meaning">{en}</div></div>')
     return "".join(parts)
+
+
+def _kanji_char_count(text: str) -> int:
+    return sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+
+
+def _vocab_type_honorific_prefix(prefix: str) -> bool:
+    return any(prefix.startswith(honorific) for honorific in VOCAB_TYPE_HONORIFIC_PREFIXES)
+
+
+def build_vocab_cloze_reading_index(vocab_items: Sequence[dict]) -> Dict[str, List[dict]]:
+    """Index vocabulary by primary reading for WK full-form lookups."""
+    index: Dict[str, List[dict]] = {}
+    for vocab in vocab_items:
+        if vocab.get("object") != "vocabulary":
+            continue
+        reading = first_reading(vocab)
+        if reading:
+            index.setdefault(reading, []).append(vocab)
+    return index
+
+
+def vocab_cloze_type_expression(vocab: dict, reading_index: Dict[str, List[dict]]) -> str:
+    """Return the kanji-production answer for type-in; may differ from WK's early spelling."""
+    expr = (vocab["data"].get("characters") or "").strip()
+    if not expr:
+        return expr
+
+    match = WK_KANA_PREFIX_KANJI_SUFFIX_RE.match(expr)
+    if not match:
+        return expr
+
+    prefix, suffix = match.group(1), match.group(2)
+    if _vocab_type_honorific_prefix(prefix):
+        return expr
+
+    reading = first_reading(vocab)
+    best_expr = expr
+    best_kanji = _kanji_char_count(expr)
+    for alt_vocab in reading_index.get(reading, ()):
+        if alt_vocab["id"] == vocab["id"]:
+            continue
+        alt_expr = (alt_vocab["data"].get("characters") or "").strip()
+        if not alt_expr.endswith(suffix):
+            continue
+        alt_kanji = _kanji_char_count(alt_expr)
+        if alt_kanji > best_kanji:
+            best_expr = alt_expr
+            best_kanji = alt_kanji
+    return best_expr
 
 
 def vocab_cloze_blank_targets(vocab: dict) -> List[str]:
@@ -3181,6 +3234,8 @@ def make_vocab_cloze_model() -> WkModel:
             {"name": "ClozeSentence"},
             {"name": "Hint"},
             {"name": "Expression"},
+            {"name": "TypeExpression"},
+            {"name": "WkSpellingNote"},
             {"name": "Reading"},
             {"name": "Meaning"},
             {"name": "FullSentence"},
@@ -3196,7 +3251,7 @@ def make_vocab_cloze_model() -> WkModel:
                 <div class="prompt">Type the missing word</div>
                 <div class="jp cloze">{{ClozeSentence}}</div>
                 <div class="meaning hint">{{Hint}}</div>
-                <div class="type-answer">{{type:Expression}}</div>
+                <div class="type-answer">{{type:TypeExpression}}</div>
                 <div class="meta">{{Meta}}</div>
                 """,
                 "afmt": """
@@ -3204,6 +3259,7 @@ def make_vocab_cloze_model() -> WkModel:
                 <hr>
                 <div class="reading answer">{{Reading}}</div>
                 <div class="meaning answer">{{Meaning}}</div>
+                {{#WkSpellingNote}}<div class="wk-spelling">{{WkSpellingNote}}</div>{{/WkSpellingNote}}
                 <div class="context">
                   <div class="jp">{{FullSentence}}</div>
                   <div class="meaning">{{SentenceEnglish}}</div>
@@ -3219,6 +3275,7 @@ def make_vocab_cloze_model() -> WkModel:
 .hint { font-size: 17px; margin-top: 10px; color: #bbb; font-style: italic; }
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .jp.answer { font-size: 40px; }
+.wk-spelling { font-size: 15px; color: #aaa; margin: 8px 0; font-style: italic; }
 .sentence-audio { margin-bottom: 12px; }
 """,
             "vocab_cloze",
@@ -4215,6 +4272,7 @@ def build_vocab_cloze_deck(
     assignment_index: Dict[int, dict],
     output_dir: Path,
     *,
+    vocab_reading_index: Optional[Dict[str, List[dict]]] = None,
     sentence_audio: bool = True,
     sentence_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_sentence_audio: bool = False,
@@ -4230,10 +4288,17 @@ def build_vocab_cloze_deck(
     if sentence_audio:
         require_edge_tts()
         print(f"Sentence audio (voice={sentence_audio_voice}, cache={SENTENCE_AUDIO_CACHE_DIR})...")
+    reading_index = vocab_reading_index or {}
     for item in cloze_items:
         vocab = item.vocab
         data = vocab["data"]
         expr = data.get("characters") or ""
+        type_expr = vocab_cloze_type_expression(vocab, reading_index)
+        wk_spelling_note = (
+            f"WK spelling in sentences: {expr}"
+            if type_expr != expr
+            else ""
+        )
         reading = first_reading(vocab)
         meaning = "; ".join(primary_meanings(vocab))
         level = data.get("level", "?")
@@ -4270,6 +4335,8 @@ def build_vocab_cloze_deck(
                 html.escape(item.cloze_sentence),
                 html.escape(meaning),
                 html.escape(expr),
+                html.escape(type_expr),
+                html.escape(wk_spelling_note),
                 html.escape(reading),
                 html.escape(meaning),
                 html.escape(item.full_sentence),
@@ -4598,6 +4665,7 @@ def print_preview_report(
     next_level: int,
     pitch_index: Dict[Tuple[str, str], dict],
     review_index: Dict[int, dict],
+    vocab_reading_index: Optional[Dict[str, List[dict]]] = None,
 ) -> None:
     print("\nDRY RUN — no .apkg files will be written")
     print("=" * 60)
@@ -4691,10 +4759,18 @@ def print_preview_report(
             ],
         )
     if "vocab-cloze" in wanted:
+        reading_index = vocab_reading_index or {}
         preview_deck_section(
             DECK_NAMES["vocab-cloze"],
             [
-                f"{item.vocab['data'].get('characters') or '?'} · {item.cloze_sentence}"
+                (
+                    f"{item.vocab['data'].get('characters') or '?'} "
+                    f"(type {vocab_cloze_type_expression(item.vocab, reading_index)}) · "
+                    f"{item.cloze_sentence}"
+                )
+                if vocab_cloze_type_expression(item.vocab, reading_index)
+                != (item.vocab["data"].get("characters") or "")
+                else f"{item.vocab['data'].get('characters') or '?'} · {item.cloze_sentence}"
                 for item in vocab_cloze_items
             ],
         )
@@ -4879,6 +4955,7 @@ def main() -> None:
         indexes["assignments"],
         min_srs=args.vocab_cloze_min_srs,
     )
+    vocab_reading_index = build_vocab_cloze_reading_index(vocab_items)
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
@@ -4957,6 +5034,7 @@ def main() -> None:
             next_level=next_level,
             pitch_index=pitch_index,
             review_index=indexes["reviews"],
+            vocab_reading_index=vocab_reading_index,
         )
         return
     created: List[Path] = []
@@ -5019,6 +5097,7 @@ def main() -> None:
             vocab_cloze_items,
             indexes["assignments"],
             output_dir,
+            vocab_reading_index=vocab_reading_index,
             sentence_audio=args.sentence_audio,
             sentence_audio_voice=args.sentence_audio_voice,
             refresh_sentence_audio=args.refresh_sentence_audio,

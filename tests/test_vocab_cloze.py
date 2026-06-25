@@ -18,6 +18,7 @@ from wk_decks import (
     WK_SRS_STAGE_MASTER,
     apply_wk_paren_readings,
     blank_target_in_sentence,
+    build_vocab_cloze_reading_index,
     collect_vocab_cloze_items,
     ensure_sentence_audio_file,
     prepare_sentence_for_tts,
@@ -26,6 +27,7 @@ from wk_decks import (
     sentence_audio_cache_path,
     vocab_cloze_audio_basename,
     vocab_cloze_blank_targets,
+    vocab_cloze_type_expression,
 )
 
 
@@ -172,6 +174,58 @@ class VocabClozeTests(unittest.TestCase):
             generate.assert_not_called()
             dest.unlink()
             dest.parent.rmdir()
+
+    def test_type_expression_upgrades_wk_deferred_kanji(self) -> None:
+        early = mock_vocab(
+            vocab_id=2505,
+            expr="ふじ山",
+            reading="ふじさん",
+            sentences=[{"ja": "あっ、ふじ山だ！", "en": "Ah, it's Mt. Fuji!"}],
+        )
+        full = mock_vocab(
+            vocab_id=5490,
+            expr="富士山",
+            reading="ふじさん",
+            sentences=[{"ja": "富士山に登りたい。", "en": "I want to climb Mt. Fuji."}],
+            level=31,
+        )
+        index = build_vocab_cloze_reading_index([early, full])
+        self.assertEqual(vocab_cloze_type_expression(early, index), "富士山")
+
+    def test_type_expression_keeps_honorific_and_regular_vocab(self) -> None:
+        honorific = mock_vocab(
+            vocab_id=2799,
+            expr="お金",
+            reading="おかね",
+            sentences=[{"ja": "お金がありません。", "en": "I have no money."}],
+        )
+        regular = mock_vocab(
+            vocab_id=100,
+            expr="食べる",
+            reading="たべる",
+            sentences=[{"ja": "ご飯を食べる。", "en": "I eat rice."}],
+        )
+        index = build_vocab_cloze_reading_index([honorific, regular])
+        self.assertEqual(vocab_cloze_type_expression(honorific, index), "お金")
+        self.assertEqual(vocab_cloze_type_expression(regular, index), "食べる")
+
+    def test_type_expression_does_not_upgrade_reading_homonyms(self) -> None:
+        pick_up = mock_vocab(
+            vocab_id=3287,
+            expr="拾う",
+            reading="ひろう",
+            sentences=[{"ja": "財布を拾う。", "en": "I pick up a wallet."}],
+            level=11,
+        )
+        fatigue = mock_vocab(
+            vocab_id=9999,
+            expr="疲労",
+            reading="ひろう",
+            sentences=[{"ja": "疲労がたまる。", "en": "Fatigue builds up."}],
+            level=20,
+        )
+        index = build_vocab_cloze_reading_index([pick_up, fatigue])
+        self.assertEqual(vocab_cloze_type_expression(pick_up, index), "拾う")
 
 
 if __name__ == "__main__":
