@@ -4,23 +4,17 @@ wk_decks.py
 
 Generate update-safe Anki decks from your WaniKani account.
 
-Decks:
-  - leeches: items you repeatedly miss in WaniKani
-  - verb-pairs: transitive/intransitive and related contrast pairs
-  - confusables: vocabulary sharing kanji/readings that are easy to mix up
-  - phonetic-families: per-kanji on'yomi drill via Keisei phonetic map (WK readings + component sounds)
-  - pitch-leeches: leeches with pitch data, if pitch data is supplied
-  - radicals: current-level and next-level radicals
-  - reading-keywords: high-confidence WK phonetic keywords from reading mnemonics
-  - kanji-radicals: kanji whose radical components are unlocked in WaniKani
-  - conjugations-verbs: verb conjugation drills (type-in answer, Master+ by default)
-  - conjugations-adjectives: adjective conjugation drills (type-in answer, Master+ by default)
-  - conjugations: alias for both conjugations-verbs and conjugations-adjectives
-  - conjugations-reverse: conjugated verb on front, dictionary form on back (type-in)
-  - verb-types: recall godan / ichidan / irregular verb class for WK verbs
-  - adjective-types: recall い-adjective vs な-adjective for WK adjectives
+Decks (default --deck all):
+  - radicals: current, next, and locked-next-level radicals
+  - phonetic-families: per-kanji on'yomi drill via Keisei phonetic map
+  - conjugations-verbs / conjugations-adjectives / conjugations-reverse
+  - verb-types / adjective-types
   - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
+  - grammar: JLPT grammar cloze from Hanabira open data (see grammar_decks.py)
   - all: all of the above
+
+Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
+  leeches, verb-pairs, confusables, reading-keywords, kanji-radicals, pitch-leeches
 
 Install:
   pip install requests genanki
@@ -64,8 +58,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.22.0"
-BUILD_DATE = "2026-06-11"
+VERSION = "2.23.0"
+BUILD_DATE = "2026-06-24"
 
 import warnings
 
@@ -130,9 +124,11 @@ LEECH_STREAK_PENALTY_MAX = 5
 LEECH_STREAK_PENALTY_STEP = 0.2
 LEECH_WEAK_SIDE_MIN_INCORRECT = 2
 CONTEXT_SENTENCE_LIMIT = 3
-# WaniKani assignment SRS stages (API srs_stage): 5–6 Guru, 7 Master, 8 Enlightened, 9 Burned.
+# WaniKani assignment SRS stages (API srs_stage): 1 Apprentice I … 9 Burned.
+WK_SRS_STAGE_APPRENTICE_1 = 1
 WK_SRS_STAGE_GURU_1 = 5
 WK_SRS_STAGE_MASTER = 7
+PHONETIC_FAMILIES_MIN_SRS = WK_SRS_STAGE_APPRENTICE_1
 VOCAB_CLOZE_DEFAULT_MIN_SRS = WK_SRS_STAGE_MASTER
 CONJUGATION_DEFAULT_MIN_SRS = WK_SRS_STAGE_MASTER
 CLOZE_BLANK_DISPLAY = "＿＿＿"
@@ -220,6 +216,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "word_class": "v1",
     "vocab_cloze": "v4",
     "conjugation_reverse": "v3",
+    "grammar_cloze": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -237,6 +234,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "word_class": 8,
     "vocab_cloze": 9,
     "conjugation_reverse": 10,
+    "grammar_cloze": 11,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -254,6 +252,7 @@ NOTE_TYPE_NAMES = {
     "conjugation": "WK Update-Safe Conjugation",
     "word_class": "WK Update-Safe Word Class",
     "vocab_cloze": "WK Update-Safe Vocab Cloze",
+    "grammar_cloze": "WK Update-Safe Grammar Cloze",
     "conjugation_reverse": "WK Update-Safe Conjugation Reverse",
 }
 
@@ -283,6 +282,7 @@ RUN_HISTORY_COLUMNS = [
     "eligible_radicals",
     "radical_level_current",
     "radical_level_next",
+    "radical_level_locked_next",
     "leeches",
     "verb_pairs",
     "confusables",
@@ -295,6 +295,7 @@ RUN_HISTORY_COLUMNS = [
     "verb_type_cards",
     "adjective_type_cards",
     "vocab_cloze",
+    "grammar_cards",
     "pitch_entries",
     "pitch_leeches",
     "bundled_in_wk_all",
@@ -304,44 +305,8 @@ FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
 
 FILTERED_DECK_DEFINITIONS = [
     {
-        "name": "WK::Daily Priority",
-        "search": '(tag:priority-high) AND (deck:"WaniKani Leech Fixes" OR deck:"WaniKani Verb Pair Contrasts")',
-        "limit": 30,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Verb Contrasts",
-        "search": 'deck:"WaniKani Verb Pair Contrasts" AND (tag:priority-high OR tag:priority-medium)',
-        "limit": 30,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Leeches",
-        "search": 'deck:"WaniKani Leech Fixes"',
-        "limit": 50,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Meaning Leeches",
-        "search": 'deck:"WaniKani Leech Fixes" AND tag:leech-meaning',
-        "limit": 30,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Reading Leeches",
-        "search": 'deck:"WaniKani Leech Fixes" AND tag:leech-reading',
-        "limit": 30,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
         "name": "WK::Radicals Preview",
         "search": 'deck:"WaniKani Current and Next Radicals"',
-        "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Confusables Light",
-        "search": 'deck:"WaniKani Confusable Vocabulary" AND tag:priority-high',
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
@@ -349,6 +314,18 @@ FILTERED_DECK_DEFINITIONS = [
         "name": "WK::Vocab Context",
         "search": 'deck:"WaniKani Vocabulary Context"',
         "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Grammar",
+        "search": 'deck:"Japanese Grammar Context" tag:jlpt-n5 OR tag:jlpt-n4',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Phonetic Families",
+        "search": 'deck:"WaniKani Phonetic Families" tag:priority-low',
+        "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
 ]
@@ -368,6 +345,7 @@ DECK_NAMES = {
     "verb-types": "WaniKani Verb Type Practice",
     "adjective-types": "WaniKani Adjective Type Practice",
     "vocab-cloze": "WaniKani Vocabulary Context",
+    "grammar": "Japanese Grammar Context",
 }
 
 PAIR_RULES = [
@@ -1266,7 +1244,13 @@ def is_burned(subject: dict, assignment_index: Dict[int, dict]) -> bool:
     return bool(assignment and assignment["data"].get("burned_at"))
 
 
-def passes_progress_filter(subject: dict, assignment_index: Dict[int, dict], args: argparse.Namespace) -> bool:
+def passes_progress_filter(
+    subject: dict,
+    assignment_index: Dict[int, dict],
+    args: argparse.Namespace,
+    *,
+    min_srs: Optional[int] = None,
+) -> bool:
     if subject["data"].get("level", 999) > args.max_level:
         return False
     if args.only_unlocked and not is_unlocked(subject, assignment_index):
@@ -1275,7 +1259,8 @@ def passes_progress_filter(subject: dict, assignment_index: Dict[int, dict], arg
         return False
     if args.only_burned and not is_burned(subject, assignment_index):
         return False
-    return srs_stage(subject, assignment_index) >= args.min_srs
+    srs_floor = args.min_srs if min_srs is None else min_srs
+    return srs_stage(subject, assignment_index) >= srs_floor
 
 
 def review_stats_data(subject: dict, review_index: Dict[int, dict]) -> dict:
@@ -3575,13 +3560,47 @@ def current_wk_level(user: dict, subjects: Sequence[dict], assignment_index: Dic
     return max(levels) if levels else 1
 
 
-def selected_radical_levels(user: dict, subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> Tuple[int, int]:
+class RadicalPreviewLevels(NamedTuple):
+    current: int
+    next: int
+    locked_next: int
+
+    def level_set(self) -> Set[int]:
+        return {self.current, self.next, self.locked_next}
+
+
+def selected_radical_levels(
+    user: dict,
+    subjects: Sequence[dict],
+    assignment_index: Dict[int, dict],
+    args: argparse.Namespace,
+) -> RadicalPreviewLevels:
     if args.radical_current_level:
         current = args.radical_current_level
     else:
         current = current_wk_level(user, subjects, assignment_index)
     next_level = min(current + 1, 60)
-    return current, next_level
+    locked_next = min(current + 2, 60)
+    return RadicalPreviewLevels(current, next_level, locked_next)
+
+
+def radical_level_status(level: int, preview_levels: RadicalPreviewLevels) -> str:
+    if level == preview_levels.current:
+        return "current-level"
+    if level == preview_levels.next:
+        return "next-level"
+    if level == preview_levels.locked_next:
+        return "locked-next-level"
+    return "preview-level"
+
+
+def radical_priority(radical: dict, preview_levels: RadicalPreviewLevels) -> str:
+    level = int(radical["data"].get("level") or 999)
+    if level == preview_levels.current or level == preview_levels.next:
+        return "priority-high"
+    if level == preview_levels.locked_next:
+        return "priority-medium"
+    return "priority-medium"
 
 
 def kanji_using_radical(kanji_items: Sequence[dict], radical: dict, max_level: int = 60, limit: int = 12) -> List[dict]:
@@ -3597,13 +3616,6 @@ def kanji_using_radical(kanji_items: Sequence[dict], radical: dict, max_level: i
 def radical_is_learned(radical: dict, assignment_index: Dict[int, dict]) -> bool:
     assignment = assignment_index.get(radical["id"])
     return bool(assignment and assignment["data"].get("started_at"))
-
-
-def radical_priority(radical: dict, current_level: int, next_level: int) -> str:
-    level = int(radical["data"].get("level") or 999)
-    if level == current_level or level == next_level:
-        return "priority-high"
-    return "priority-medium"
 
 
 def radical_display(radical: dict) -> str:
@@ -3853,8 +3865,18 @@ def vocab_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], 
     return [s for s in subjects if s.get("object") == "vocabulary" and passes_progress_filter(s, assignment_index, args)]
 
 
-def kanji_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
-    return [s for s in subjects if s.get("object") == "kanji" and passes_progress_filter(s, assignment_index, args)]
+def kanji_subjects(
+    subjects: Sequence[dict],
+    assignment_index: Dict[int, dict],
+    args: argparse.Namespace,
+    *,
+    min_srs: Optional[int] = None,
+) -> List[dict]:
+    return [
+        s
+        for s in subjects
+        if s.get("object") == "kanji" and passes_progress_filter(s, assignment_index, args, min_srs=min_srs)
+    ]
 
 
 def all_wk_kanji_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
@@ -4258,12 +4280,11 @@ def build_radical_deck(
     indexes: dict,
     args: argparse.Namespace,
     output_dir: Path,
-    current_level: int,
-    next_level: int,
+    preview_levels: RadicalPreviewLevels,
 ) -> Tuple[Path, genanki.Deck]:
     selected = [
         r for r in radicals
-        if int(r["data"].get("level") or 999) in {current_level, next_level}
+        if int(r["data"].get("level") or 999) in preview_levels.level_set()
     ]
 
     deck = genanki.Deck(DECK_IDS["radicals"], DECK_NAMES["radicals"])
@@ -4274,7 +4295,7 @@ def build_radical_deck(
     for radical in sorted(selected, key=lambda r: (r["data"].get("level", 999), radical_display(r))):
         data = radical["data"]
         level = int(data.get("level") or 0)
-        status = "current-level" if level == current_level else "next-level"
+        status = radical_level_status(level, preview_levels)
         if radical_is_learned(radical, indexes["assignments"]):
             status += " · started"
 
@@ -4294,7 +4315,13 @@ def build_radical_deck(
         note = genanki.Note(
             model=model,
             fields=[
-                stable_guid("radical", radical["id"], current_level, next_level),
+                stable_guid(
+                    "radical",
+                    radical["id"],
+                    preview_levels.current,
+                    preview_levels.next,
+                    preview_levels.locked_next,
+                ),
                 radical_text,
                 meanings,
                 str(level),
@@ -4307,10 +4334,16 @@ def build_radical_deck(
                 "wanikani",
                 "radical",
                 status.split()[0],
-                radical_priority(radical, current_level, next_level),
+                radical_priority(radical, preview_levels),
                 f"wk-level-{level}",
             ],
-            guid=stable_guid("radical", radical["id"], current_level, next_level),
+            guid=stable_guid(
+                "radical",
+                radical["id"],
+                preview_levels.current,
+                preview_levels.next,
+                preview_levels.locked_next,
+            ),
         )
         deck.add_note(note)
 
@@ -4893,20 +4926,15 @@ def wanted_decks(args: argparse.Namespace) -> Set[str]:
     if args.deck != "all":
         return normalize_wanted_decks({args.deck})
     return normalize_wanted_decks({
-        "leeches",
-        "verb-pairs",
-        "confusables",
         "phonetic-families",
-        "pitch-leeches",
         "radicals",
-        "reading-keywords",
-        "kanji-radicals",
         "conjugations-verbs",
         "conjugations-adjectives",
         "conjugations-reverse",
         "verb-types",
         "adjective-types",
         "vocab-cloze",
+        "grammar",
     })
 
 
@@ -4926,23 +4954,14 @@ def deck_names_for_run(
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
+    grammar_card_count: int,
     pitch_index: Dict[Tuple[str, str], dict],
 ) -> List[str]:
     names: List[str] = []
     if "radicals" in wanted and radical_items:
         names.append(DECK_NAMES["radicals"])
-    if "leeches" in wanted and leeches:
-        names.append(DECK_NAMES["leeches"])
-    if "verb-pairs" in wanted and verb_pairs:
-        names.append(DECK_NAMES["verb-pairs"])
-    if "confusables" in wanted and confusables:
-        names.append(DECK_NAMES["confusables"])
     if "phonetic-families" in wanted and phonetic_families:
         names.append(DECK_NAMES["phonetic-families"])
-    if "reading-keywords" in wanted and reading_keywords:
-        names.append(DECK_NAMES["reading-keywords"])
-    if "kanji-radicals" in wanted and kanji_radical_items:
-        names.append(DECK_NAMES["kanji-radicals"])
     if "conjugations-verbs" in wanted and conjugation_verb_drills:
         names.append(DECK_NAMES["conjugations-verbs"])
     if "conjugations-adjectives" in wanted and conjugation_adjective_drills:
@@ -4955,6 +4974,8 @@ def deck_names_for_run(
         names.append(DECK_NAMES["adjective-types"])
     if "vocab-cloze" in wanted and vocab_cloze_items:
         names.append(DECK_NAMES["vocab-cloze"])
+    if "grammar" in wanted and grammar_card_count:
+        names.append(DECK_NAMES["grammar"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -4965,8 +4986,7 @@ def build_run_history_row(
     user: dict,
     *,
     dry_run: bool,
-    current_level: int,
-    next_level: int,
+    preview_levels: RadicalPreviewLevels,
     vocab_count: int,
     kanji_count: int,
     radical_count: int,
@@ -4983,6 +5003,7 @@ def build_run_history_row(
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
+    grammar_card_count: int,
     pitch_index: Dict[Tuple[str, str], dict],
     bundled_deck_names: Sequence[str],
     bundled_in_wk_all: bool,
@@ -5003,8 +5024,9 @@ def build_run_history_row(
         "eligible_vocab": vocab_count,
         "eligible_kanji": kanji_count,
         "eligible_radicals": radical_count,
-        "radical_level_current": current_level,
-        "radical_level_next": next_level,
+        "radical_level_current": preview_levels.current,
+        "radical_level_next": preview_levels.next,
+        "radical_level_locked_next": preview_levels.locked_next,
         "leeches": len(leeches),
         "verb_pairs": len(verb_pairs),
         "confusables": len(confusables),
@@ -5017,6 +5039,7 @@ def build_run_history_row(
         "verb_type_cards": len(verb_type_items),
         "adjective_type_cards": len(adjective_type_items),
         "vocab_cloze": len(vocab_cloze_items),
+        "grammar_cards": grammar_card_count,
         "pitch_entries": len(pitch_index),
         "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
         "bundled_in_wk_all": int(bundled_in_wk_all),
@@ -5214,9 +5237,9 @@ def print_preview_report(
     verb_type_items: Sequence[dict],
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
+    grammar_cards: Sequence[Any],
     radical_items: Sequence[dict],
-    current_level: int,
-    next_level: int,
+    preview_levels: RadicalPreviewLevels,
     pitch_index: Dict[Tuple[str, str], dict],
     review_index: Dict[int, dict],
     vocab_reading_index: Optional[Dict[str, List[dict]]] = None,
@@ -5337,10 +5360,18 @@ def print_preview_report(
                 for item in vocab_cloze_items
             ],
         )
+    if "grammar" in wanted:
+        preview_deck_section(
+            DECK_NAMES["grammar"],
+            [
+                f"JLPT {item.jlpt} · {item.title[:50]} · {item.cloze_sentence}"
+                for item in grammar_cards
+            ],
+        )
     if "radicals" in wanted:
         selected = [
             r for r in radical_items
-            if int(r["data"].get("level") or 999) in {current_level, next_level}
+            if int(r["data"].get("level") or 999) in preview_levels.level_set()
         ]
         preview_deck_section(
             DECK_NAMES["radicals"],
@@ -5357,6 +5388,16 @@ def print_preview_report(
         f"Conjugation filter: min_srs={args.conjugation_min_srs} "
         f"(Master+ when {WK_SRS_STAGE_MASTER}, Guru+ when {WK_SRS_STAGE_GURU_1})"
     )
+    print(
+        f"Phonetic families filter: min_srs={PHONETIC_FAMILIES_MIN_SRS} "
+        f"(Apprentice+; independent of --min-srs)"
+    )
+    if "grammar" in wanted:
+        print(
+            f"Grammar filter: max_jlpt={args.grammar_max_jlpt}, "
+            f"examples_per_point={args.grammar_max_examples}, "
+            f"max_unknown_kanji={args.grammar_max_unknown_kanji}"
+        )
     if args.sentence_audio:
         print(f"Sentence audio: on (voice={args.sentence_audio_voice})")
     else:
@@ -5365,16 +5406,23 @@ def print_preview_report(
 
 
 def parse_args() -> argparse.Namespace:
+    from grammar_decks import (
+        GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
+        GRAMMAR_DEFAULT_MAX_JLPT,
+        GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
+        JLPT_LEVELS,
+    )
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
-        "pitch-leeches", "radicals", "reading-keywords",         "kanji-radicals",
+        "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
         "conjugations",
         "conjugations-verbs",
         "conjugations-adjectives",
         "conjugations-reverse",
-        "verb-types", "adjective-types", "vocab-cloze", "all",
+        "verb-types", "adjective-types", "vocab-cloze", "grammar", "all",
     ], default="all")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
@@ -5417,6 +5465,29 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Re-download sentence audio instead of using the local TTS cache.",
     )
+    parser.add_argument(
+        "--grammar-max-jlpt",
+        choices=list(JLPT_LEVELS),
+        default=GRAMMAR_DEFAULT_MAX_JLPT,
+        help="Include grammar points through this JLPT level (default: N2).",
+    )
+    parser.add_argument(
+        "--grammar-max-examples",
+        type=int,
+        default=GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
+        help="Max example cloze cards per grammar point (default: 2).",
+    )
+    parser.add_argument(
+        "--grammar-max-unknown-kanji",
+        type=int,
+        default=GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
+        help="Skip example sentences with more than this many unknown WK kanji (default: 5).",
+    )
+    parser.add_argument(
+        "--grammar-no-wk-filter",
+        action="store_true",
+        help="Do not filter grammar examples by WaniKani kanji knowledge.",
+    )
     parser.add_argument("--leech-incorrect-min", type=int, default=3)
     parser.add_argument("--leech-streak-max", type=int, default=5)
     parser.add_argument("--leech-score-min", type=float, default=1.0, help="Minimum composite leech score after incorrect/streak filters.")
@@ -5435,6 +5506,43 @@ def parse_args() -> argparse.Namespace:
         help="Run --verify-conjugations and exit without writing decks.",
     )
     return parser.parse_args()
+
+
+def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> None:
+    """Build grammar deck without WaniKani API (grammar-only runs)."""
+    from grammar_decks import build_grammar_deck, collect_grammar_cards
+
+    grammar_cards = collect_grammar_cards(
+        max_jlpt=args.grammar_max_jlpt,
+        max_examples_per_point=args.grammar_max_examples,
+        max_unknown_kanji=args.grammar_max_unknown_kanji,
+        known_kanji=set(),
+        refresh=args.refresh_cache,
+    )
+    print(
+        f"Grammar context cloze: {len(grammar_cards)} "
+        f"(JLPT ≤ {args.grammar_max_jlpt}, {args.grammar_max_examples} ex/point)"
+    )
+    if args.dry_run:
+        preview_deck_section(
+            DECK_NAMES["grammar"],
+            [f"JLPT {c.jlpt} · {c.title[:50]} · {c.cloze_sentence}" for c in grammar_cards],
+        )
+        print("\nRe-run without --dry-run to write decks.")
+        return
+    if not grammar_cards:
+        print("No grammar cards created.", file=sys.stderr)
+        sys.exit(1)
+    path, deck = build_grammar_deck(grammar_cards, output_dir)
+    bundle_path: Optional[Path] = None
+    if not args.no_bundle:
+        bundle_path = output_dir / BUNDLE_FILENAME
+        write_bundled_apkg([deck], bundle_path)
+    print("Created:")
+    if bundle_path:
+        print(f"  {bundle_path}  ← recommended import")
+    print(f"  {path}")
+    print_import_verification_help(bundle_path)
 
 
 def main() -> None:
@@ -5457,6 +5565,10 @@ def main() -> None:
         ok = run_verify_conjugations(args, cache_only=True)
         if not ok:
             sys.exit(1)
+        return
+
+    if wanted_decks(args) == {"grammar"}:
+        run_standalone_grammar_deck(args, output_dir)
         return
 
     user = get_cached_user(refresh=args.refresh_cache)
@@ -5495,8 +5607,14 @@ def main() -> None:
     pitch_index = merge_pitch_indexes(load_yomitan_pitch(args.yomitan_dict), load_pitch_csv(args.pitch_csv))
     vocab_items = vocab_subjects(subjects, indexes["assignments"], args)
     kanji_items = kanji_subjects(subjects, indexes["assignments"], args)
+    phonetic_seed_kanji = kanji_subjects(
+        subjects,
+        indexes["assignments"],
+        args,
+        min_srs=PHONETIC_FAMILIES_MIN_SRS,
+    )
     radical_items = radical_subjects(subjects, args)
-    current_level, next_level = selected_radical_levels(user, subjects, indexes["assignments"], args)
+    preview_levels = selected_radical_levels(user, subjects, indexes["assignments"], args)
     if args.verify_conjugations:
         if not run_verify_conjugations(args, vocab_items=vocab_items):
             sys.exit(1)
@@ -5510,67 +5628,132 @@ def main() -> None:
             "Keisei phonetic DB:",
             ", ".join(f"{key}={len(keisei_databases[key])}" for key in sorted(keisei_databases)),
         )
-    leeches = find_leeches(subjects, indexes["assignments"], indexes["reviews"], args)
-    verb_pairs = find_verb_pairs(vocab_items, args)
-    confusables = find_confusable_groups(vocab_items, args)
-    phonetic_families = find_phonetic_families(
-        kanji_items,
-        all_wk_kanji_subjects(subjects, args),
-        keisei_databases.get("phonetic", {}),
-        keisei_databases.get("kanji", {}),
-        args,
+    wanted = wanted_decks(args)
+    leeches = (
+        find_leeches(subjects, indexes["assignments"], indexes["reviews"], args)
+        if "leeches" in wanted or "pitch-leeches" in wanted
+        else []
     )
-    started_kanji_ids = {item["id"] for item in kanji_items}
+    verb_pairs = find_verb_pairs(vocab_items, args) if "verb-pairs" in wanted else []
+    confusables = (
+        find_confusable_groups(vocab_items, args) if "confusables" in wanted else []
+    )
+    phonetic_families = (
+        find_phonetic_families(
+            phonetic_seed_kanji,
+            all_wk_kanji_subjects(subjects, args),
+            keisei_databases.get("phonetic", {}),
+            keisei_databases.get("kanji", {}),
+            args,
+        )
+        if "phonetic-families" in wanted
+        else []
+    )
+    started_kanji_ids = {item["id"] for item in phonetic_seed_kanji}
     all_kanji_by_char = kanji_by_char(all_wk_kanji_subjects(subjects, args))
-    reading_keywords = build_reading_keyword_catalog(subjects)
-    kanji_radical_items = find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
-    conjugation_verb_drills = collect_conjugation_drills(
-        vocab_items,
-        indexes["assignments"],
-        args,
-        min_srs=args.conjugation_min_srs,
-        word_classes=VERB_CONJUGATION_WORD_CLASSES,
+    reading_keywords = (
+        build_reading_keyword_catalog(subjects) if "reading-keywords" in wanted else []
     )
-    conjugation_adjective_drills = collect_conjugation_drills(
-        vocab_items,
-        indexes["assignments"],
-        args,
-        min_srs=args.conjugation_min_srs,
-        word_classes=ADJECTIVE_CONJUGATION_WORD_CLASSES,
+    kanji_radical_items = (
+        find_kanji_radical_breakdown(kanji_items, radical_items, indexes["assignments"], args)
+        if "kanji-radicals" in wanted
+        else []
     )
-    conjugation_reverse_drills = collect_conjugation_drills(
-        vocab_items,
-        indexes["assignments"],
-        args,
-        min_srs=args.conjugation_min_srs,
-        word_classes=VERB_CONJUGATION_WORD_CLASSES,
+    conjugation_verb_drills = (
+        collect_conjugation_drills(
+            vocab_items,
+            indexes["assignments"],
+            args,
+            min_srs=args.conjugation_min_srs,
+            word_classes=VERB_CONJUGATION_WORD_CLASSES,
+        )
+        if "conjugations-verbs" in wanted or "conjugations-reverse" in wanted
+        else []
     )
-    verb_type_items = collect_verb_type_items(vocab_items, args)
-    adjective_type_items = collect_adjective_type_items(vocab_items, args)
-    vocab_cloze_items = collect_vocab_cloze_items(
-        vocab_items,
-        indexes["assignments"],
-        min_srs=args.vocab_cloze_min_srs,
+    conjugation_adjective_drills = (
+        collect_conjugation_drills(
+            vocab_items,
+            indexes["assignments"],
+            args,
+            min_srs=args.conjugation_min_srs,
+            word_classes=ADJECTIVE_CONJUGATION_WORD_CLASSES,
+        )
+        if "conjugations-adjectives" in wanted
+        else []
     )
-    vocab_reading_index = build_vocab_cloze_reading_index(vocab_items)
+    conjugation_reverse_drills = (
+        collect_conjugation_drills(
+            vocab_items,
+            indexes["assignments"],
+            args,
+            min_srs=args.conjugation_min_srs,
+            word_classes=VERB_CONJUGATION_WORD_CLASSES,
+        )
+        if "conjugations-reverse" in wanted
+        else []
+    )
+    verb_type_items = collect_verb_type_items(vocab_items, args) if "verb-types" in wanted else []
+    adjective_type_items = (
+        collect_adjective_type_items(vocab_items, args) if "adjective-types" in wanted else []
+    )
+    vocab_cloze_items = (
+        collect_vocab_cloze_items(
+            vocab_items,
+            indexes["assignments"],
+            min_srs=args.vocab_cloze_min_srs,
+        )
+        if "vocab-cloze" in wanted
+        else []
+    )
+    vocab_reading_index = build_vocab_cloze_reading_index(vocab_items) if vocab_cloze_items else {}
+    grammar_cards = []
+    if "grammar" in wanted:
+        from grammar_decks import collect_grammar_cards, known_kanji_from_subjects
+
+        grammar_cards = collect_grammar_cards(
+            max_jlpt=args.grammar_max_jlpt,
+            max_examples_per_point=args.grammar_max_examples,
+            max_unknown_kanji=args.grammar_max_unknown_kanji,
+            known_kanji=set()
+            if args.grammar_no_wk_filter
+            else known_kanji_from_subjects(vocab_items, kanji_items),
+            refresh=args.refresh_cache,
+        )
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
-    print(f"Radical preview levels: current={current_level}, next={next_level}")
-    print(f"Leeches: {len(leeches)}")
-    print(f"Verb pairs: {len(verb_pairs)}")
-    print(f"Confusable groups: {len(confusables)}")
-    print(f"Phonetic families: {len(phonetic_families)} ({phonetic_drill_note_count(phonetic_families)} drill cards)")
-    print(f"Reading keywords: {len(reading_keywords)}")
-    print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
-    print(f"Verb conjugation drills: {len(conjugation_verb_drills)} (min SRS {args.conjugation_min_srs})")
-    print(f"Adjective conjugation drills: {len(conjugation_adjective_drills)} (min SRS {args.conjugation_min_srs})")
-    print(f"Verb conjugation reverse drills: {len(conjugation_reverse_drills)} (min SRS {args.conjugation_min_srs})")
-    print(f"Verb type cards: {len(verb_type_items)}")
-    print(f"Adjective type cards: {len(adjective_type_items)}")
-    print(f"Vocabulary context cloze: {len(vocab_cloze_items)} (min SRS {args.vocab_cloze_min_srs})")
+    print(f"Radical preview levels: current={preview_levels.current}, next={preview_levels.next}, locked_next={preview_levels.locked_next}")
+    if leeches:
+        print(f"Leeches: {len(leeches)}")
+    if verb_pairs:
+        print(f"Verb pairs: {len(verb_pairs)}")
+    if confusables:
+        print(f"Confusable groups: {len(confusables)}")
+    if "phonetic-families" in wanted:
+        print(f"Phonetic family seed kanji: {len(phonetic_seed_kanji)} (min SRS {PHONETIC_FAMILIES_MIN_SRS})")
+        print(f"Phonetic families: {len(phonetic_families)} ({phonetic_drill_note_count(phonetic_families)} drill cards)")
+    if reading_keywords:
+        print(f"Reading keywords: {len(reading_keywords)}")
+    if kanji_radical_items:
+        print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
+    if conjugation_verb_drills:
+        print(f"Verb conjugation drills: {len(conjugation_verb_drills)} (min SRS {args.conjugation_min_srs})")
+    if conjugation_adjective_drills:
+        print(f"Adjective conjugation drills: {len(conjugation_adjective_drills)} (min SRS {args.conjugation_min_srs})")
+    if conjugation_reverse_drills:
+        print(f"Verb conjugation reverse drills: {len(conjugation_reverse_drills)} (min SRS {args.conjugation_min_srs})")
+    if verb_type_items:
+        print(f"Verb type cards: {len(verb_type_items)}")
+    if adjective_type_items:
+        print(f"Adjective type cards: {len(adjective_type_items)}")
+    if vocab_cloze_items:
+        print(f"Vocabulary context cloze: {len(vocab_cloze_items)} (min SRS {args.vocab_cloze_min_srs})")
+    if grammar_cards:
+        print(
+            f"Grammar context cloze: {len(grammar_cards)} "
+            f"(JLPT ≤ {args.grammar_max_jlpt}, {args.grammar_max_examples} ex/point)"
+        )
     print(f"Pitch entries loaded: {len(pitch_index)}")
-    wanted = wanted_decks(args)
     if args.dry_run:
         would_bundle = deck_names_for_run(
             wanted,
@@ -5587,6 +5770,7 @@ def main() -> None:
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
+            grammar_card_count=len(grammar_cards),
             pitch_index=pitch_index,
         )
         history_path = append_run_history(
@@ -5595,8 +5779,7 @@ def main() -> None:
                 args,
                 user,
                 dry_run=True,
-                current_level=current_level,
-                next_level=next_level,
+                preview_levels=preview_levels,
                 vocab_count=len(vocab_items),
                 kanji_count=len(kanji_items),
                 radical_count=len(radical_items),
@@ -5613,6 +5796,7 @@ def main() -> None:
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
+                grammar_card_count=len(grammar_cards),
                 pitch_index=pitch_index,
                 bundled_deck_names=would_bundle,
                 bundled_in_wk_all=bool(would_bundle and not args.no_bundle),
@@ -5634,9 +5818,9 @@ def main() -> None:
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
+            grammar_cards=grammar_cards,
             radical_items=radical_items,
-            current_level=current_level,
-            next_level=next_level,
+            preview_levels=preview_levels,
             pitch_index=pitch_index,
             review_index=indexes["reviews"],
             vocab_reading_index=vocab_reading_index,
@@ -5646,7 +5830,7 @@ def main() -> None:
     built_decks: List[genanki.Deck] = []
     bundled_media_files: List[str] = []
     if "radicals" in wanted and radical_items:
-        path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, current_level, next_level)
+        path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, preview_levels)
         created.append(path)
         built_decks.append(deck)
     if "leeches" in wanted and leeches:
@@ -5718,6 +5902,12 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
         bundled_media_files.extend(media)
+    if "grammar" in wanted and grammar_cards:
+        from grammar_decks import build_grammar_deck
+
+        path, deck = build_grammar_deck(grammar_cards, output_dir)
+        created.append(path)
+        built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
         maybe = build_pitch_leeches_deck(leeches, indexes, pitch_index, output_dir)
         if maybe:
@@ -5731,8 +5921,7 @@ def main() -> None:
                 args,
                 user,
                 dry_run=False,
-                current_level=current_level,
-                next_level=next_level,
+                preview_levels=preview_levels,
                 vocab_count=len(vocab_items),
                 kanji_count=len(kanji_items),
                 radical_count=len(radical_items),
@@ -5749,6 +5938,7 @@ def main() -> None:
                 verb_type_items=verb_type_items,
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
+                grammar_card_count=len(grammar_cards),
                 pitch_index=pitch_index,
                 bundled_deck_names=[],
                 bundled_in_wk_all=False,
@@ -5775,8 +5965,7 @@ def main() -> None:
             args,
             user,
             dry_run=False,
-            current_level=current_level,
-            next_level=next_level,
+            preview_levels=preview_levels,
             vocab_count=len(vocab_items),
             kanji_count=len(kanji_items),
             radical_count=len(radical_items),
@@ -5793,6 +5982,7 @@ def main() -> None:
             verb_type_items=verb_type_items,
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
+            grammar_card_count=len(grammar_cards),
             pitch_index=pitch_index,
             bundled_deck_names=[deck.name for deck in built_decks],
             bundled_in_wk_all=bool(bundle_path),
