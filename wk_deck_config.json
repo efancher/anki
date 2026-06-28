@@ -1,0 +1,45 @@
+{
+  "_comment": "WK deck generator defaults. Keys use snake_case and mirror wk_decks.py CLI flags. Edit this file, then run: python wk_decks.py --from-config. Explicit CLI flags override config. Conjugation forms follow grammar.max_tae_kim_lesson when set.",
+  "deck": "all",
+  "generate_decks": [
+    "core",
+    "phonetic-families",
+    "radicals",
+    "conjugations-verbs",
+    "conjugations-adjectives",
+    "verb-types",
+    "vocab-cloze",
+    "dictation",
+    "grammar",
+    "tae-kim-exercises"
+  ],
+  "output_dir": "out",
+  "only_started": false,
+  "no_wk_progress_filter": true,
+  "no_bundle": false,
+  "grammar": {
+    "max_jlpt": "N5",
+    "max_tae_kim_section": 3,
+    "max_tae_kim_lesson": "introduction-to-particles",
+    "max_examples": 5,
+    "max_unknown_kanji": 5,
+    "no_wk_filter": false,
+    "sentence_audio": true
+  },
+  "vocab_cloze": {
+    "sentence_audio": false
+  },
+  "dictation": {
+    "min_srs": 7,
+    "voice": "Kyoko"
+  },
+  "core": {
+    "bootstrap_scheduling": true,
+    "import_all_subjects": true,
+    "suspend_unstarted": true,
+    "reading_audio": true,
+    "reading_voice": "Kyoko"
+  },
+  "reading_audio": true,
+  "reading_voice": "Kyoko"
+}

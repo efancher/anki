@@ -61,13 +61,14 @@ class DeckProgressFilterTests(unittest.TestCase):
         user = {"level": 99}
         levels = selected_radical_levels(user, [], {}, args)
         self.assertEqual(levels, RadicalPreviewLevels(12, 13, 14))
-        self.assertEqual(levels.level_set(), {12, 13, 14})
+        self.assertEqual(levels.level_set(), set(range(1, 13)) | {13, 14})
 
     def test_radical_level_status_labels_locked_next(self) -> None:
         levels = RadicalPreviewLevels(10, 11, 12)
         self.assertEqual(radical_level_status(10, levels), "current-level")
         self.assertEqual(radical_level_status(11, levels), "next-level")
         self.assertEqual(radical_level_status(12, levels), "locked-next-level")
+        self.assertEqual(radical_level_status(5, levels), "previous-level")
 
 
 if __name__ == "__main__":

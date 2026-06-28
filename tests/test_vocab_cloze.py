@@ -27,6 +27,7 @@ from wk_decks import (
     sentence_audio_cache_path,
     vocab_cloze_audio_basename,
     vocab_cloze_blank_targets,
+    vocab_cloze_form_hint,
     vocab_cloze_type_expression,
 )
 
@@ -175,6 +176,27 @@ class VocabClozeTests(unittest.TestCase):
             dest.unlink()
             dest.parent.rmdir()
 
+    def test_ensure_sentence_audio_file_regenerates_empty_cache(self) -> None:
+        with mock.patch("wk_decks.generate_sentence_audio_cache") as generate:
+
+            def write_fake(_text: str, _voice: str, path: Path) -> None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fake-mp3")
+
+            generate.side_effect = write_fake
+            cache_path = sentence_audio_cache_path("私は学生だ。", "ja-JP-NanamiNeural")
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(b"")
+            dest = Path("/tmp/wk_vocab_cloze_test/wk_grammar_empty_cache.mp3")
+            if dest.exists():
+                dest.unlink()
+            ok, was_cached = ensure_sentence_audio_file("私は学生だ。", "ja-JP-NanamiNeural", dest)
+            self.assertEqual((ok, was_cached), (True, False))
+            self.assertTrue(dest.is_file())
+            generate.assert_called_once()
+            dest.unlink()
+            dest.parent.rmdir()
+
     def test_type_expression_upgrades_wk_deferred_kanji(self) -> None:
         early = mock_vocab(
             vocab_id=2505,
@@ -226,6 +248,20 @@ class VocabClozeTests(unittest.TestCase):
         )
         index = build_vocab_cloze_reading_index([pick_up, fatigue])
         self.assertEqual(vocab_cloze_type_expression(pick_up, index), "拾う")
+
+    def test_vocab_cloze_form_hint_includes_sentence_context(self) -> None:
+        self.assertEqual(
+            vocab_cloze_form_hint("I am a student.", type_expression="学生", expression="学生"),
+            "I am a student.",
+        )
+        self.assertEqual(
+            vocab_cloze_form_hint(
+                "Ah, it's Mt. Fuji!",
+                type_expression="富士山",
+                expression="ふじ山",
+            ),
+            "Ah, it's Mt. Fuji! · Type full kanji spelling (not early WK kana)",
+        )
 
 
 if __name__ == "__main__":

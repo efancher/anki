@@ -500,3 +500,109 @@ def tae_kim_lesson_within_cap(
     if lesson is None:
         return False
     return lesson.num <= max_lesson_num
+
+
+# Tae Kim Basic Grammar lesson when each WK conjugation form is introduced.
+_TAE_KIM_BASIC_VERB_FORM_MIN_LESSON: Dict[str, int] = {
+    "polite_present": 7,   # Verb Basics
+    "polite_negative": 9,  # Negative Verbs
+    "plain_negative": 9,
+    "polite_past": 11,     # Past Tense
+    "plain_past": 11,
+    "te_form": 99,         # Essential Grammar (see section cap below)
+}
+_TAE_KIM_BASIC_I_ADJECTIVE_MIN_LESSON = 5   # Adjectives
+_TAE_KIM_BASIC_NA_ADJECTIVE_MIN_LESSON = 1  # State-of-being (な-adj copula)
+_TAE_KIM_TE_FORM_MIN_SECTION = 4            # Essential Grammar
+
+
+class TaeKimConjugationCap(NamedTuple):
+    """Allowed WK conjugation drill forms for a Tae Kim lesson/section cap."""
+
+    verb_forms: frozenset
+    i_adjective_forms: frozenset
+    na_adjective_forms: frozenset
+
+    def allows_word_class(self, word_class: str) -> bool:
+        if word_class in {"godan", "ichidan", "suru_verb", "irregular_verb"}:
+            return bool(self.verb_forms)
+        if word_class == "i_adjective":
+            return bool(self.i_adjective_forms)
+        if word_class == "na_adjective":
+            return bool(self.na_adjective_forms)
+        return False
+
+    def allows_form(self, word_class: str, form_key: str) -> bool:
+        if word_class in {"godan", "ichidan", "suru_verb", "irregular_verb"}:
+            return form_key in self.verb_forms
+        if word_class == "i_adjective":
+            return form_key in self.i_adjective_forms
+        if word_class == "na_adjective":
+            return form_key in self.na_adjective_forms
+        return False
+
+
+def _all_verb_form_keys() -> frozenset:
+    return frozenset(_TAE_KIM_BASIC_VERB_FORM_MIN_LESSON.keys())
+
+
+def _all_i_adjective_form_keys() -> frozenset:
+    return frozenset(
+        {
+            "plain_negative",
+            "plain_past",
+            "plain_past_negative",
+            "polite",
+            "polite_negative",
+            "polite_past",
+        }
+    )
+
+
+def _all_na_adjective_form_keys() -> frozenset:
+    return frozenset(_all_i_adjective_form_keys())
+
+
+def conjugation_cap_for_tae_kim(
+    *,
+    max_tae_kim_lesson: str,
+    max_tae_kim_section: int,
+) -> TaeKimConjugationCap:
+    """Map grammar lesson cap to allowed WK conjugation forms."""
+    chapter, max_lesson_num = parse_tae_kim_lesson_cap(max_tae_kim_lesson)
+    include_te = max_tae_kim_section >= _TAE_KIM_TE_FORM_MIN_SECTION
+
+    if chapter != "basic":
+        verb_forms = set(_all_verb_form_keys())
+        if not include_te:
+            verb_forms.discard("te_form")
+        return TaeKimConjugationCap(
+            verb_forms=frozenset(verb_forms),
+            i_adjective_forms=_all_i_adjective_form_keys(),
+            na_adjective_forms=_all_na_adjective_form_keys(),
+        )
+
+    verb_forms = {
+        form_key
+        for form_key, min_lesson in _TAE_KIM_BASIC_VERB_FORM_MIN_LESSON.items()
+        if form_key != "te_form"
+        and max_lesson_num >= min_lesson
+    }
+    if include_te:
+        verb_forms.add("te_form")
+
+    i_adj_forms = (
+        _all_i_adjective_form_keys()
+        if max_lesson_num >= _TAE_KIM_BASIC_I_ADJECTIVE_MIN_LESSON
+        else frozenset()
+    )
+    na_adj_forms = (
+        _all_na_adjective_form_keys()
+        if max_lesson_num >= _TAE_KIM_BASIC_NA_ADJECTIVE_MIN_LESSON
+        else frozenset()
+    )
+    return TaeKimConjugationCap(
+        verb_forms=frozenset(verb_forms),
+        i_adjective_forms=i_adj_forms,
+        na_adjective_forms=na_adj_forms,
+    )

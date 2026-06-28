@@ -67,3 +67,38 @@ After importing `out/wk_all.apkg`:
 ```bash
 export WK_DECK_OPTIONS_JSON="$HOME/anki/out/anki_deck_options.json"
 ```
+
+---
+
+# WK Unlock (core SRS prerequisites)
+
+Enforces radical → kanji → vocab unlock order inside Anki. Unsuspends `wk-locked`
+core notes when all `PrerequisiteIds` are mature; unsuspends supplementary notes
+(vocab cloze, dictation, conjugation) when their linked `WkSubjectId` vocab is mature in core.
+Tags `wk-mature` / `wk-deps-met`.
+
+## Install once
+
+Copy the `wk_unlock` folder into Anki's add-ons folder (same path as above),
+then restart Anki.
+
+## After core deck import
+
+1. Import `out/wk_all.apkg` with `--bootstrap-wk-scheduling` (one-time migration).
+2. **Tools → WK Run Unlock Pass** (or wait for automatic pass on collection load).
+
+## Optional config
+
+Create `out/wk_unlock_config.json` (or set `WK_UNLOCK_CONFIG`):
+
+```json
+{
+  "mature_min_interval_days": 21,
+  "mature_require_all_card_types": true,
+  "burned_interval_days": 365
+}
+```
+
+Design and implementation tracker: [docs/wk_core_srs_design.md](../docs/wk_core_srs_design.md)
+
+Migration playbook (one-time WK → Anki core SRS): [wk_anki_runbook.md](../wk_anki_runbook.md#core-srs-migration-wk--anki)

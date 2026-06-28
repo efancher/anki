@@ -1,0 +1,50 @@
+{
+  "source": "https://guidetojapanese.org/",
+  "note": "Maps Tae Kim practice-exercise pages (*_ex.html) to Basic Grammar lessons. parent_lesson is the reading lesson; practice_lesson matches tae_kim_lessons.json.",
+  "pages": [
+    {
+      "page": "copula_ex.html",
+      "chapter": "basic",
+      "parent_lesson": "expressing-state-of-being",
+      "practice_lesson": "state-of-being-practice",
+      "formation": "Noun + だ / じゃない / だった / じゃなかった"
+    },
+    {
+      "page": "particles_ex.html",
+      "chapter": "basic",
+      "parent_lesson": "introduction-to-particles",
+      "practice_lesson": "particle-practice",
+      "formation": "Particles は / も / が in context sentences"
+    },
+    {
+      "page": "adjectives_ex.html",
+      "chapter": "basic",
+      "parent_lesson": "adjectives",
+      "practice_lesson": "adjective-practice",
+      "formation": "い-adjective / な-adjective conjugation and particles"
+    },
+    {
+      "page": "verbs_ex.html",
+      "chapter": "basic",
+      "parent_lesson": "verb-basics",
+      "practice_lesson": "verb-practice",
+      "formation": "Verb classification (ru / u / exception)",
+      "skip": true,
+      "skip_reason": "Multiple-choice grid (●), not type-in production"
+    },
+    {
+      "page": "negverb_ex.html",
+      "chapter": "basic",
+      "parent_lesson": "negative-verbs",
+      "practice_lesson": "negative-verb-practice",
+      "formation": "Negative verb conjugation"
+    },
+    {
+      "page": "pastverb_ex.html",
+      "chapter": "basic",
+      "parent_lesson": "past-tense",
+      "practice_lesson": "past-verb-practice",
+      "formation": "Past tense verb conjugation"
+    }
+  ]
+}

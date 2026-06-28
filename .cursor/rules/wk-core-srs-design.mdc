@@ -1,0 +1,42 @@
+---
+description: WK core SRS migration — read and update docs/wk_core_srs_design.md first
+globs: docs/wk_core_srs_design.md,wk_decks.py,anki_addon/wk_unlock/**,anki_addon/wk_filtered_decks/**,wk_deck_config.json,tests/test_wk_scheduling*.py,tests/test_wk_unlock*.py
+alwaysApply: false
+---
+
+# WK Core SRS migration (Anki replaces WK reviews)
+
+This project is migrating **core WaniKani reviews** (radicals → kanji → vocab) to Anki + FSRS with in-Anki unlock logic. Work is spec-driven.
+
+## Before any implementation or design change
+
+1. **Read** [docs/wk_core_srs_design.md](../../docs/wk_core_srs_design.md) in full — especially:
+   - **Agent resume checklist**
+   - **Implementation status**
+   - **Session log** (last entries)
+   - **Open decisions**
+2. After compaction, context reset, or new session on this feature: **start here**, not from memory.
+
+## After any change to core SRS, scheduling bootstrap, or wk_unlock
+
+Update [docs/wk_core_srs_design.md](../../docs/wk_core_srs_design.md):
+
+- Bump **Last updated** date
+- Tick **Implementation status** rows
+- Append one line to **Session log**
+- Resolve or add **Open decisions** if scope shifted
+
+## Scope boundaries
+
+- **In scope:** `--deck core`, `patch_apkg_wk_scheduling`, `WkSubjectId` / `PrerequisiteIds` fields, `anki_addon/wk_unlock`, supplementary suspend/gating, filtered deck search updates for `-is:suspended`
+- **Out of scope for this rule:** grammar/cloze template tweaks unless adding link fields for gating; unrelated deck generators
+
+## Template version reminder
+
+Changing note-type **fields** or templates for core models requires bumping `MODEL_TEMPLATE_VERSIONS` per `.cursor/rules/wk-anki-template-versions.mdc`.
+
+## Do not
+
+- Re-introduce weekly Python runs to sync unlock state (belongs in `wk_unlock` addon)
+- Re-apply WK scheduling on every re-import after `wk-schedule-bootstrapped` is set
+- Use `--only-started` as the long-term gating mechanism for supplementary decks once addon ships

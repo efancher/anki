@@ -1,0 +1,199 @@
+{
+  "note": "Curated production-cloze cards for Tae Kim Basic Grammar lessons that Hanabira does not tag as discrete points (especially lesson 1).",
+  "fixtures": [
+    {
+      "id": "state-being-casual-positive",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 1,
+      "title": "State-of-being: casual positive (だ)",
+      "short_explanation": "Attach だ to nouns and な-adjectives in casual speech.",
+      "formation": "Noun / な-Adjective + だ",
+      "cloze_sentence": "私は＿＿＿。",
+      "full_sentence": "私は学生だ。",
+      "sentence_en": "I am a student.",
+      "type_expression": "学生だ",
+      "hint": "am a student"
+    },
+    {
+      "id": "state-being-polite-positive",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 2,
+      "title": "State-of-being: polite positive (です)",
+      "short_explanation": "Attach です for polite speech; drop だ.",
+      "formation": "Noun / な-Adjective + です",
+      "cloze_sentence": "私は＿＿＿。",
+      "full_sentence": "私は学生です。",
+      "sentence_en": "I am a student.",
+      "type_expression": "学生です",
+      "hint": "am a student"
+    },
+    {
+      "id": "state-being-casual-negative",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 3,
+      "title": "State-of-being: casual negative (じゃない)",
+      "short_explanation": "Negative state-of-being in casual speech.",
+      "formation": "Noun / な-Adjective + じゃない",
+      "cloze_sentence": "彼女は＿＿＿。",
+      "full_sentence": "彼女は学生じゃない。",
+      "sentence_en": "She is not a student.",
+      "type_expression": "学生じゃない",
+      "hint": "is not a student"
+    },
+    {
+      "id": "state-being-polite-negative",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 4,
+      "title": "State-of-being: polite negative (じゃないです / ではありません)",
+      "short_explanation": "Polite negative state-of-being.",
+      "formation": "Noun / な-Adjective + じゃないです / ではありません",
+      "cloze_sentence": "彼女は＿＿＿。",
+      "full_sentence": "彼女は学生じゃないです。",
+      "sentence_en": "She is not a student.",
+      "type_expression": "学生じゃないです",
+      "hint": "is not a student"
+    },
+    {
+      "id": "state-being-casual-past",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 5,
+      "title": "State-of-being: casual past (だった)",
+      "short_explanation": "Past tense state-of-being in casual speech.",
+      "formation": "Noun / な-Adjective + だった",
+      "cloze_sentence": "彼は＿＿＿。",
+      "full_sentence": "彼は学生だった。",
+      "sentence_en": "He was a student.",
+      "type_expression": "学生だった",
+      "hint": "was a student"
+    },
+    {
+      "id": "state-being-polite-past",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 6,
+      "title": "State-of-being: polite past (でした)",
+      "short_explanation": "Past tense state-of-being in polite speech.",
+      "formation": "Noun / な-Adjective + でした",
+      "cloze_sentence": "彼は＿＿＿。",
+      "full_sentence": "彼は学生でした。",
+      "sentence_en": "He was a student.",
+      "type_expression": "学生でした",
+      "hint": "was a student"
+    },
+    {
+      "id": "state-being-na-adj-casual",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 7,
+      "title": "State-of-being: な-adjective + だ",
+      "short_explanation": "な-adjectives attach だ directly (no な before だ).",
+      "formation": "な-Adjective + だ",
+      "cloze_sentence": "彼は＿＿＿。",
+      "full_sentence": "彼は親切だ。",
+      "sentence_en": "He is kind.",
+      "type_expression": "親切だ",
+      "hint": "is kind"
+    },
+    {
+      "id": "state-being-suki-desu",
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "order": 8,
+      "title": "State-of-being: 好き + です",
+      "short_explanation": "好き behaves like a な-adjective; use です for polite liking.",
+      "formation": "Noun + が + 好き + です",
+      "cloze_sentence": "私は猫が＿＿＿。",
+      "full_sentence": "私は猫が好きです。",
+      "sentence_en": "I like cats.",
+      "type_expression": "好きです",
+      "hint": "like cats"
+    }
+  ],
+  "wk_lesson_supplements": [
+    {
+      "lesson": "expressing-state-of-being",
+      "jlpt": "N5",
+      "short_explanation": "State-of-being from WaniKani example sentences.",
+      "formation": "Noun / な-Adjective + copula",
+      "patterns": [
+        {
+          "id": "janai-deshita",
+          "order": 101,
+          "title": "State-of-being: じゃないです (WaniKani)",
+          "short_explanation": "Polite negative state-of-being.",
+          "formation": "Noun / な-Adjective + じゃないです",
+          "regex": "(じゃないです)(?=。|$)"
+        },
+        {
+          "id": "dewa-nai-deshita",
+          "order": 102,
+          "title": "State-of-being: ではないです (WaniKani)",
+          "short_explanation": "Polite negative state-of-being (formal では).",
+          "formation": "Noun / な-Adjective + ではないです",
+          "regex": "(ではないです)(?=。|$)"
+        },
+        {
+          "id": "dewa-arimasen",
+          "order": 103,
+          "title": "State-of-being: ではありません (WaniKani)",
+          "short_explanation": "Formal polite negative state-of-being.",
+          "formation": "Noun / な-Adjective + ではありません",
+          "regex": "(ではありません)(?=。|$)"
+        },
+        {
+          "id": "janai",
+          "order": 104,
+          "title": "State-of-being: じゃない (WaniKani)",
+          "short_explanation": "Casual negative state-of-being.",
+          "formation": "Noun / な-Adjective + じゃない",
+          "regex": "(じゃない)(?=。|$)"
+        },
+        {
+          "id": "dewa-nai",
+          "order": 105,
+          "title": "State-of-being: ではない (WaniKani)",
+          "short_explanation": "Casual negative state-of-being (formal では).",
+          "formation": "Noun / な-Adjective + ではない",
+          "regex": "(ではない)(?=。|$)"
+        },
+        {
+          "id": "deshita",
+          "order": 106,
+          "title": "State-of-being: でした (WaniKani)",
+          "short_explanation": "Polite past state-of-being.",
+          "formation": "Noun / な-Adjective + でした",
+          "regex": "(でした)(?=。|$)"
+        },
+        {
+          "id": "datta",
+          "order": 107,
+          "title": "State-of-being: だった (WaniKani)",
+          "short_explanation": "Casual past state-of-being.",
+          "formation": "Noun / な-Adjective + だった",
+          "regex": "(だった)(?=。|$)"
+        },
+        {
+          "id": "desu",
+          "order": 108,
+          "title": "State-of-being: です (WaniKani)",
+          "short_explanation": "Polite positive state-of-being.",
+          "formation": "Noun / な-Adjective + です",
+          "regex": "(です)(?=。|$)"
+        },
+        {
+          "id": "da",
+          "order": 109,
+          "title": "State-of-being: だ (WaniKani)",
+          "short_explanation": "Casual positive state-of-being.",
+          "formation": "Noun / な-Adjective + だ",
+          "regex": "((?<![ろ])だ)(?=。|$)"
+        }
+      ]
+    }
+  ]
+}

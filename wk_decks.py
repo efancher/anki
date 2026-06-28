@@ -5,12 +5,14 @@ wk_decks.py
 Generate update-safe Anki decks from your WaniKani account.
 
 Decks (default --deck all):
-  - radicals: current, next, and locked-next-level radicals
+  - radicals: current level, all previous levels, next, and locked-next-level radicals
   - phonetic-families: per-kanji on'yomi drill via Keisei phonetic map
   - conjugations-verbs / conjugations-adjectives / conjugations-reverse
   - verb-types / adjective-types
   - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
   - grammar: JLPT grammar cloze from Hanabira open data (see grammar_decks.py)
+  - tae-kim-exercises: Tae Kim book practice exercises (see tae_kim_exercise_decks.py)
+  - dictation: native WK pronunciation audio → type the reading in kana (see dictation_decks.py)
   - all: all of the above
 
 Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
@@ -38,6 +40,11 @@ Recommended weekly import (one file, all decks):
   python wk_decks.py --deck all --only-started
   # then import out/wk_all.apkg into Anki
 
+Regenerate from wk_deck_config.json (grammar caps, deck list, etc.):
+  python wk_decks.py --from-config
+  # or: python wk_decks.py --config wk_deck_config.json
+  # CLI flags override config; missing config file → built-in defaults
+
 Vocabulary context cloze (reading production in WK sentences, Master+ default):
   python wk_decks.py --deck vocab-cloze --only-started
   # uses --vocab-cloze-min-srs 7 by default; run Tools → WK Apply Deck Options after import
@@ -46,9 +53,10 @@ Conjugation drills (type-in, Master+ default):
   python wk_decks.py --deck conjugations-verbs --only-started
   python wk_decks.py --deck conjugations-adjectives --only-started
 
-With sentence audio (edge-tts, on by default; cached in .wk_cache/sentence_audio/):
-  python wk_decks.py --deck vocab-cloze --only-started
-  python wk_decks.py --deck vocab-cloze --only-started --no-sentence-audio  # skip TTS
+With sentence audio (edge-tts; off by default for WK vocab, on for grammar/exercises — plays on card back):
+  python wk_decks.py --deck vocab-cloze --only-started --sentence-audio
+  python wk_decks.py --deck grammar --no-grammar-sentence-audio  # skip grammar TTS
+  python wk_decks.py --deck tae-kim-exercises --grammar-max-tae-kim-lesson expressing-state-of-being
 
 With Yomitan pitch dictionary zip/folder:
   python wk_decks.py --deck all --only-started --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
@@ -58,8 +66,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.23.0"
-BUILD_DATE = "2026-06-24"
+VERSION = "2.27.0"
+BUILD_DATE = "2026-06-28"
 
 import warnings
 
@@ -90,6 +98,15 @@ from typing import Any, DefaultDict, Dict, Iterable, List, NamedTuple, Optional,
 import genanki
 import requests
 
+from wk_scheduling import (
+    WK_LOCKED_TAG,
+    WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME,
+    load_srs_stage_interval_days,
+    patch_apkg_supplementary_suspend,
+    patch_apkg_wk_scheduling,
+    wk_subject_mature_at_import,
+)
+
 WK_API_BASE = "https://api.wanikani.com/v2"
 WK_REVISION = "20170710"
 WK_CLOUDFLARE_RETRY_WAIT_SECONDS = 5
@@ -97,6 +114,18 @@ WK_CLOUDFLARE_MAX_RETRIES = 2
 CACHE_DIR = Path(".wk_cache")
 CACHE_MAX_AGE_HOURS = 24
 OUTPUT_DIR = Path("out")
+WK_DECK_CONFIG_FILENAME = "wk_deck_config.json"
+DEFAULT_GENERATE_DECKS = (
+    "phonetic-families",
+    "radicals",
+    "conjugations-verbs",
+    "conjugations-adjectives",
+    "verb-types",
+    "vocab-cloze",
+    "dictation",
+    "grammar",
+    "tae-kim-exercises",
+)
 
 # Keisei phonetic-semantic DB (GPL-3.0, mwil/wanikani-userscripts).
 # Pinned commit for stable raw JSON URLs; auto-downloaded into .wk_cache/keisei/.
@@ -186,6 +215,10 @@ DECK_IDS = {
     "vocab-cloze": 2059400122,
     "conjugations-reverse": 2059400123,
     "conjugations-adjectives": 2059400124,
+    "dictation": 2059400127,
+    "core-radical": 2059400128,
+    "core-kanji": 2059400129,
+    "core-vocabulary": 2059400130,
 }
 
 MODEL_IDS = {
@@ -200,23 +233,29 @@ MODEL_IDS = {
     "word_class": 1865429020,
     "vocab_cloze": 1865429021,
     "conjugation_reverse": 1865429022,
+    "dictation": 1865429024,
+    "core_radical": 1865429025,
+    "core_item": 1865429026,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
 # Anki import uses model.mod; these map to stable epoch seconds (see template_mod_epoch).
 MODEL_TEMPLATE_VERSIONS = {
-    "item": "v5",
+    "item": "v6",
     "pair": "v2",
     "family": "v1",
-    "radical": "v4",
+    "radical": "v5",
     "reading_keyword": "v3",
-    "kanji_radical": "v1",
-    "phonetic_drill": "v4",
-    "conjugation": "v3",
-    "word_class": "v1",
-    "vocab_cloze": "v4",
-    "conjugation_reverse": "v3",
-    "grammar_cloze": "v1",
+    "kanji_radical": "v2",
+    "phonetic_drill": "v5",
+    "conjugation": "v4",
+    "word_class": "v2",
+    "vocab_cloze": "v7",
+    "conjugation_reverse": "v4",
+    "grammar_cloze": "v4",
+    "dictation": "v3",
+    "core_radical": "v2",
+    "core_item": "v4",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -235,6 +274,9 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "vocab_cloze": 9,
     "conjugation_reverse": 10,
     "grammar_cloze": 11,
+    "dictation": 12,
+    "core_radical": 13,
+    "core_item": 14,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -254,6 +296,9 @@ NOTE_TYPE_NAMES = {
     "vocab_cloze": "WK Update-Safe Vocab Cloze",
     "grammar_cloze": "WK Update-Safe Grammar Cloze",
     "conjugation_reverse": "WK Update-Safe Conjugation Reverse",
+    "dictation": "WK Update-Safe Dictation",
+    "core_radical": "WK Core Radical",
+    "core_item": "WK Core Item",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -295,7 +340,9 @@ RUN_HISTORY_COLUMNS = [
     "verb_type_cards",
     "adjective_type_cards",
     "vocab_cloze",
+    "dictation_items",
     "grammar_cards",
+    "tae_kim_exercise_cards",
     "pitch_entries",
     "pitch_leeches",
     "bundled_in_wk_all",
@@ -305,32 +352,56 @@ FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
 
 FILTERED_DECK_DEFINITIONS = [
     {
+        "name": "WK::Core Radicals",
+        "search": 'deck:"WaniKani Core · Radicals" -is:suspended',
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Core Kanji",
+        "search": 'deck:"WaniKani Core · Kanji" -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Core Vocabulary",
+        "search": 'deck:"WaniKani Core · Vocabulary" -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
         "name": "WK::Radicals Preview",
-        "search": 'deck:"WaniKani Current and Next Radicals"',
+        "search": 'deck:"WaniKani Current and Next Radicals" -is:suspended',
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Vocab Context",
-        "search": 'deck:"WaniKani Vocabulary Context"',
+        "search": 'deck:"WaniKani Vocabulary Context" -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Dictation",
+        "search": 'deck:"WaniKani Dictation" -is:suspended',
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Grammar",
-        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-expressing-state-of-being OR tag:tk-lesson-basic-introduction-to-particles OR tag:tk-lesson-basic-adjectives',
+        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-expressing-state-of-being OR tag:tk-lesson-basic-introduction-to-particles OR tag:tk-lesson-basic-adjectives -is:suspended',
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Grammar · Current Tae Kim lesson",
-        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-introduction-to-particles',
+        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-introduction-to-particles -is:suspended',
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Phonetic Families",
-        "search": 'deck:"WaniKani Phonetic Families" tag:priority-low',
+        "search": 'deck:"WaniKani Phonetic Families" tag:priority-low -is:suspended',
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
@@ -351,7 +422,12 @@ DECK_NAMES = {
     "verb-types": "WaniKani Verb Type Practice",
     "adjective-types": "WaniKani Adjective Type Practice",
     "vocab-cloze": "WaniKani Vocabulary Context",
+    "dictation": "WaniKani Dictation",
     "grammar": "Japanese Grammar Context",
+    "tae-kim-exercises": "Japanese Grammar Exercises",
+    "core-radical": "WaniKani Core · Radicals",
+    "core-kanji": "WaniKani Core · Kanji",
+    "core-vocabulary": "WaniKani Core · Vocabulary",
 }
 
 PAIR_RULES = [
@@ -522,6 +598,27 @@ COMMON_CSS = """
 .radicals-front-piece { display: inline-block; margin: 6px 12px; font-size: 28px; vertical-align: top; }
 .radicals-front-meaning { display: block; font-size: 14px; color: #aaa; margin-top: 4px; }
 
+"""
+
+# WK mnemonic tag highlights — append to note types that render wk_mnemonic_html().
+WK_MNEMONIC_CSS = """
+.wk-mnemonic .wk-mnemonic-radical { color: #4da6ff; font-weight: 600; }
+.wk-mnemonic .wk-mnemonic-kanji { color: #ff6b6b; font-weight: 600; }
+.wk-mnemonic .wk-mnemonic-vocabulary { color: #ff6b6b; font-weight: 600; }
+.wk-mnemonic .wk-mnemonic-reading { color: #c77dff; font-weight: 600; }
+.wk-mnemonic .jp { font-family: inherit; }
+.nightMode .wk-mnemonic .wk-mnemonic-radical,
+.card.nightMode .wk-mnemonic .wk-mnemonic-radical,
+.night_mode .wk-mnemonic .wk-mnemonic-radical { color: #7ec8ff; }
+.nightMode .wk-mnemonic .wk-mnemonic-kanji,
+.card.nightMode .wk-mnemonic .wk-mnemonic-kanji,
+.night_mode .wk-mnemonic .wk-mnemonic-kanji,
+.nightMode .wk-mnemonic .wk-mnemonic-vocabulary,
+.card.nightMode .wk-mnemonic .wk-mnemonic-vocabulary,
+.night_mode .wk-mnemonic .wk-mnemonic-vocabulary { color: #ff9a9a; }
+.nightMode .wk-mnemonic .wk-mnemonic-reading,
+.card.nightMode .wk-mnemonic .wk-mnemonic-reading,
+.night_mode .wk-mnemonic .wk-mnemonic-reading { color: #ddb0ff; }
 """
 
 
@@ -776,6 +873,14 @@ def build_assignment_params(args: argparse.Namespace) -> dict:
     return params
 
 
+def build_core_assignment_params(args: argparse.Namespace) -> dict:
+    """Full assignment index for core SRS import (no started/SRS filters)."""
+    params: dict = {"subject_types": "radical,kanji,vocabulary"}
+    if args.max_level < 60:
+        params["levels"] = ",".join(str(level) for level in range(1, args.max_level + 1))
+    return params
+
+
 def get_cached_user(refresh: bool = False) -> dict:
     path = CACHE_DIR / "user.json"
     cached = load_json_cache(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
@@ -796,6 +901,33 @@ def get_cached_user(refresh: bool = False) -> dict:
     save_json_cache(path, user)
     print(f"Saved user cache: {path}")
     return user
+
+
+def get_cached_spaced_repetition_systems(*, refresh: bool = False) -> List[dict]:
+    """Fetch/cache WK /v2/spaced_repetition_systems for SRS stage interval mapping."""
+    path = CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
+    cached = load_json_cache(path, CACHE_MAX_AGE_HOURS, refresh=refresh)
+    if cached is not None and not refresh:
+        if isinstance(cached, dict) and isinstance(cached.get("items"), list):
+            print(f"Using cached spaced_repetition_systems: {path}")
+            return cached["items"]
+        if isinstance(cached, list):
+            print(f"Using cached spaced_repetition_systems: {path}")
+            return cached
+    print("Downloading WaniKani spaced_repetition_systems...")
+    try:
+        items = wk_get_all("spaced_repetition_systems")
+    except requests.HTTPError as exc:
+        if refresh and path.exists() and exc.response is not None and exc.response.status_code == 403:
+            envelope = json.loads(path.read_text(encoding="utf-8"))
+            items = envelope.get("items") if isinstance(envelope, dict) else envelope
+            if isinstance(items, list):
+                wk_warn_use_cached_api_data("spaced_repetition_systems", exc.response, len(items))
+                return items
+        raise
+    save_cache_envelope(path, items)
+    print(f"Saved spaced_repetition_systems cache: {path} ({len(items)} items)")
+    return items
 
 
 def get_cached_collection(
@@ -1049,6 +1181,8 @@ def write_bundled_apkg(
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
     patch_apkg_deck_options(path)
+    maybe_patch_apkg_wk_scheduling(path, decks)
+    patch_apkg_supplementary_suspend(path)
 
 
 # Default FSRS-5 weights shipped with Anki 23.10+ (used when preset is created on import).
@@ -1161,6 +1295,22 @@ def patch_apkg_deck_options(apkg_path: Path) -> None:
         Path(tmp_db_path).unlink(missing_ok=True)
 
 
+def collect_deck_schedule_specs(decks: Sequence[genanki.Deck]) -> Dict[str, object]:
+    merged: Dict[str, object] = {}
+    for deck in decks:
+        specs = getattr(deck, "wk_schedule_specs", None) or {}
+        merged.update(specs)
+    return merged
+
+
+def maybe_patch_apkg_wk_scheduling(apkg_path: Path, decks: Sequence[genanki.Deck]) -> int:
+    specs = collect_deck_schedule_specs(decks)
+    if not specs:
+        return 0
+    interval_map = load_srs_stage_interval_days(CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME)
+    return patch_apkg_wk_scheduling(apkg_path, specs, interval_map=interval_map)
+
+
 def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence[str]] = None) -> None:
     models = list(deck.models.values())
     package = genanki.Package(deck)
@@ -1168,6 +1318,13 @@ def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(models))
     patch_apkg_deck_options(path)
+    maybe_patch_apkg_wk_scheduling(path, [deck])
+    patch_apkg_supplementary_suspend(path)
+
+
+def subject_is_hidden(subject: dict) -> bool:
+    """True when WK retired the subject (hidden_at set on API subject data)."""
+    return bool(subject.get("data", {}).get("hidden_at"))
 
 
 def primary_meanings(subject: dict) -> List[str]:
@@ -1214,6 +1371,47 @@ def strip_html(value: Optional[str]) -> str:
     return re.sub(r"<[^>]+>", "", value or "").strip()
 
 
+WK_MNEMONIC_TAG_OPEN_RE = re.compile(
+    r"<(radical|kanji|vocabulary|reading|em|i|ja)>",
+    re.IGNORECASE,
+)
+
+WK_MNEMONIC_SEMANTIC_CLASS = {
+    "radical": "wk-mnemonic-radical",
+    "kanji": "wk-mnemonic-kanji",
+    "vocabulary": "wk-mnemonic-vocabulary",
+    "reading": "wk-mnemonic-reading",
+}
+
+
+def _wk_mnemonic_fragment(text: str) -> str:
+    match = WK_MNEMONIC_TAG_OPEN_RE.search(text)
+    if not match:
+        return html.escape(text)
+    tag = match.group(1).lower()
+    before = html.escape(text[: match.start()])
+    close_tag = f"</{tag}>"
+    close_at = text.lower().find(close_tag, match.end())
+    if close_at == -1:
+        return html.escape(text)
+    inner = _wk_mnemonic_fragment(text[match.end() : close_at])
+    rest = _wk_mnemonic_fragment(text[close_at + len(close_tag) :])
+    if tag in WK_MNEMONIC_SEMANTIC_CLASS:
+        wrapped = f"<span class='{WK_MNEMONIC_SEMANTIC_CLASS[tag]}'>{inner}</span>"
+    elif tag == "ja":
+        wrapped = f"<span class='jp'>{inner}</span>"
+    else:
+        wrapped = f"<{tag}>{inner}</{tag}>"
+    return before + wrapped + rest
+
+
+def wk_mnemonic_html(raw: Optional[str]) -> str:
+    """Render WK meaning/reading mnemonic with radical (blue) and kanji/vocab (red) highlights."""
+    if not raw or not str(raw).strip():
+        return ""
+    return f"<span class='wk-mnemonic'>{_wk_mnemonic_fragment(str(raw).strip())}</span>"
+
+
 def index_by_subject_id(items: Iterable[dict]) -> Dict[int, dict]:
     return {i["data"]["subject_id"]: i for i in items}
 
@@ -1233,6 +1431,35 @@ def study_materials_by_subject_id(study_materials: Iterable[dict]) -> Dict[int, 
 def srs_stage(subject: dict, assignment_index: Dict[int, dict]) -> int:
     assignment = assignment_index.get(subject["id"])
     return int(assignment["data"].get("srs_stage") or 0) if assignment else 0
+
+
+def supplementary_min_srs(args: argparse.Namespace, deck_min_srs: int) -> int:
+    """Return 0 to include all eligible subjects when import-time gating replaces build-time SRS filter."""
+    return 0 if getattr(args, "no_wk_progress_filter", False) else deck_min_srs
+
+
+def supplementary_import_tags(
+    subject: dict,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
+) -> List[str]:
+    """Tags for supplementary notes; adds wk-locked when linked subject is not mature at import."""
+    stage = srs_stage(subject, assignment_index)
+    tags: List[str] = []
+    if not wk_subject_mature_at_import(stage, interval_map=interval_map):
+        tags.append(WK_LOCKED_TAG)
+    return tags
+
+
+def all_vocab_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
+    return [
+        subject
+        for subject in subjects
+        if subject.get("object") == "vocabulary"
+        and not subject_is_hidden(subject)
+        and int(subject["data"].get("level", 999)) <= args.max_level
+    ]
 
 
 def is_unlocked(subject: dict, assignment_index: Dict[int, dict]) -> bool:
@@ -1261,6 +1488,10 @@ def passes_progress_filter(
         return False
     if args.only_unlocked and not is_unlocked(subject, assignment_index):
         return False
+    if getattr(args, "no_wk_progress_filter", False):
+        if args.only_burned and not is_burned(subject, assignment_index):
+            return False
+        return True
     if args.only_started and not is_started(subject, assignment_index):
         return False
     if args.only_burned and not is_burned(subject, assignment_index):
@@ -1801,8 +2032,8 @@ def require_edge_tts():
         import edge_tts  # noqa: F401
     except ImportError as exc:
         raise SystemExit(
-            "edge-tts is required for sentence audio (on by default). "
-            "Install it: pip install edge-tts — or pass --no-sentence-audio."
+            "edge-tts is required for sentence audio. "
+            "Install it: pip install edge-tts — or disable with --no-sentence-audio / --no-grammar-sentence-audio."
         ) from exc
 
 
@@ -1818,6 +2049,10 @@ def generate_sentence_audio_cache(text: str, voice: str, cache_path: Path) -> No
     asyncio.run(_write_edge_tts_mp3(text, voice, cache_path))
 
 
+def sentence_audio_cache_is_usable(cache_path: Path) -> bool:
+    return cache_path.is_file() and cache_path.stat().st_size > 0
+
+
 def ensure_sentence_audio_file(
     text: str,
     voice: str,
@@ -1831,7 +2066,7 @@ def ensure_sentence_audio_file(
         return False, False
     cache_path = sentence_audio_cache_path(plain, voice)
     try:
-        was_cached = cache_path.is_file() and not refresh
+        was_cached = sentence_audio_cache_is_usable(cache_path) and not refresh
         if not was_cached:
             generate_sentence_audio_cache(plain, voice, cache_path)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2028,7 +2263,8 @@ def make_radical_model() -> WkModel:
   vertical-align: middle;
 }
 .radical-text { font-size: 32px; color: #cfcfcf; }
-""",
+"""
+            + WK_MNEMONIC_CSS,
             "radical",
         ),
     )
@@ -2044,6 +2280,7 @@ def make_item_model() -> WkModel:
             {"name": "GuidKey"},
             {"name": "Expression"},
             {"name": "Reading"},
+            {"name": "ReadingAudio"},
             {"name": "Meaning"},
             {"name": "ItemHtml"},
             {"name": "Mnemonic"},
@@ -2077,6 +2314,7 @@ def make_item_model() -> WkModel:
                 </div>
                 {{#MeaningWeak}}<div class="weak-side">Meaning side needs work</div>{{/MeaningWeak}}
                 <div class="jp">{{Expression}}</div>
+                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 </div>
                 """,
                 "afmt": """
@@ -2102,12 +2340,14 @@ def make_item_model() -> WkModel:
                 </div>
                 {{#ReadingWeak}}<div class="weak-side">Reading side needs work</div>{{/ReadingWeak}}
                 <div class="jp">{{Expression}}</div>
+                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 </div>
                 """,
                 "afmt": """
                 {{FrontSide}}
                 <hr>
                 <div class="reading answer">{{Reading}}</div>
+                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 {{#ReadingsDetail}}<div class="reading-detail">{{ReadingsDetail}}</div>{{/ReadingsDetail}}
                 {{#ReadingMnemonic}}<h3>Reading mnemonic</h3><div class="notes">{{ReadingMnemonic}}</div>{{/ReadingMnemonic}}
                 {{#ContextSentences}}<h3>Context</h3>{{ContextSentences}}{{/ContextSentences}}
@@ -2118,11 +2358,17 @@ def make_item_model() -> WkModel:
             },
             {
                 "name": "Pitch",
-                "qfmt": "{{#Pitch}}<div class='wk-card {{StyleClass}}'><div class='subject-badge'>{{SubjectType}}</div><div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div></div>{{/Pitch}}",
+                "qfmt": "{{#Pitch}}<div class='wk-card {{StyleClass}}'><div class='subject-badge'>{{SubjectType}}</div><div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div>{{#ReadingAudio}}<div class='reading-audio'>{{ReadingAudio}}</div>{{/ReadingAudio}}</div>{{/Pitch}}",
                 "afmt": "{{FrontSide}}<hr><div class='pitch-answer'>{{Pitch}} {{PitchPattern}}</div>{{ItemHtml}}",
             },
         ],
-        css=versioned_css(COMMON_CSS, "item"),
+        css=versioned_css(
+            COMMON_CSS
+            + """
+.reading-audio { margin: 10px auto 6px; }
+""",
+            "item",
+        ),
     )
 
 
@@ -2635,6 +2881,7 @@ def collect_conjugation_drills(
     *,
     min_srs: int,
     word_classes: Optional[Set[str]] = None,
+    tae_kim_cap: Optional["TaeKimConjugationCap"] = None,
 ) -> List[ConjugationDrill]:
     drills: List[ConjugationDrill] = []
     for vocab in sorted(vocab_items, key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or "")):
@@ -2645,9 +2892,13 @@ def collect_conjugation_drills(
             continue
         if word_classes is not None and word_class not in word_classes:
             continue
+        if tae_kim_cap is not None and not tae_kim_cap.allows_word_class(word_class):
+            continue
         expr = vocab["data"].get("characters") or ""
         reading = first_reading(vocab)
         for form_key, prompt in conjugation_forms_for_class(word_class):
+            if tae_kim_cap is not None and not tae_kim_cap.allows_form(word_class, form_key):
+                continue
             result = conjugate_vocab_form(vocab, word_class, form_key)
             if not result:
                 continue
@@ -2667,6 +2918,20 @@ def collect_conjugation_drills(
                 )
             )
     return drills[: args.max_cards]
+
+
+def resolve_tae_kim_conjugation_cap(args: argparse.Namespace):
+    """When grammar lesson cap is set, limit conjugation forms to match Tae Kim progress."""
+    if getattr(args, "conjugation_no_tae_kim_cap", False):
+        return None
+    if not args.grammar_max_tae_kim_lesson:
+        return None
+    from tae_kim_mapping import conjugation_cap_for_tae_kim
+
+    return conjugation_cap_for_tae_kim(
+        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+        max_tae_kim_section=args.grammar_max_tae_kim_section,
+    )
 
 
 CONJUGATION_FIXTURES_FILENAME = "conjugation_fixtures.json"
@@ -3260,7 +3525,7 @@ def make_kanji_radical_model() -> WkModel:
                 """,
             },
         ],
-        css=versioned_css(COMMON_CSS, "kanji_radical"),
+        css=versioned_css(COMMON_CSS + WK_MNEMONIC_CSS, "kanji_radical"),
     )
 
 
@@ -3271,6 +3536,7 @@ def make_phonetic_drill_model() -> WkModel:
         template_key="phonetic_drill",
         fields=[
             {"name": "GuidKey"},
+            {"name": "WkSubjectId"},
             {"name": "Kanji"},
             {"name": "Prompt"},
             {"name": "WkReadings"},
@@ -3343,6 +3609,7 @@ def make_conjugation_model() -> WkModel:
         template_key="conjugation",
         fields=[
             {"name": "GuidKey"},
+            {"name": "WkSubjectId"},
             {"name": "Prompt"},
             {"name": "DictExpression"},
             {"name": "DictReading"},
@@ -3391,6 +3658,7 @@ def make_conjugation_reverse_model() -> WkModel:
         template_key="conjugation_reverse",
         fields=[
             {"name": "GuidKey"},
+            {"name": "WkSubjectId"},
             {"name": "Prompt"},
             {"name": "DictExpression"},
             {"name": "TypeDictExpression"},
@@ -3439,6 +3707,7 @@ def make_word_class_model() -> WkModel:
         template_key="word_class",
         fields=[
             {"name": "GuidKey"},
+            {"name": "WkSubjectId"},
             {"name": "Prompt"},
             {"name": "Expression"},
             {"name": "Reading"},
@@ -3482,6 +3751,22 @@ def make_word_class_model() -> WkModel:
     )
 
 
+def vocab_cloze_form_hint(
+    sentence_en: str,
+    *,
+    type_expression: str = "",
+    expression: str = "",
+) -> str:
+    """Front-side context for vocab production without revealing the blanked word."""
+    parts: List[str] = []
+    plain = strip_html(sentence_en).strip()
+    if plain:
+        parts.append(plain)
+    if type_expression and expression and type_expression != expression:
+        parts.append("Type full kanji spelling (not early WK kana)")
+    return " · ".join(parts)
+
+
 def make_vocab_cloze_model() -> WkModel:
     return WkModel(
         MODEL_IDS["vocab_cloze"],
@@ -3489,8 +3774,10 @@ def make_vocab_cloze_model() -> WkModel:
         template_key="vocab_cloze",
         fields=[
             {"name": "GuidKey"},
+            {"name": "WkSubjectId"},
             {"name": "ClozeSentence"},
             {"name": "Hint"},
+            {"name": "FormHint"},
             {"name": "Expression"},
             {"name": "TypeExpression"},
             {"name": "WkSpellingNote"},
@@ -3505,10 +3792,10 @@ def make_vocab_cloze_model() -> WkModel:
             {
                 "name": "Reading cloze",
                 "qfmt": """
-                {{#SentenceAudio}}<div class="sentence-audio">{{SentenceAudio}}</div>{{/SentenceAudio}}
                 <div class="prompt">Type the missing word</div>
                 <div class="jp cloze">{{ClozeSentence}}</div>
                 <div class="meaning hint">{{Hint}}</div>
+                {{#FormHint}}<div class="form-hint">{{FormHint}}</div>{{/FormHint}}
                 <div class="type-answer">{{type:TypeExpression}}</div>
                 <div class="meta">{{Meta}}</div>
                 """,
@@ -3520,6 +3807,7 @@ def make_vocab_cloze_model() -> WkModel:
                 {{#WkSpellingNote}}<div class="wk-spelling">{{WkSpellingNote}}</div>{{/WkSpellingNote}}
                 <div class="context">
                   <div class="jp">{{FullSentence}}</div>
+                  {{#SentenceAudio}}<div class="sentence-audio">{{SentenceAudio}}</div>{{/SentenceAudio}}
                   <div class="meaning">{{SentenceEnglish}}</div>
                 </div>
                 <div class="meta">{{Meta}}</div>
@@ -3531,10 +3819,11 @@ def make_vocab_cloze_model() -> WkModel:
             + """
 .cloze { font-size: 34px; line-height: 1.55; }
 .hint { font-size: 17px; margin-top: 10px; color: #bbb; font-style: italic; }
+.form-hint { font-size: 15px; margin-top: 6px; color: #c8c8c8; font-weight: 600; letter-spacing: 0.02em; }
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .jp.answer { font-size: 40px; }
 .wk-spelling { font-size: 15px; color: #aaa; margin: 8px 0; font-style: italic; }
-.sentence-audio { margin-bottom: 12px; }
+.sentence-audio { margin-top: 10px; margin-bottom: 4px; }
 """,
             "vocab_cloze",
         ),
@@ -3547,6 +3836,7 @@ def radical_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List
         s for s in subjects
         if s.get("object") == "radical"
         and int(s["data"].get("level", 999)) <= max_level
+        and not subject_is_hidden(s)
     ]
 
 
@@ -3572,7 +3862,11 @@ class RadicalPreviewLevels(NamedTuple):
     locked_next: int
 
     def level_set(self) -> Set[int]:
-        return {self.current, self.next, self.locked_next}
+        """Levels 1..current (review), plus next and locked-next preview."""
+        levels = set(range(1, self.current + 1))
+        levels.add(self.next)
+        levels.add(self.locked_next)
+        return levels
 
 
 def selected_radical_levels(
@@ -3597,6 +3891,8 @@ def radical_level_status(level: int, preview_levels: RadicalPreviewLevels) -> st
         return "next-level"
     if level == preview_levels.locked_next:
         return "locked-next-level"
+    if level < preview_levels.current:
+        return "previous-level"
     return "preview-level"
 
 
@@ -3606,6 +3902,8 @@ def radical_priority(radical: dict, preview_levels: RadicalPreviewLevels) -> str
         return "priority-high"
     if level == preview_levels.locked_next:
         return "priority-medium"
+    if level < preview_levels.current:
+        return "priority-low"
     return "priority-medium"
 
 
@@ -3784,8 +4082,7 @@ def radical_display_html(radical: dict, media_names: Optional[Dict[int, str]] = 
 
 
 def radical_description_html(radical: dict) -> str:
-    mnemonic = strip_html(radical["data"].get("meaning_mnemonic"))
-    return html.escape(mnemonic) if mnemonic else ""
+    return wk_mnemonic_html(radical["data"].get("meaning_mnemonic"))
 
 
 def radical_index_by_id(subjects: Sequence[dict]) -> Dict[int, dict]:
@@ -3842,8 +4139,7 @@ def kanji_radicals_front_html(
 
 
 def meaning_mnemonic_html(subject: dict) -> str:
-    mnemonic = strip_html(subject["data"].get("meaning_mnemonic"))
-    return html.escape(mnemonic) if mnemonic else ""
+    return wk_mnemonic_html(subject["data"].get("meaning_mnemonic"))
 
 
 def find_kanji_radical_breakdown(
@@ -3868,7 +4164,15 @@ def find_kanji_radical_breakdown(
 
 
 def vocab_subjects(subjects: Sequence[dict], assignment_index: Dict[int, dict], args: argparse.Namespace) -> List[dict]:
-    return [s for s in subjects if s.get("object") == "vocabulary" and passes_progress_filter(s, assignment_index, args)]
+    if getattr(args, "no_wk_progress_filter", False):
+        return all_vocab_subjects(subjects, args)
+    return [
+        s
+        for s in subjects
+        if s.get("object") == "vocabulary"
+        and not subject_is_hidden(s)
+        and passes_progress_filter(s, assignment_index, args)
+    ]
 
 
 def kanji_subjects(
@@ -3881,7 +4185,9 @@ def kanji_subjects(
     return [
         s
         for s in subjects
-        if s.get("object") == "kanji" and passes_progress_filter(s, assignment_index, args, min_srs=min_srs)
+        if s.get("object") == "kanji"
+        and not subject_is_hidden(s)
+        and passes_progress_filter(s, assignment_index, args, min_srs=min_srs)
     ]
 
 
@@ -3890,7 +4196,9 @@ def all_wk_kanji_subjects(subjects: Sequence[dict], args: argparse.Namespace) ->
     return [
         s
         for s in subjects
-        if s.get("object") == "kanji" and s["data"].get("level", 999) <= args.max_level
+        if s.get("object") == "kanji"
+        and s["data"].get("level", 999) <= args.max_level
+        and not subject_is_hidden(s)
     ]
 
 
@@ -4232,7 +4540,17 @@ def priority_for_confusable_group(group: List[dict], review_index: Dict[int, dic
 
 
 
-def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusables_html: str = "") -> None:
+def add_item_note(
+    deck,
+    model,
+    subject,
+    indexes,
+    pitch_index,
+    kind: str,
+    confusables_html: str = "",
+    *,
+    reading_audio_field: str = "",
+) -> None:
     data = subject["data"]
     expr = data.get("characters") or ""
     reading = "、".join(primary_readings(subject)) or first_reading(subject)
@@ -4247,6 +4565,7 @@ def add_item_note(deck, model, subject, indexes, pitch_index, kind: str, confusa
             guid,
             html.escape(expr),
             html.escape(reading),
+            reading_audio_field,
             html.escape("; ".join(primary_meanings(subject))),
             item_html(subject, indexes["assignments"], indexes["reviews"], indexes["studies"], pitch_index),
             html.escape(strip_html(data.get("meaning_mnemonic"))),
@@ -4359,26 +4678,94 @@ def build_radical_deck(
 
 
 
-def build_leech_deck(items, indexes, pitch_index, output_dir: Path) -> Tuple[Path, genanki.Deck]:
+def build_leech_deck(
+    items,
+    indexes,
+    pitch_index,
+    output_dir: Path,
+    *,
+    reading_audio: bool = True,
+    wk_voice: str = "Kyoko",
+    tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    refresh_reading_audio: bool = False,
+) -> Tuple[Path, genanki.Deck]:
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_reading_audio_field
+
     deck = genanki.Deck(DECK_IDS["leeches"], DECK_NAMES["leeches"])
     model = make_item_model()
+    media_dir = output_dir / "media/leech_reading"
+    media_files: List[str] = []
+    if reading_audio:
+        print(f"Leech reading audio (vocab: WK {wk_voice}, kanji: TTS {tts_voice})...")
     for item in items:
-        add_item_note(deck, model, item, indexes, pitch_index, "leech")
+        audio_field = ""
+        if reading_audio:
+            audio_field, media_path = prepare_reading_audio_field(
+                item,
+                media_dir,
+                wk_voice=wk_voice or DEFAULT_WK_READING_VOICE,
+                tts_voice=tts_voice,
+                refresh=refresh_reading_audio,
+            )
+            if media_path:
+                media_files.append(media_path)
+        add_item_note(
+            deck,
+            model,
+            item,
+            indexes,
+            pitch_index,
+            "leech",
+            reading_audio_field=audio_field,
+        )
     out = output_dir / "wk_leeches.apkg"
-    write_apkg(deck, out)
+    write_apkg(deck, out, media_files=media_files or None)
     return out, deck
 
 
-def build_pitch_leeches_deck(items, indexes, pitch_index, output_dir: Path) -> Optional[Tuple[Path, genanki.Deck]]:
+def build_pitch_leeches_deck(
+    items,
+    indexes,
+    pitch_index,
+    output_dir: Path,
+    *,
+    reading_audio: bool = True,
+    wk_voice: str = "Kyoko",
+    tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    refresh_reading_audio: bool = False,
+) -> Optional[Tuple[Path, genanki.Deck]]:
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_reading_audio_field
+
     pitch_items = [i for i in items if pitch_for(i, pitch_index).get("pitch") or pitch_for(i, pitch_index).get("pattern")]
     if not pitch_items:
         return None
     deck = genanki.Deck(DECK_IDS["pitch-leeches"], DECK_NAMES["pitch-leeches"])
     model = make_item_model()
+    media_dir = output_dir / "media/pitch_leech_reading"
+    media_files: List[str] = []
     for item in pitch_items:
-        add_item_note(deck, model, item, indexes, pitch_index, "pitch-leech")
+        audio_field = ""
+        if reading_audio:
+            audio_field, media_path = prepare_reading_audio_field(
+                item,
+                media_dir,
+                wk_voice=wk_voice or DEFAULT_WK_READING_VOICE,
+                tts_voice=tts_voice,
+                refresh=refresh_reading_audio,
+            )
+            if media_path:
+                media_files.append(media_path)
+        add_item_note(
+            deck,
+            model,
+            item,
+            indexes,
+            pitch_index,
+            "pitch-leech",
+            reading_audio_field=audio_field,
+        )
     out = output_dir / "wk_pitch_leeches.apkg"
-    write_apkg(deck, out)
+    write_apkg(deck, out, media_files=media_files or None)
     return out, deck
 
 
@@ -4480,10 +4867,16 @@ def build_phonetic_family_deck(
     started_kanji_ids: Set[int],
     all_kanji_by_char: Dict[str, dict],
     output_dir: Path,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["phonetic-families"], DECK_NAMES["phonetic-families"])
     model = make_phonetic_drill_model()
     template_label = MODEL_TEMPLATE_VERSIONS["phonetic_drill"]
+    stage_interval_map = interval_map or load_srs_stage_interval_days(
+        CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
+    )
     for kanji, comp, family_members in collect_phonetic_drill_items(families):
         data = kanji["data"]
         char = data.get("characters") or ""
@@ -4504,10 +4897,21 @@ def build_phonetic_family_deck(
         meta = f"WK Level {level} · {progress} · phonetic {comp} · template {template_label}"
         guid = stable_guid("phonetic-drill", kanji["id"], comp)
         reading_tags = [f"reading-{r}" for r in wk_onyomi_readings(kanji)]
+        note_tags = [
+            "wanikani",
+            "phonetic-drill",
+            "phonetic-family",
+            "priority-low",
+            f"phonetic-{comp}",
+            progress,
+            *reading_tags,
+        ]
+        note_tags.extend(supplementary_import_tags(kanji, assignment_index, interval_map=stage_interval_map))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
+                str(kanji["id"]),
                 html.escape(char),
                 "What is the on'yomi reading?",
                 html.escape(wk_readings),
@@ -4517,15 +4921,7 @@ def build_phonetic_family_deck(
                 html.escape(meaning),
                 html.escape(meta),
             ],
-            tags=[
-                "wanikani",
-                "phonetic-drill",
-                "phonetic-family",
-                "priority-low",
-                f"phonetic-{comp}",
-                progress,
-                *reading_tags,
-            ],
+            tags=note_tags,
             guid=guid,
         )
         deck.add_note(note)
@@ -4631,12 +5027,17 @@ def build_conjugation_deck(
     deck_key: str,
     drills: Sequence[ConjugationDrill],
     output_dir: Path,
+    assignment_index: Dict[int, dict],
     *,
     tag_kind: str,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_conjugation_model()
     template_label = MODEL_TEMPLATE_VERSIONS["conjugation"]
+    stage_interval_map = interval_map or load_srs_stage_interval_days(
+        CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
+    )
     outfile = (
         "wk_conjugations_verbs.apkg"
         if deck_key == "conjugations-verbs"
@@ -4649,10 +5050,19 @@ def build_conjugation_deck(
         meaning = "; ".join(primary_meanings(vocab))
         class_label = conjugation_class_label(drill.word_class)
         meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
+        note_tags = [
+            "wanikani",
+            tag_kind,
+            drill.word_class.replace("_", "-"),
+            drill.form_key,
+            f"wk-level-{level}",
+        ]
+        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
+                str(vocab["id"]),
                 html.escape(drill.prompt),
                 html.escape(drill.dict_expr),
                 html.escape(drill.dict_reading),
@@ -4663,12 +5073,7 @@ def build_conjugation_deck(
                 html.escape(drill.conj_reading),
                 html.escape(meta),
             ],
-            tags=[
-                "wanikani",
-                tag_kind,
-                drill.word_class.replace("_", "-"),
-                drill.form_key,
-            ],
+            tags=note_tags,
             guid=guid,
         )
         deck.add_note(note)
@@ -4680,34 +5085,50 @@ def build_conjugation_deck(
 def build_conjugation_verb_deck(
     drills: Sequence[ConjugationDrill],
     output_dir: Path,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     return build_conjugation_deck(
         "conjugations-verbs",
         drills,
         output_dir,
+        assignment_index,
         tag_kind="conjugation-verb",
+        interval_map=interval_map,
     )
 
 
 def build_conjugation_adjective_deck(
     drills: Sequence[ConjugationDrill],
     output_dir: Path,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     return build_conjugation_deck(
         "conjugations-adjectives",
         drills,
         output_dir,
+        assignment_index,
         tag_kind="conjugation-adjective",
+        interval_map=interval_map,
     )
 
 
 def build_conjugation_reverse_deck(
     drills: Sequence[ConjugationDrill],
     output_dir: Path,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["conjugations-reverse"], DECK_NAMES["conjugations-reverse"])
     model = make_conjugation_reverse_model()
     template_label = MODEL_TEMPLATE_VERSIONS["conjugation_reverse"]
+    stage_interval_map = interval_map or load_srs_stage_interval_days(
+        CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
+    )
     for drill in drills:
         vocab = drill.vocab
         level = vocab["data"].get("level", "?")
@@ -4715,10 +5136,19 @@ def build_conjugation_reverse_deck(
         meaning = "; ".join(primary_meanings(vocab))
         class_label = conjugation_class_label(drill.word_class)
         meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
+        note_tags = [
+            "wanikani",
+            "conjugation-reverse",
+            drill.word_class.replace("_", "-"),
+            drill.form_key,
+            f"wk-level-{level}",
+        ]
+        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
+                str(vocab["id"]),
                 html.escape(drill.prompt),
                 html.escape(drill.dict_expr),
                 html.escape(drill.dict_expr),
@@ -4728,12 +5158,7 @@ def build_conjugation_reverse_deck(
                 html.escape(drill.conj_reading),
                 html.escape(meta),
             ],
-            tags=[
-                "wanikani",
-                "conjugation-reverse",
-                drill.word_class.replace("_", "-"),
-                drill.form_key,
-            ],
+            tags=note_tags,
             guid=guid,
         )
         deck.add_note(note)
@@ -4746,12 +5171,17 @@ def build_word_class_deck(
     deck_key: str,
     vocab_items: Sequence[dict],
     output_dir: Path,
+    assignment_index: Dict[int, dict],
     *,
     drill_kind: str,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_word_class_model()
     template_label = MODEL_TEMPLATE_VERSIONS["word_class"]
+    stage_interval_map = interval_map or load_srs_stage_interval_days(
+        CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
+    )
     guid_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
     tag_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
     prompt = (
@@ -4782,10 +5212,18 @@ def build_word_class_deck(
         meaning = "; ".join(primary_meanings(vocab))
         guid = stable_guid(guid_kind, vocab["id"])
         meta = f"WK L{level} · template {template_label} · {class_key}"
+        note_tags = [
+            "wanikani",
+            tag_kind,
+            class_key.replace("_", "-"),
+            f"wk-level-{level}",
+        ]
+        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
+                str(vocab["id"]),
                 html.escape(prompt),
                 html.escape(expr),
                 html.escape(reading),
@@ -4794,11 +5232,7 @@ def build_word_class_deck(
                 html.escape(class_hint),
                 html.escape(meta),
             ],
-            tags=[
-                "wanikani",
-                tag_kind,
-                class_key.replace("_", "-"),
-            ],
+            tags=note_tags,
             guid=guid,
         )
         deck.add_note(note)
@@ -4808,12 +5242,38 @@ def build_word_class_deck(
     return out, deck
 
 
-def build_verb_type_deck(vocab_items: Sequence[dict], output_dir: Path) -> Tuple[Path, genanki.Deck]:
-    return build_word_class_deck("verb-types", vocab_items, output_dir, drill_kind="verb")
+def build_verb_type_deck(
+    vocab_items: Sequence[dict],
+    output_dir: Path,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
+) -> Tuple[Path, genanki.Deck]:
+    return build_word_class_deck(
+        "verb-types",
+        vocab_items,
+        output_dir,
+        assignment_index,
+        drill_kind="verb",
+        interval_map=interval_map,
+    )
 
 
-def build_adjective_type_deck(vocab_items: Sequence[dict], output_dir: Path) -> Tuple[Path, genanki.Deck]:
-    return build_word_class_deck("adjective-types", vocab_items, output_dir, drill_kind="adjective")
+def build_adjective_type_deck(
+    vocab_items: Sequence[dict],
+    output_dir: Path,
+    assignment_index: Dict[int, dict],
+    *,
+    interval_map: Optional[Mapping[int, int]] = None,
+) -> Tuple[Path, genanki.Deck]:
+    return build_word_class_deck(
+        "adjective-types",
+        vocab_items,
+        output_dir,
+        assignment_index,
+        drill_kind="adjective",
+        interval_map=interval_map,
+    )
 
 
 def build_vocab_cloze_deck(
@@ -4822,13 +5282,17 @@ def build_vocab_cloze_deck(
     output_dir: Path,
     *,
     vocab_reading_index: Optional[Dict[str, List[dict]]] = None,
-    sentence_audio: bool = True,
+    sentence_audio: bool = False,
     sentence_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_sentence_audio: bool = False,
+    interval_map: Optional[Mapping[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     deck = genanki.Deck(DECK_IDS["vocab-cloze"], DECK_NAMES["vocab-cloze"])
     model = make_vocab_cloze_model()
     template_label = MODEL_TEMPLATE_VERSIONS["vocab_cloze"]
+    stage_interval_map = interval_map or load_srs_stage_interval_days(
+        CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
+    )
     media_dir = output_dir / VOCAB_CLOZE_MEDIA_SUBDIR
     media_files: List[str] = []
     audio_ok = 0
@@ -4877,12 +5341,25 @@ def build_vocab_cloze_deck(
                     audio_cached += 1
                 else:
                     audio_new += 1
+        form_hint = vocab_cloze_form_hint(
+            item.sentence_en,
+            type_expression=type_expr,
+            expression=expr,
+        )
+        note_tags = [
+            "wanikani",
+            "vocab-cloze",
+            f"wk-level-{level}",
+        ]
+        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
+                str(vocab["id"]),
                 html.escape(item.cloze_sentence),
                 html.escape(meaning),
+                html.escape(form_hint),
                 html.escape(expr),
                 html.escape(type_expr),
                 html.escape(wk_spelling_note),
@@ -4893,11 +5370,7 @@ def build_vocab_cloze_deck(
                 sentence_audio_field,
                 html.escape(meta),
             ],
-            tags=[
-                "wanikani",
-                "vocab-cloze",
-                f"wk-level-{level}",
-            ],
+            tags=note_tags,
             guid=guid,
         )
         deck.add_note(note)
@@ -4921,6 +5394,9 @@ def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, st
 
 def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
     normalized = set(wanted)
+    if "core" in normalized:
+        normalized.discard("core")
+        normalized.update(("core-radical", "core-kanji", "core-vocabulary"))
     if "conjugations" in normalized:
         normalized.discard("conjugations")
         normalized.add("conjugations-verbs")
@@ -4931,17 +5407,8 @@ def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
 def wanted_decks(args: argparse.Namespace) -> Set[str]:
     if args.deck != "all":
         return normalize_wanted_decks({args.deck})
-    return normalize_wanted_decks({
-        "phonetic-families",
-        "radicals",
-        "conjugations-verbs",
-        "conjugations-adjectives",
-        "conjugations-reverse",
-        "verb-types",
-        "adjective-types",
-        "vocab-cloze",
-        "grammar",
-    })
+    generate_decks = getattr(args, "generate_decks", None) or DEFAULT_GENERATE_DECKS
+    return normalize_wanted_decks(set(generate_decks))
 
 
 def deck_names_for_run(
@@ -4961,9 +5428,17 @@ def deck_names_for_run(
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_card_count: int,
+    tae_kim_exercise_card_count: int = 0,
+    dictation_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
 ) -> List[str]:
     names: List[str] = []
+    if "core-radical" in wanted:
+        names.append(DECK_NAMES["core-radical"])
+    if "core-kanji" in wanted:
+        names.append(DECK_NAMES["core-kanji"])
+    if "core-vocabulary" in wanted:
+        names.append(DECK_NAMES["core-vocabulary"])
     if "radicals" in wanted and radical_items:
         names.append(DECK_NAMES["radicals"])
     if "phonetic-families" in wanted and phonetic_families:
@@ -4982,6 +5457,10 @@ def deck_names_for_run(
         names.append(DECK_NAMES["vocab-cloze"])
     if "grammar" in wanted and grammar_card_count:
         names.append(DECK_NAMES["grammar"])
+    if "tae-kim-exercises" in wanted and tae_kim_exercise_card_count:
+        names.append(DECK_NAMES["tae-kim-exercises"])
+    if "dictation" in wanted and dictation_item_count:
+        names.append(DECK_NAMES["dictation"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -5010,6 +5489,8 @@ def build_run_history_row(
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_card_count: int,
+    tae_kim_exercise_card_count: int = 0,
+    dictation_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
     bundled_deck_names: Sequence[str],
     bundled_in_wk_all: bool,
@@ -5046,6 +5527,8 @@ def build_run_history_row(
         "adjective_type_cards": len(adjective_type_items),
         "vocab_cloze": len(vocab_cloze_items),
         "grammar_cards": grammar_card_count,
+        "tae_kim_exercise_cards": tae_kim_exercise_card_count,
+        "dictation_items": dictation_item_count,
         "pitch_entries": len(pitch_index),
         "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
         "bundled_in_wk_all": int(bundled_in_wk_all),
@@ -5146,6 +5629,13 @@ When Anki asks about existing note types:
   - Use "Always update" if templates still look stale
   - Do NOT choose "Create new note type" or "Keep old note type"
 
+Anki treats note-type updates and note updates separately. "Always update" on one
+prompt may not refresh both. If card layout or typed answers look wrong after import:
+  1. Re-import and accept UPDATE for the note type AND for existing notes
+  2. In Browse, spot-check TypeExpression / SentenceAudio on a card
+  3. If fields are still old: delete the deck (or its notes) and import again
+     — loses scheduling for that deck only; other WK decks are unaffected
+
 If Anki reports notes could not be imported (often exactly 246 notes):
   That count matches the conjugation + conjugation-reverse decks. It usually means
   Anki kept an older note type schema without the type-in fields (TypeConjExpression,
@@ -5155,6 +5645,26 @@ If Anki reports notes could not be imported (often exactly 246 notes):
   Also update if prompted:
     - {NOTE_TYPE_NAMES['vocab_cloze']} (template {MODEL_TEMPLATE_VERSIONS['vocab_cloze']})
     - {NOTE_TYPE_NAMES['grammar_cloze']} (template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']})
+
+If Anki reports exactly 40 notes could not be imported:
+  That count matches the Japanese Grammar Exercises deck (Tae Kim practice pages) at
+  your current --grammar-max-tae-kim-lesson cap. Those cards share the same note type
+  as Japanese Grammar Context ({NOTE_TYPE_NAMES['grammar_cloze']}). Common causes:
+    1. Note type not updated to template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}
+       (FormHint field added in v4) — re-import and choose Always update for the note
+       type AND for existing notes.
+    2. A prior partial import left conflicting copies — in Browse, filter deck
+       "Japanese Grammar Exercises"; if empty or broken, delete that deck (notes only)
+       and re-import {BUNDLE_FILENAME}.
+    3. Duplicate note type — Tools → Manage Note Types; there should be only one
+       "{NOTE_TYPE_NAMES['grammar_cloze']}". Remove stray duplicates if you created
+       "Create new note type" on an earlier import.
+
+Grammar sentence audio (template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}):
+  - Plays on the card BACK only — flip after typing the answer.
+  - Choose UPDATE for {NOTE_TYPE_NAMES['grammar_cloze']} so the back template includes SentenceAudio.
+  - In Browse, SentenceAudio should be [sound:wk_grammar_....mp3]; build log should show N/N cards.
+  - Install edge-tts for TTS; use --no-grammar-sentence-audio only to skip generation.
 
 Expected note type names (stable — no version suffix):
   {note_types}
@@ -5189,8 +5699,9 @@ to assign that preset to all WK decks. Enable FSRS globally in Anki if prompted.
 
 If templates still do not update after import:
   1. Tools → Manage Note Types → Cards — confirm CSS starts with WK template comment
-  2. Re-import with "Always update" for the note type
-  3. Last resort: delete notes in that deck and re-import (loses scheduling)
+  2. Re-import; choose UPDATE for both the note type and existing notes
+  3. Delete the deck (or all notes in it) and re-import if fields/answers stay stale
+     (common after generator changes to TypeExpression or cloze text)
 """,
         encoding="utf-8",
     )
@@ -5203,9 +5714,16 @@ def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
     if bundle_path:
         print(f"  Recommended: import {bundle_path.name} (all decks in one file)")
     print("  When Anki asks about an existing note type, choose UPDATE — not create new.")
+    print("  Also accept UPDATE for existing notes (separate prompt); delete deck if answers stay stale.")
     print("  If ~246 notes fail: update Conjugation + Conjugation Reverse note types (type-in fields).")
     print(f"  Conjugation: {NOTE_TYPE_NAMES['conjugation']} · template {MODEL_TEMPLATE_VERSIONS['conjugation']}")
     print(f"  Grammar: {NOTE_TYPE_NAMES['grammar_cloze']} · template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}")
+    print(
+        "  If import says 40 notes failed: that is usually Japanese Grammar Exercises — "
+        f"update {NOTE_TYPE_NAMES['grammar_cloze']} to template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']} "
+        "and re-import (see out/anki_import_instructions.txt)."
+    )
+    print("  Grammar sentence audio plays on the card BACK (flip first); update that note type on import.")
     print(f"  Full instructions: out/anki_import_instructions.txt")
     print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
     print(f"  Deck options: install anki_addon/wk_deck_options, then Tools → WK Apply Deck Options")
@@ -5255,6 +5773,8 @@ def print_preview_report(
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_cards: Sequence[Any],
+    tae_kim_exercise_cards: Sequence[Any],
+    dictation_items: Sequence[Any],
     radical_items: Sequence[dict],
     preview_levels: RadicalPreviewLevels,
     pitch_index: Dict[Tuple[str, str], dict],
@@ -5385,6 +5905,22 @@ def print_preview_report(
                 for item in grammar_cards
             ],
         )
+    if "tae-kim-exercises" in wanted:
+        preview_deck_section(
+            DECK_NAMES["tae-kim-exercises"],
+            [
+                f"{item.title[:50]} · {item.cloze_sentence}"
+                for item in tae_kim_exercise_cards
+            ],
+        )
+    if "dictation" in wanted:
+        preview_deck_section(
+            DECK_NAMES["dictation"],
+            [
+                f"{item.expression} ({item.reading}) · {item.meaning[:40]}"
+                for item in dictation_items
+            ],
+        )
     if "radicals" in wanted:
         selected = [
             r for r in radical_items
@@ -5405,6 +5941,14 @@ def print_preview_report(
         f"Conjugation filter: min_srs={args.conjugation_min_srs} "
         f"(Master+ when {WK_SRS_STAGE_MASTER}, Guru+ when {WK_SRS_STAGE_GURU_1})"
     )
+    if getattr(args, "grammar_max_tae_kim_lesson", None) and not getattr(args, "conjugation_no_tae_kim_cap", False):
+        cap = resolve_tae_kim_conjugation_cap(args)
+        if cap is not None:
+            print(
+                f"Conjugation Tae Kim cap: lesson={args.grammar_max_tae_kim_lesson}, "
+                f"verb forms={sorted(cap.verb_forms) or 'none'}, "
+                f"i-adj={bool(cap.i_adjective_forms)}, na-adj={bool(cap.na_adjective_forms)}"
+            )
     print(
         f"Phonetic families filter: min_srs={PHONETIC_FAMILIES_MIN_SRS} "
         f"(Apprentice+; independent of --min-srs)"
@@ -5417,14 +5961,158 @@ def print_preview_report(
             f"examples_per_point={args.grammar_max_examples}, "
             f"max_unknown_kanji={args.grammar_max_unknown_kanji}"
         )
+    if "tae-kim-exercises" in wanted:
+        print(
+            f"Tae Kim exercise filter: max_tae_kim_section={args.grammar_max_tae_kim_section}, "
+            f"max_tae_kim_lesson={args.grammar_max_tae_kim_lesson or 'off'}"
+        )
+    if "dictation" in wanted:
+        print(
+            f"Dictation filter: min_srs={args.dictation_min_srs}, voice={args.dictation_voice} "
+            f"(WaniKani native pronunciation)"
+        )
     if args.sentence_audio:
-        print(f"Sentence audio: on (voice={args.sentence_audio_voice})")
+        print(f"Vocab sentence audio: on (voice={args.sentence_audio_voice})")
     else:
-        print("Sentence audio: off (--no-sentence-audio)")
+        print("Vocab sentence audio: off (pass --sentence-audio to generate; plays on card back)")
+    if args.grammar_sentence_audio:
+        print(f"Grammar sentence audio: on (voice={args.sentence_audio_voice})")
+    else:
+        print("Grammar sentence audio: off (--no-grammar-sentence-audio)")
     print("\nRe-run without --dry-run to write decks.")
 
 
-def parse_args() -> argparse.Namespace:
+def wk_deck_config_path(config_path: Optional[str | Path] = None) -> Path:
+    if config_path is None:
+        return Path(__file__).resolve().parent / WK_DECK_CONFIG_FILENAME
+    candidate = Path(config_path)
+    if not candidate.is_absolute():
+        candidate = Path(__file__).resolve().parent / candidate
+    return candidate
+
+
+def resolve_config_path_from_argv(argv: Optional[Sequence[str]] = None) -> Optional[Path]:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    config_path: Optional[str] = None
+    from_config = False
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--config":
+            if index + 1 >= len(argv):
+                raise SystemExit("error: --config requires a path")
+            config_path = argv[index + 1]
+            index += 2
+            continue
+        if arg.startswith("--config="):
+            config_path = arg.split("=", 1)[1]
+            index += 1
+            continue
+        if arg == "--from-config":
+            from_config = True
+            index += 1
+            continue
+        index += 1
+    if config_path is not None:
+        return wk_deck_config_path(config_path)
+    if from_config:
+        return wk_deck_config_path()
+    return None
+
+
+def load_wk_deck_config(config_path: Optional[Path] = None) -> dict:
+    if config_path is None or not config_path.is_file():
+        return {}
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{config_path.name} must contain a JSON object.")
+    return payload
+
+
+def parser_defaults_from_config(config: dict) -> dict:
+    """Map wk_deck_config.json keys to argparse dest names."""
+    defaults: dict[str, Any] = {}
+    if "deck" in config:
+        defaults["deck"] = config["deck"]
+    if config.get("generate_decks") is not None:
+        defaults["generate_decks"] = list(config["generate_decks"])
+    if "output_dir" in config:
+        defaults["output_dir"] = config["output_dir"]
+    for flag in ("only_started", "only_unlocked", "only_burned", "refresh_cache", "no_bundle", "dry_run", "no_wk_progress_filter"):
+        if flag in config:
+            defaults[flag] = bool(config[flag])
+    if "min_srs" in config:
+        defaults["min_srs"] = int(config["min_srs"])
+    if "max_level" in config:
+        defaults["max_level"] = int(config["max_level"])
+    if "vocab_cloze_min_srs" in config:
+        defaults["vocab_cloze_min_srs"] = int(config["vocab_cloze_min_srs"])
+    if "conjugation_min_srs" in config:
+        defaults["conjugation_min_srs"] = int(config["conjugation_min_srs"])
+    if "sentence_audio_voice" in config:
+        defaults["sentence_audio_voice"] = config["sentence_audio_voice"]
+    if "refresh_sentence_audio" in config:
+        defaults["refresh_sentence_audio"] = bool(config["refresh_sentence_audio"])
+    if "reading_audio" in config:
+        defaults["reading_audio"] = bool(config["reading_audio"])
+    if "reading_voice" in config:
+        defaults["reading_voice"] = config["reading_voice"]
+    if "refresh_reading_audio" in config:
+        defaults["refresh_reading_audio"] = bool(config["refresh_reading_audio"])
+
+    grammar = config.get("grammar") or {}
+    grammar_key_map = {
+        "max_jlpt": "grammar_max_jlpt",
+        "max_tae_kim_section": "grammar_max_tae_kim_section",
+        "max_tae_kim_lesson": "grammar_max_tae_kim_lesson",
+        "max_examples": "grammar_max_examples",
+        "max_unknown_kanji": "grammar_max_unknown_kanji",
+        "no_wk_filter": "grammar_no_wk_filter",
+        "sentence_audio": "grammar_sentence_audio",
+    }
+    for config_key, dest in grammar_key_map.items():
+        if config_key in grammar:
+            defaults[dest] = grammar[config_key]
+
+    vocab_cloze = config.get("vocab_cloze") or {}
+    if "sentence_audio" in vocab_cloze:
+        defaults["sentence_audio"] = bool(vocab_cloze["sentence_audio"])
+
+    dictation = config.get("dictation") or {}
+    dictation_key_map = {
+        "min_srs": "dictation_min_srs",
+        "voice": "dictation_voice",
+        "refresh_audio": "refresh_dictation_audio",
+    }
+    for config_key, dest in dictation_key_map.items():
+        if config_key in dictation:
+            defaults[dest] = dictation[config_key]
+
+    core = config.get("core") or {}
+    core_bool_keys = {
+        "bootstrap_scheduling",
+        "import_all_subjects",
+        "suspend_unstarted",
+        "reading_audio",
+        "refresh_reading_audio",
+    }
+    core_key_map = {
+        "bootstrap_scheduling": "bootstrap_wk_scheduling",
+        "import_all_subjects": "core_import_all",
+        "suspend_unstarted": "core_suspend_unstarted",
+        "reading_audio": "reading_audio",
+        "reading_voice": "reading_voice",
+        "refresh_reading_audio": "refresh_reading_audio",
+    }
+    for config_key, dest in core_key_map.items():
+        if config_key in core:
+            value = core[config_key]
+            defaults[dest] = bool(value) if config_key in core_bool_keys else value
+
+    return defaults
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     from grammar_decks import (
         GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
         GRAMMAR_DEFAULT_MAX_JLPT,
@@ -5432,9 +6120,30 @@ def parse_args() -> argparse.Namespace:
         GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
         JLPT_LEVELS,
     )
+    from dictation_decks import DEFAULT_DICTATION_VOICE, DICTATION_DEFAULT_MIN_SRS
     from tae_kim_mapping import load_tae_kim_sections
 
-    parser = argparse.ArgumentParser()
+    config_path = resolve_config_path_from_argv(argv)
+    cfg = parser_defaults_from_config(load_wk_deck_config(config_path))
+
+    parser = argparse.ArgumentParser(
+        description="Generate update-safe Anki decks from WaniKani and grammar sources.",
+        epilog=(
+            f"Defaults can live in {WK_DECK_CONFIG_FILENAME} beside this script; "
+            "use --from-config or --config PATH. CLI flags override config."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help=f"Load defaults from a JSON config file (default path: {WK_DECK_CONFIG_FILENAME}).",
+    )
+    parser.add_argument(
+        "--from-config",
+        action="store_true",
+        help=f"Load defaults from {WK_DECK_CONFIG_FILENAME} beside this script.",
+    )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
@@ -5443,53 +6152,133 @@ def parse_args() -> argparse.Namespace:
         "conjugations-verbs",
         "conjugations-adjectives",
         "conjugations-reverse",
-        "verb-types", "adjective-types", "vocab-cloze", "grammar", "all",
-    ], default="all")
-    parser.add_argument("--refresh-cache", action="store_true")
-    parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
+        "verb-types", "adjective-types", "vocab-cloze", "dictation", "grammar",
+        "tae-kim-exercises", "core", "all",
+    ], default=cfg.get("deck", "all"))
+    parser.add_argument("--refresh-cache", action="store_true", default=cfg.get("refresh_cache", False))
+    parser.add_argument("--output-dir", default=cfg.get("output_dir", str(OUTPUT_DIR)))
     parser.add_argument("--pitch-csv")
     parser.add_argument("--yomitan-dict")
     parser.add_argument("--write-pitch-template")
-    parser.add_argument("--max-level", type=int, default=60)
+    parser.add_argument("--max-level", type=int, default=cfg.get("max_level", 60))
     parser.add_argument("--radical-current-level", type=int, default=None, help="Override detected current WaniKani level for radical preview.")
-    parser.add_argument("--min-srs", type=int, default=1)
-    parser.add_argument("--only-unlocked", action="store_true")
-    parser.add_argument("--only-started", action="store_true")
-    parser.add_argument("--only-burned", action="store_true")
-    parser.add_argument("--dry-run", action="store_true", help="Preview generated deck contents without writing .apkg files.")
-    parser.add_argument("--no-bundle", action="store_true", help="Do not write the combined out/wk_all.apkg file.")
+    parser.add_argument("--min-srs", type=int, default=cfg.get("min_srs", 1))
+    parser.add_argument("--only-unlocked", action="store_true", default=cfg.get("only_unlocked", False))
+    parser.add_argument("--only-started", action="store_true", default=cfg.get("only_started", False))
+    parser.add_argument(
+        "--no-wk-progress-filter",
+        action="store_true",
+        default=cfg.get("no_wk_progress_filter", False),
+        help="Import all supplementary subjects; suspend until core matures (replaces --only-started gating).",
+    )
+    parser.add_argument("--only-burned", action="store_true", default=cfg.get("only_burned", False))
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=cfg.get("dry_run", False),
+        help="Preview generated deck contents without writing .apkg files.",
+    )
+    parser.add_argument(
+        "--no-bundle",
+        action="store_true",
+        default=cfg.get("no_bundle", False),
+        help="Do not write the combined out/wk_all.apkg file.",
+    )
+    parser.add_argument(
+        "--bootstrap-wk-scheduling",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.get("bootstrap_wk_scheduling", False),
+        help="Patch core card ivl/due/type from WK assignments (one-time migration).",
+    )
+    parser.add_argument(
+        "--core-suspend-unstarted",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.get("core_suspend_unstarted", True),
+        help="Suspend core notes without WK started_at (default: suspend + wk-locked).",
+    )
     parser.add_argument(
         "--vocab-cloze-min-srs",
         type=int,
-        default=VOCAB_CLOZE_DEFAULT_MIN_SRS,
+        default=cfg.get("vocab_cloze_min_srs", VOCAB_CLOZE_DEFAULT_MIN_SRS),
         help="Minimum WK SRS stage for vocabulary context cloze cards (7 = Master+, 5 = Guru+).",
     )
     parser.add_argument(
         "--conjugation-min-srs",
         type=int,
-        default=CONJUGATION_DEFAULT_MIN_SRS,
+        default=cfg.get("conjugation_min_srs", CONJUGATION_DEFAULT_MIN_SRS),
         help="Minimum WK SRS stage for conjugation decks (7 = Master+, 5 = Guru+).",
+    )
+    parser.add_argument(
+        "--conjugation-no-tae-kim-cap",
+        action="store_true",
+        default=cfg.get("conjugation_no_tae_kim_cap", False),
+        help="Do not limit conjugation forms to --grammar-max-tae-kim-lesson progress.",
+    )
+    parser.add_argument(
+        "--dictation-min-srs",
+        type=int,
+        default=cfg.get("dictation_min_srs", DICTATION_DEFAULT_MIN_SRS),
+        help="Minimum WK SRS stage for dictation cards (7 = Master+, 5 = Guru+).",
+    )
+    parser.add_argument(
+        "--dictation-voice",
+        choices=["Kyoko", "Kenichi"],
+        default=cfg.get("dictation_voice", DEFAULT_DICTATION_VOICE),
+        help="WaniKani voice actor for dictation audio (default: Kyoko).",
+    )
+    parser.add_argument(
+        "--refresh-dictation-audio",
+        action="store_true",
+        default=cfg.get("refresh_dictation_audio", False),
+        help="Re-download WaniKani pronunciation audio instead of using cache.",
     )
     parser.add_argument(
         "--sentence-audio",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Generate sentence audio for vocab-cloze cards via edge-tts (default: on).",
+        default=cfg.get("sentence_audio", False),
+        help="Generate sentence audio for vocab-cloze cards via edge-tts (plays on card back).",
+    )
+    parser.add_argument(
+        "--grammar-sentence-audio",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.get("grammar_sentence_audio", True),
+        help="Generate sentence audio for grammar-cloze cards via edge-tts (plays on card back; default: on).",
     )
     parser.add_argument(
         "--sentence-audio-voice",
-        default=DEFAULT_SENTENCE_AUDIO_VOICE,
+        default=cfg.get("sentence_audio_voice", DEFAULT_SENTENCE_AUDIO_VOICE),
         help=f"edge-tts voice for sentence audio (default: {DEFAULT_SENTENCE_AUDIO_VOICE}).",
     )
     parser.add_argument(
         "--refresh-sentence-audio",
         action="store_true",
+        default=cfg.get("refresh_sentence_audio", False),
         help="Re-download sentence audio instead of using the local TTS cache.",
+    )
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE
+
+    parser.add_argument(
+        "--reading-audio",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.get("reading_audio", True),
+        help="Generate reading pronunciation on core/leech cards (WK native for vocab, TTS for kanji).",
+    )
+    parser.add_argument(
+        "--reading-voice",
+        choices=["Kyoko", "Kenichi"],
+        default=cfg.get("reading_voice", DEFAULT_WK_READING_VOICE),
+        help="WaniKani voice for vocabulary reading audio (default: Kyoko).",
+    )
+    parser.add_argument(
+        "--refresh-reading-audio",
+        action="store_true",
+        default=cfg.get("refresh_reading_audio", False),
+        help="Re-download reading audio instead of using cache.",
     )
     parser.add_argument(
         "--grammar-max-jlpt",
         choices=list(JLPT_LEVELS),
-        default=GRAMMAR_DEFAULT_MAX_JLPT,
+        default=cfg.get("grammar_max_jlpt", GRAMMAR_DEFAULT_MAX_JLPT),
         help="Include grammar points through this JLPT level (default: N2).",
     )
     tae_kim_section_nums = [str(section.num) for section in load_tae_kim_sections()]
@@ -5497,7 +6286,7 @@ def parse_args() -> argparse.Namespace:
         "--grammar-max-tae-kim-section",
         type=int,
         choices=[int(num) for num in tae_kim_section_nums],
-        default=GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION,
+        default=cfg.get("grammar_max_tae_kim_section", GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION),
         help=(
             "Include grammar through this Tae Kim chapter (3=Basic Grammar, "
             "4=Essential, 5=Special, 6=Advanced; default: 6)."
@@ -5505,7 +6294,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--grammar-max-tae-kim-lesson",
-        default=None,
+        default=cfg.get("grammar_max_tae_kim_lesson"),
         metavar="CHAPTER:SUBSECTION",
         help=(
             "Cap at a guidetojapanese.org subsection title, e.g. "
@@ -5515,18 +6304,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--grammar-max-examples",
         type=int,
-        default=GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
+        default=cfg.get("grammar_max_examples", GRAMMAR_DEFAULT_EXAMPLES_PER_POINT),
         help="Max example cloze cards per grammar point (default: 2).",
     )
     parser.add_argument(
         "--grammar-max-unknown-kanji",
         type=int,
-        default=GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
+        default=cfg.get("grammar_max_unknown_kanji", GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI),
         help="Skip example sentences with more than this many unknown WK kanji (default: 5).",
     )
     parser.add_argument(
         "--grammar-no-wk-filter",
         action="store_true",
+        default=cfg.get("grammar_no_wk_filter", False),
         help="Do not filter grammar examples by WaniKani kanji knowledge.",
     )
     parser.add_argument("--leech-incorrect-min", type=int, default=3)
@@ -5546,7 +6336,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run --verify-conjugations and exit without writing decks.",
     )
-    return parser.parse_args()
+    parser.set_defaults(generate_decks=cfg.get("generate_decks"))
+    return parser.parse_args(argv)
 
 
 def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> None:
@@ -5577,11 +6368,59 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
     if not grammar_cards:
         print("No grammar cards created.", file=sys.stderr)
         sys.exit(1)
-    path, deck = build_grammar_deck(grammar_cards, output_dir)
+    path, deck, media = build_grammar_deck(
+        grammar_cards,
+        output_dir,
+        sentence_audio=args.grammar_sentence_audio,
+        sentence_audio_voice=args.sentence_audio_voice,
+        refresh_sentence_audio=args.refresh_sentence_audio,
+    )
     bundle_path: Optional[Path] = None
     if not args.no_bundle:
         bundle_path = output_dir / BUNDLE_FILENAME
-        write_bundled_apkg([deck], bundle_path)
+        write_bundled_apkg([deck], bundle_path, media_files=media or None)
+    print("Created:")
+    if bundle_path:
+        print(f"  {bundle_path}  ← recommended import")
+    print(f"  {path}")
+    print_import_verification_help(bundle_path)
+
+
+def run_standalone_tae_kim_exercise_deck(args: argparse.Namespace, output_dir: Path) -> None:
+    """Build Tae Kim exercise deck without WaniKani API."""
+    from tae_kim_exercise_decks import build_tae_kim_exercise_deck, collect_tae_kim_exercise_cards
+
+    exercise_cards = collect_tae_kim_exercise_cards(
+        max_tae_kim_section=args.grammar_max_tae_kim_section,
+        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+        refresh=args.refresh_cache,
+    )
+    print(
+        f"Tae Kim exercise cloze: {len(exercise_cards)} "
+        f"(Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
+        f"lesson cap={args.grammar_max_tae_kim_lesson or 'off'})"
+    )
+    if args.dry_run:
+        preview_deck_section(
+            DECK_NAMES["tae-kim-exercises"],
+            [f"{c.title[:50]} · {c.cloze_sentence}" for c in exercise_cards],
+        )
+        print("\nRe-run without --dry-run to write decks.")
+        return
+    if not exercise_cards:
+        print("No Tae Kim exercise cards created.", file=sys.stderr)
+        sys.exit(1)
+    path, deck, media = build_tae_kim_exercise_deck(
+        exercise_cards,
+        output_dir,
+        sentence_audio=args.grammar_sentence_audio,
+        sentence_audio_voice=args.sentence_audio_voice,
+        refresh_sentence_audio=args.refresh_sentence_audio,
+    )
+    bundle_path: Optional[Path] = None
+    if not args.no_bundle:
+        bundle_path = output_dir / BUNDLE_FILENAME
+        write_bundled_apkg([deck], bundle_path, media_files=media or None)
     print("Created:")
     if bundle_path:
         print(f"  {bundle_path}  ← recommended import")
@@ -5615,14 +6454,28 @@ def main() -> None:
         run_standalone_grammar_deck(args, output_dir)
         return
 
+    if wanted_decks(args) == {"tae-kim-exercises"}:
+        run_standalone_tae_kim_exercise_deck(args, output_dir)
+        return
+
     user = get_cached_user(refresh=args.refresh_cache)
+    get_cached_spaced_repetition_systems(refresh=args.refresh_cache)
+    srs_interval_map = load_srs_stage_interval_days(CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME)
     subjects = get_cached_collection(
         "subjects",
         params={"types": "vocabulary,kanji,radical"},
         params_key="vocabulary_kanji_radical",
         refresh=args.refresh_cache,
     )
-    assignment_params = build_assignment_params(args)
+    wanted_preview = wanted_decks(args)
+    use_full_assignments = (
+        args.no_wk_progress_filter
+        or args.bootstrap_wk_scheduling
+        or bool(wanted_preview & {"core-radical", "core-kanji", "core-vocabulary", "core"})
+    )
+    assignment_params = (
+        build_core_assignment_params(args) if use_full_assignments else build_assignment_params(args)
+    )
     assignment_key = assignment_params_key(assignment_params)
     assignments = get_cached_collection(
         "assignments",
@@ -5655,7 +6508,7 @@ def main() -> None:
         subjects,
         indexes["assignments"],
         args,
-        min_srs=PHONETIC_FAMILIES_MIN_SRS,
+        min_srs=supplementary_min_srs(args, PHONETIC_FAMILIES_MIN_SRS),
     )
     radical_items = radical_subjects(subjects, args)
     preview_levels = selected_radical_levels(user, subjects, indexes["assignments"], args)
@@ -5673,6 +6526,26 @@ def main() -> None:
             ", ".join(f"{key}={len(keisei_databases[key])}" for key in sorted(keisei_databases)),
         )
     wanted = wanted_decks(args)
+    core_wanted = wanted & {"core-radical", "core-kanji", "core-vocabulary"}
+    core_assignment_index = assignment_index
+    if core_wanted:
+        core_assignment_params = build_core_assignment_params(args)
+        core_assignment_key = assignment_params_key(core_assignment_params)
+        if core_assignment_key != assignment_key:
+            core_assignments = get_cached_collection(
+                "assignments",
+                params=core_assignment_params,
+                params_key=core_assignment_key,
+                refresh=args.refresh_cache,
+            )
+            core_assignment_index = assignment_by_subject_id(core_assignments)
+    core_radical_items = radical_subjects(subjects, args) if "core-radical" in wanted else []
+    core_kanji_items = all_wk_kanji_subjects(subjects, args) if "core-kanji" in wanted else []
+    core_vocab_items: List[dict] = []
+    if "core-vocabulary" in wanted:
+        from core_decks import all_core_vocab_subjects
+
+        core_vocab_items = all_core_vocab_subjects(subjects, args)
     leeches = (
         find_leeches(subjects, indexes["assignments"], indexes["reviews"], args)
         if "leeches" in wanted or "pitch-leeches" in wanted
@@ -5703,13 +6576,15 @@ def main() -> None:
         if "kanji-radicals" in wanted
         else []
     )
+    tae_kim_conjugation_cap = resolve_tae_kim_conjugation_cap(args)
     conjugation_verb_drills = (
         collect_conjugation_drills(
             vocab_items,
             indexes["assignments"],
             args,
-            min_srs=args.conjugation_min_srs,
+            min_srs=supplementary_min_srs(args, args.conjugation_min_srs),
             word_classes=VERB_CONJUGATION_WORD_CLASSES,
+            tae_kim_cap=tae_kim_conjugation_cap,
         )
         if "conjugations-verbs" in wanted or "conjugations-reverse" in wanted
         else []
@@ -5719,8 +6594,9 @@ def main() -> None:
             vocab_items,
             indexes["assignments"],
             args,
-            min_srs=args.conjugation_min_srs,
+            min_srs=supplementary_min_srs(args, args.conjugation_min_srs),
             word_classes=ADJECTIVE_CONJUGATION_WORD_CLASSES,
+            tae_kim_cap=tae_kim_conjugation_cap,
         )
         if "conjugations-adjectives" in wanted
         else []
@@ -5730,8 +6606,9 @@ def main() -> None:
             vocab_items,
             indexes["assignments"],
             args,
-            min_srs=args.conjugation_min_srs,
+            min_srs=supplementary_min_srs(args, args.conjugation_min_srs),
             word_classes=VERB_CONJUGATION_WORD_CLASSES,
+            tae_kim_cap=tae_kim_conjugation_cap,
         )
         if "conjugations-reverse" in wanted
         else []
@@ -5744,7 +6621,7 @@ def main() -> None:
         collect_vocab_cloze_items(
             vocab_items,
             indexes["assignments"],
-            min_srs=args.vocab_cloze_min_srs,
+            min_srs=supplementary_min_srs(args, args.vocab_cloze_min_srs),
         )
         if "vocab-cloze" in wanted
         else []
@@ -5763,7 +6640,27 @@ def main() -> None:
             known_kanji=set()
             if args.grammar_no_wk_filter
             else known_kanji_from_subjects(vocab_items, kanji_items),
+            vocab_items=vocab_items,
             refresh=args.refresh_cache,
+        )
+    tae_kim_exercise_cards = []
+    if "tae-kim-exercises" in wanted:
+        from tae_kim_exercise_decks import collect_tae_kim_exercise_cards
+
+        tae_kim_exercise_cards = collect_tae_kim_exercise_cards(
+            max_tae_kim_section=args.grammar_max_tae_kim_section,
+            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+            refresh=args.refresh_cache,
+        )
+    dictation_items = []
+    if "dictation" in wanted:
+        from dictation_decks import collect_vocab_dictation_items
+
+        dictation_items = collect_vocab_dictation_items(
+            vocab_items,
+            indexes["assignments"],
+            min_srs=supplementary_min_srs(args, args.dictation_min_srs),
+            voice_actor=args.dictation_voice,
         )
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
@@ -5784,6 +6681,8 @@ def main() -> None:
         print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
     if conjugation_verb_drills:
         print(f"Verb conjugation drills: {len(conjugation_verb_drills)} (min SRS {args.conjugation_min_srs})")
+        if tae_kim_conjugation_cap is not None:
+            print(f"  Tae Kim cap: {args.grammar_max_tae_kim_lesson}")
     if conjugation_adjective_drills:
         print(f"Adjective conjugation drills: {len(conjugation_adjective_drills)} (min SRS {args.conjugation_min_srs})")
     if conjugation_reverse_drills:
@@ -5800,6 +6699,25 @@ def main() -> None:
             f"(JLPT ≤ {args.grammar_max_jlpt}, Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
             f"{args.grammar_max_examples} ex/point)"
         )
+    if tae_kim_exercise_cards:
+        print(
+            f"Tae Kim exercise cloze: {len(tae_kim_exercise_cards)} "
+            f"(Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
+            f"lesson cap={args.grammar_max_tae_kim_lesson or 'off'})"
+        )
+    if dictation_items:
+        print(
+            f"Dictation: {len(dictation_items)} "
+            f"(min SRS {args.dictation_min_srs}, voice={args.dictation_voice})"
+        )
+    if core_radical_items:
+        print(f"Core radicals: {len(core_radical_items)} (full catalog ≤ level {args.max_level})")
+    if core_kanji_items:
+        print(f"Core kanji: {len(core_kanji_items)} (full catalog ≤ level {args.max_level})")
+    if core_vocab_items:
+        print(f"Core vocabulary: {len(core_vocab_items)} (full catalog ≤ level {args.max_level})")
+    if args.bootstrap_wk_scheduling and core_wanted:
+        print("WK scheduling bootstrap: enabled for core decks")
     print(f"Pitch entries loaded: {len(pitch_index)}")
     if args.dry_run:
         would_bundle = deck_names_for_run(
@@ -5818,6 +6736,8 @@ def main() -> None:
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
             grammar_card_count=len(grammar_cards),
+            tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
+            dictation_item_count=len(dictation_items),
             pitch_index=pitch_index,
         )
         history_path = append_run_history(
@@ -5844,6 +6764,8 @@ def main() -> None:
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
                 grammar_card_count=len(grammar_cards),
+                tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
+                dictation_item_count=len(dictation_items),
                 pitch_index=pitch_index,
                 bundled_deck_names=would_bundle,
                 bundled_in_wk_all=bool(would_bundle and not args.no_bundle),
@@ -5866,6 +6788,8 @@ def main() -> None:
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
             grammar_cards=grammar_cards,
+            tae_kim_exercise_cards=tae_kim_exercise_cards,
+            dictation_items=dictation_items,
             radical_items=radical_items,
             preview_levels=preview_levels,
             pitch_index=pitch_index,
@@ -5876,12 +6800,67 @@ def main() -> None:
     created: List[Path] = []
     built_decks: List[genanki.Deck] = []
     bundled_media_files: List[str] = []
+    if core_wanted:
+        from core_decks import build_core_kanji_deck, build_core_radical_deck, build_core_vocab_deck
+
+        bootstrap = bool(args.bootstrap_wk_scheduling)
+        suspend_unstarted = bool(args.core_suspend_unstarted)
+        reading_audio_kwargs = {
+            "reading_audio": bool(args.reading_audio),
+            "wk_voice": args.reading_voice,
+            "tts_voice": args.sentence_audio_voice,
+            "refresh_reading_audio": bool(args.refresh_reading_audio),
+        }
+        if "core-radical" in wanted and core_radical_items:
+            path, deck = build_core_radical_deck(
+                core_radical_items,
+                core_assignment_index,
+                output_dir,
+                bootstrap_scheduling=bootstrap,
+                suspend_unstarted=suspend_unstarted,
+            )
+            created.append(path)
+            built_decks.append(deck)
+            bundled_media_files.extend(getattr(deck, "wk_media_files", []) or [])
+        if "core-kanji" in wanted and core_kanji_items:
+            path, deck = build_core_kanji_deck(
+                core_kanji_items,
+                core_assignment_index,
+                output_dir,
+                bootstrap_scheduling=bootstrap,
+                suspend_unstarted=suspend_unstarted,
+                **reading_audio_kwargs,
+            )
+            created.append(path)
+            built_decks.append(deck)
+            bundled_media_files.extend(getattr(deck, "wk_media_files", []) or [])
+        if "core-vocabulary" in wanted and core_vocab_items:
+            path, deck = build_core_vocab_deck(
+                core_vocab_items,
+                core_assignment_index,
+                output_dir,
+                bootstrap_scheduling=bootstrap,
+                suspend_unstarted=suspend_unstarted,
+                **reading_audio_kwargs,
+            )
+            created.append(path)
+            built_decks.append(deck)
+            bundled_media_files.extend(getattr(deck, "wk_media_files", []) or [])
     if "radicals" in wanted and radical_items:
         path, deck = build_radical_deck(radical_items, kanji_items, indexes, args, output_dir, preview_levels)
         created.append(path)
         built_decks.append(deck)
     if "leeches" in wanted and leeches:
-        path, deck = build_leech_deck(leeches, indexes, pitch_index, output_dir)
+        path, deck = build_leech_deck(
+            leeches,
+            indexes,
+            pitch_index,
+            output_dir,
+            reading_audio=bool(args.reading_audio),
+            wk_voice=args.reading_voice,
+            tts_voice=args.sentence_audio_voice,
+            refresh_reading_audio=bool(args.refresh_reading_audio),
+        )
         created.append(path)
         built_decks.append(deck)
     if "verb-pairs" in wanted and verb_pairs:
@@ -5900,6 +6879,8 @@ def main() -> None:
             started_kanji_ids,
             all_kanji_by_char,
             output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
         )
         created.append(path)
         built_decks.append(deck)
@@ -5917,23 +6898,48 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
     if "conjugations-verbs" in wanted and conjugation_verb_drills:
-        path, deck = build_conjugation_verb_deck(conjugation_verb_drills, output_dir)
+        path, deck = build_conjugation_verb_deck(
+            conjugation_verb_drills,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
         created.append(path)
         built_decks.append(deck)
     if "conjugations-adjectives" in wanted and conjugation_adjective_drills:
-        path, deck = build_conjugation_adjective_deck(conjugation_adjective_drills, output_dir)
+        path, deck = build_conjugation_adjective_deck(
+            conjugation_adjective_drills,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
         created.append(path)
         built_decks.append(deck)
     if "conjugations-reverse" in wanted and conjugation_reverse_drills:
-        path, deck = build_conjugation_reverse_deck(conjugation_reverse_drills, output_dir)
+        path, deck = build_conjugation_reverse_deck(
+            conjugation_reverse_drills,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
         created.append(path)
         built_decks.append(deck)
     if "verb-types" in wanted and verb_type_items:
-        path, deck = build_verb_type_deck(verb_type_items, output_dir)
+        path, deck = build_verb_type_deck(
+            verb_type_items,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
         created.append(path)
         built_decks.append(deck)
     if "adjective-types" in wanted and adjective_type_items:
-        path, deck = build_adjective_type_deck(adjective_type_items, output_dir)
+        path, deck = build_adjective_type_deck(
+            adjective_type_items,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
         created.append(path)
         built_decks.append(deck)
     if "vocab-cloze" in wanted and vocab_cloze_items:
@@ -5945,6 +6951,7 @@ def main() -> None:
             sentence_audio=args.sentence_audio,
             sentence_audio_voice=args.sentence_audio_voice,
             refresh_sentence_audio=args.refresh_sentence_audio,
+            interval_map=srs_interval_map,
         )
         created.append(path)
         built_decks.append(deck)
@@ -5952,11 +6959,54 @@ def main() -> None:
     if "grammar" in wanted and grammar_cards:
         from grammar_decks import build_grammar_deck
 
-        path, deck = build_grammar_deck(grammar_cards, output_dir)
+        path, deck, media = build_grammar_deck(
+            grammar_cards,
+            output_dir,
+            sentence_audio=args.grammar_sentence_audio,
+            sentence_audio_voice=args.sentence_audio_voice,
+            refresh_sentence_audio=args.refresh_sentence_audio,
+        )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
+    if "tae-kim-exercises" in wanted and tae_kim_exercise_cards:
+        from tae_kim_exercise_decks import build_tae_kim_exercise_deck
+
+        path, deck, media = build_tae_kim_exercise_deck(
+            tae_kim_exercise_cards,
+            output_dir,
+            sentence_audio=args.grammar_sentence_audio,
+            sentence_audio_voice=args.sentence_audio_voice,
+            refresh_sentence_audio=args.refresh_sentence_audio,
+        )
+        created.append(path)
+        built_decks.append(deck)
+        bundled_media_files.extend(media)
+    if "dictation" in wanted and dictation_items:
+        from dictation_decks import build_dictation_deck
+
+        path, deck, media = build_dictation_deck(
+            dictation_items,
+            output_dir,
+            indexes["assignments"],
+            voice_actor=args.dictation_voice,
+            refresh_audio=args.refresh_dictation_audio,
+            interval_map=srs_interval_map,
+        )
+        created.append(path)
+        built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "pitch-leeches" in wanted and leeches:
-        maybe = build_pitch_leeches_deck(leeches, indexes, pitch_index, output_dir)
+        maybe = build_pitch_leeches_deck(
+            leeches,
+            indexes,
+            pitch_index,
+            output_dir,
+            reading_audio=bool(args.reading_audio),
+            wk_voice=args.reading_voice,
+            tts_voice=args.sentence_audio_voice,
+            refresh_reading_audio=bool(args.refresh_reading_audio),
+        )
         if maybe:
             path, deck = maybe
             created.append(path)
@@ -5986,6 +7036,8 @@ def main() -> None:
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
                 grammar_card_count=len(grammar_cards),
+                tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
+                dictation_item_count=len(dictation_items),
                 pitch_index=pitch_index,
                 bundled_deck_names=[],
                 bundled_in_wk_all=False,
@@ -6030,6 +7082,8 @@ def main() -> None:
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
             grammar_card_count=len(grammar_cards),
+            tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
+            dictation_item_count=len(dictation_items),
             pitch_index=pitch_index,
             bundled_deck_names=[deck.name for deck in built_decks],
             bundled_in_wk_all=bool(bundle_path),
