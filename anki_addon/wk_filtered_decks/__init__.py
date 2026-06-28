@@ -73,6 +73,14 @@ def load_definitions(path: Path) -> List[dict]:
     return decks
 
 
+def _deck_id_for_name(decks: Any, name: str) -> Optional[int]:
+    if hasattr(decks, "id_for_name"):
+        deck_id = decks.id_for_name(name)
+        return int(deck_id) if deck_id else None
+    deck_id = decks.id(name, default=False)
+    return int(deck_id) if deck_id else None
+
+
 def apply_search_terms(deck_config: Any, spec: dict) -> None:
     del deck_config.search_terms[:]
     term = FilteredDeckConfig.SearchTerm(
@@ -86,7 +94,7 @@ def apply_search_terms(deck_config: Any, spec: dict) -> None:
 def upsert_filtered_deck(spec: dict) -> tuple[str, int]:
     col = mw.col
     name = str(spec["name"])
-    existing_id = col.decks.id(name, default=False)
+    existing_id = _deck_id_for_name(col.decks, name)
     if existing_id:
         deck = col.sched.get_or_create_filtered_deck(DeckId(existing_id))
         action = "rebuilt"

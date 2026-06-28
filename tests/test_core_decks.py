@@ -81,8 +81,10 @@ class CoreDecksTests(unittest.TestCase):
         self.assertEqual(templates, ["Review"])
         qfmt = model.templates[0]["qfmt"]
         self.assertIn("{{type:Reading}}", qfmt)
+        self.assertNotIn("ReadingAudio", qfmt)
         afmt = model.templates[0]["afmt"]
         self.assertIn("{{Meaning}}", afmt)
+        self.assertIn("ReadingAudio", afmt)
 
     def test_core_note_type_names(self) -> None:
         self.assertEqual(NOTE_TYPE_NAMES["core_radical"], "WK Core Radical")

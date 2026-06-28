@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 ANKI_QUEUE_SUSPENDED = -1
 
-DEFAULT_MATURE_MIN_INTERVAL_DAYS = 21
+DEFAULT_MATURE_MIN_INTERVAL_DAYS = 7  # WaniKani Guru I (srs_stage 5) — “guru’d at least once”
 DEFAULT_BURNED_INTERVAL_DAYS = 365
 
 WK_LOCKED_TAG = "wk-locked"

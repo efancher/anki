@@ -12,7 +12,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from wk_reading_audio import (
+    format_progress_line,
+    kanji_tts_readings,
     reading_audio_basename,
+    reading_filename_slug,
     reading_tts_text,
     select_pronunciation_audio,
 )
@@ -36,25 +39,35 @@ def mock_vocab(vocab_id: int = 42, reading: str = "がくせい") -> dict:
     }
 
 
-def mock_kanji(reading: str = "おも") -> dict:
+def mock_kanji(*readings: str) -> dict:
     return {
         "id": 637,
         "object": "kanji",
         "data": {
             "characters": "思",
-            "readings": [{"reading": reading, "primary": True}],
+            "readings": [{"reading": r, "primary": True} for r in readings],
         },
     }
 
 
 class WkReadingAudioTests(unittest.TestCase):
     def test_reading_tts_text_uses_primary_reading(self) -> None:
-        self.assertEqual(reading_tts_text(mock_kanji()), "おも")
+        self.assertEqual(reading_tts_text(mock_kanji("おも")), "おも")
 
-    def test_reading_audio_basename_includes_subject_kind(self) -> None:
+    def test_kanji_tts_readings_deduplicates(self) -> None:
+        self.assertEqual(kanji_tts_readings(mock_kanji("せい", "しょう")), ["せい", "しょう"])
+
+    def test_reading_audio_basename_vocab(self) -> None:
         self.assertEqual(
             reading_audio_basename(mock_vocab(), "Kyoko", "mp3"),
             "wk_reading_vocabulary_42_kyoko.mp3",
+        )
+
+    def test_reading_audio_basename_kanji_includes_reading_slug(self) -> None:
+        reading = "おも"
+        self.assertEqual(
+            reading_audio_basename(mock_kanji(reading), "Kyoko", "mp3", reading=reading),
+            f"wk_reading_kanji_637_{reading_filename_slug(reading)}_kyoko.mp3",
         )
 
     def test_prepare_reading_audio_field_vocab(self) -> None:
@@ -62,23 +75,59 @@ class WkReadingAudioTests(unittest.TestCase):
 
         media_dir = REPO_ROOT / "out" / "test_reading_media"
         with mock.patch("wk_reading_audio.ensure_pronunciation_audio_file", return_value=(True, True)):
-            field, path = prepare_reading_audio_field(mock_vocab(), media_dir)
+            field, paths = prepare_reading_audio_field(mock_vocab(), media_dir)
         self.assertEqual(field, "[sound:wk_reading_vocabulary_42_kyoko.mp3]")
-        self.assertTrue(path)
+        self.assertEqual(len(paths), 1)
 
-    def test_prepare_reading_audio_field_kanji_uses_tts(self) -> None:
+    def test_prepare_reading_audio_field_kanji_single_reading(self) -> None:
         from wk_reading_audio import prepare_reading_audio_field
 
         media_dir = REPO_ROOT / "out" / "test_reading_media_kanji"
-        with mock.patch("wk_reading_audio.ensure_sentence_audio_file", return_value=(True, False)):
-            field, path = prepare_reading_audio_field(mock_kanji(), media_dir)
-        self.assertEqual(field, "[sound:wk_reading_kanji_637_kyoko.mp3]")
-        self.assertTrue(path)
+        reading = "おも"
+        with mock.patch("wk_reading_audio.ensure_kanji_reading_audio_file", return_value=(True, False)) as mock_tts:
+            field, paths = prepare_reading_audio_field(mock_kanji(reading), media_dir)
+        mock_tts.assert_called_once()
+        expected = reading_audio_basename(mock_kanji(reading), "Kyoko", "mp3", reading=reading)
+        self.assertEqual(field, f"[sound:{expected}]")
+        self.assertEqual(len(paths), 1)
+
+    def test_prepare_reading_audio_field_kanji_multiple_readings(self) -> None:
+        from wk_reading_audio import prepare_reading_audio_field
+
+        media_dir = REPO_ROOT / "out" / "test_reading_media_kanji_multi"
+        kanji = mock_kanji("せい", "しょう")
+        with mock.patch("wk_reading_audio.ensure_kanji_reading_audio_file", return_value=(True, False)) as mock_tts:
+            field, paths = prepare_reading_audio_field(kanji, media_dir)
+        self.assertEqual(mock_tts.call_count, 2)
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(field.count("[sound:"), 2)
 
     def test_select_pronunciation_audio_prefers_kyoko(self) -> None:
         entry = select_pronunciation_audio(mock_vocab(), voice_actor="Kyoko")
         self.assertIsNotNone(entry)
         self.assertEqual(entry["metadata"]["voice_actor_name"], "Kyoko")
+
+    def test_format_progress_line_shows_counts(self) -> None:
+        line = format_progress_line(5, 10, label="Reading audio")
+        self.assertIn("Reading audio:", line)
+        self.assertIn("5/10", line)
+        self.assertIn("(50%)", line)
+        self.assertIn("[", line)
+
+    def test_progress_bar_finish_non_tty(self) -> None:
+        from io import StringIO
+
+        from wk_reading_audio import ReadingAudioProgressBar
+
+        stream = StringIO()
+        bar = ReadingAudioProgressBar(3, label="Reading audio", stream=stream, enabled=True)
+        bar._is_tty = False
+        bar.advance()
+        bar.advance()
+        bar.finish(ok_count=2)
+        output = stream.getvalue()
+        self.assertIn("Reading audio:", output)
+        self.assertIn("2 with audio", output)
 
 
 if __name__ == "__main__":

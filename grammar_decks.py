@@ -53,6 +53,8 @@ from wk_decks import (
     load_cache_items_only,
     require_edge_tts,
     stable_guid,
+    tts_audio_basename,
+    WK_SHARED_MEDIA_SUBDIR,
     strip_html,
     versioned_css,
     write_apkg,
@@ -156,6 +158,7 @@ def grammar_point_id(point: dict, example_index: int) -> str:
 
 
 def grammar_audio_basename(point_id: str) -> str:
+    """Deprecated: use tts_audio_basename(sentence, voice) for packaged media."""
     safe = hashlib.sha1(point_id.encode("utf-8")).hexdigest()[:16]
     return f"wk_grammar_{safe}.mp3"
 
@@ -719,7 +722,7 @@ def build_grammar_deck(
     deck = genanki.Deck(GRAMMAR_DECK_ID, GRAMMAR_DECK_NAME)
     model = make_grammar_model()
     template_label = GRAMMAR_TEMPLATE_VERSION
-    media_dir = output_dir / GRAMMAR_MEDIA_SUBDIR
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
     audio_ok = 0
     audio_cached = 0
@@ -750,23 +753,24 @@ def build_grammar_deck(
             )
         sentence_audio_field = ""
         if sentence_audio:
-            basename = grammar_audio_basename(item.point_id)
-            dest = media_dir / basename
             tts_text = prepare_grammar_sentence_for_tts(item.full_sentence)
-            ok, was_cached = ensure_sentence_audio_file(
-                tts_text,
-                sentence_audio_voice,
-                dest,
-                refresh=refresh_sentence_audio,
-            )
-            if ok:
-                sentence_audio_field = f"[sound:{basename}]"
-                media_files.append(str(dest.resolve()))
-                audio_ok += 1
-                if was_cached:
-                    audio_cached += 1
-                else:
-                    audio_new += 1
+            basename = tts_audio_basename(tts_text, sentence_audio_voice)
+            if basename:
+                dest = media_dir / basename
+                ok, was_cached = ensure_sentence_audio_file(
+                    tts_text,
+                    sentence_audio_voice,
+                    dest,
+                    refresh=refresh_sentence_audio,
+                )
+                if ok:
+                    sentence_audio_field = f"[sound:{basename}]"
+                    media_files.append(str(dest.resolve()))
+                    audio_ok += 1
+                    if was_cached:
+                        audio_cached += 1
+                    else:
+                        audio_new += 1
         note = genanki.Note(
             model=model,
             fields=[

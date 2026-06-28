@@ -86,6 +86,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -164,6 +165,7 @@ CLOZE_BLANK_DISPLAY = "＿＿＿"
 SENTENCE_AUDIO_CACHE_DIR = CACHE_DIR / "sentence_audio"
 DEFAULT_SENTENCE_AUDIO_VOICE = "ja-JP-NanamiNeural"
 VOCAB_CLOZE_MEDIA_SUBDIR = "media/vocab_cloze"
+WK_SHARED_MEDIA_SUBDIR = "media/shared"
 SECONDS_PER_DAY = 86400
 REVIEW_STATS_BATCH_SIZE = 100
 READING_KEYWORD_MIN_USES = 5
@@ -241,7 +243,7 @@ MODEL_IDS = {
 # Bump the relevant key when that note type's templates/CSS change.
 # Anki import uses model.mod; these map to stable epoch seconds (see template_mod_epoch).
 MODEL_TEMPLATE_VERSIONS = {
-    "item": "v6",
+    "item": "v7",
     "pair": "v2",
     "family": "v1",
     "radical": "v5",
@@ -255,7 +257,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "grammar_cloze": "v4",
     "dictation": "v3",
     "core_radical": "v2",
-    "core_item": "v4",
+    "core_item": "v5",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -2023,6 +2025,14 @@ def sentence_audio_cache_path(text: str, voice: str) -> Path:
     return SENTENCE_AUDIO_CACHE_DIR / f"{sentence_audio_cache_key(text, voice)}.mp3"
 
 
+def tts_audio_basename(text: str, voice: str) -> str:
+    """Shared Anki media name for TTS clips — dedupes identical sentences across decks."""
+    plain = strip_html(text).strip()
+    if not plain:
+        return ""
+    return f"wk_tts_{sentence_audio_cache_key(plain, voice)}.mp3"
+
+
 def vocab_cloze_audio_basename(vocab_id: int) -> str:
     return f"wk_vocab_cloze_{vocab_id}.mp3"
 
@@ -2314,13 +2324,13 @@ def make_item_model() -> WkModel:
                 </div>
                 {{#MeaningWeak}}<div class="weak-side">Meaning side needs work</div>{{/MeaningWeak}}
                 <div class="jp">{{Expression}}</div>
-                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 </div>
                 """,
                 "afmt": """
                 {{FrontSide}}
                 <hr>
                 <div class="meaning answer">{{Meaning}}</div>
+                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 {{#Synonyms}}<div class="synonyms"><b>Your synonyms:</b> {{Synonyms}}</div>{{/Synonyms}}
                 {{#Mnemonic}}<h3>Meaning mnemonic</h3><div class="notes">{{Mnemonic}}</div>{{/Mnemonic}}
                 {{#Confusables}}<h3>Confusables</h3><div class="notes">{{Confusables}}</div>{{/Confusables}}
@@ -2340,7 +2350,6 @@ def make_item_model() -> WkModel:
                 </div>
                 {{#ReadingWeak}}<div class="weak-side">Reading side needs work</div>{{/ReadingWeak}}
                 <div class="jp">{{Expression}}</div>
-                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 </div>
                 """,
                 "afmt": """
@@ -2358,8 +2367,8 @@ def make_item_model() -> WkModel:
             },
             {
                 "name": "Pitch",
-                "qfmt": "{{#Pitch}}<div class='wk-card {{StyleClass}}'><div class='subject-badge'>{{SubjectType}}</div><div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div>{{#ReadingAudio}}<div class='reading-audio'>{{ReadingAudio}}</div>{{/ReadingAudio}}</div>{{/Pitch}}",
-                "afmt": "{{FrontSide}}<hr><div class='pitch-answer'>{{Pitch}} {{PitchPattern}}</div>{{ItemHtml}}",
+                "qfmt": "{{#Pitch}}<div class='wk-card {{StyleClass}}'><div class='subject-badge'>{{SubjectType}}</div><div class='prompt'>Pitch accent?</div><div class='jp'>{{Expression}}</div><div class='reading'>{{Reading}}</div></div>{{/Pitch}}",
+                "afmt": "{{FrontSide}}<hr><div class='pitch-answer'>{{Pitch}} {{PitchPattern}}</div>{{#ReadingAudio}}<div class='reading-audio'>{{ReadingAudio}}</div>{{/ReadingAudio}}{{ItemHtml}}",
             },
         ],
         css=versioned_css(
@@ -4689,7 +4698,7 @@ def build_leech_deck(
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_reading_audio: bool = False,
 ) -> Tuple[Path, genanki.Deck]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, ReadingAudioProgressBar, prepare_reading_audio_field
 
     deck = genanki.Deck(DECK_IDS["leeches"], DECK_NAMES["leeches"])
     model = make_item_model()
@@ -4697,18 +4706,22 @@ def build_leech_deck(
     media_files: List[str] = []
     if reading_audio:
         print(f"Leech reading audio (vocab: WK {wk_voice}, kanji: TTS {tts_voice})...")
+    progress = ReadingAudioProgressBar(len(items), label="Leech reading audio", enabled=reading_audio)
+    audio_ok = 0
     for item in items:
         audio_field = ""
         if reading_audio:
-            audio_field, media_path = prepare_reading_audio_field(
+            audio_field, media_paths = prepare_reading_audio_field(
                 item,
                 media_dir,
                 wk_voice=wk_voice or DEFAULT_WK_READING_VOICE,
                 tts_voice=tts_voice,
                 refresh=refresh_reading_audio,
             )
-            if media_path:
-                media_files.append(media_path)
+            if media_paths:
+                media_files.extend(media_paths)
+                audio_ok += 1
+            progress.advance()
         add_item_note(
             deck,
             model,
@@ -4718,6 +4731,8 @@ def build_leech_deck(
             "leech",
             reading_audio_field=audio_field,
         )
+    if reading_audio:
+        progress.finish(ok_count=audio_ok)
     out = output_dir / "wk_leeches.apkg"
     write_apkg(deck, out, media_files=media_files or None)
     return out, deck
@@ -4734,7 +4749,7 @@ def build_pitch_leeches_deck(
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_reading_audio: bool = False,
 ) -> Optional[Tuple[Path, genanki.Deck]]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, ReadingAudioProgressBar, prepare_reading_audio_field
 
     pitch_items = [i for i in items if pitch_for(i, pitch_index).get("pitch") or pitch_for(i, pitch_index).get("pattern")]
     if not pitch_items:
@@ -4743,18 +4758,22 @@ def build_pitch_leeches_deck(
     model = make_item_model()
     media_dir = output_dir / "media/pitch_leech_reading"
     media_files: List[str] = []
+    progress = ReadingAudioProgressBar(len(pitch_items), label="Pitch leech reading audio", enabled=reading_audio)
+    audio_ok = 0
     for item in pitch_items:
         audio_field = ""
         if reading_audio:
-            audio_field, media_path = prepare_reading_audio_field(
+            audio_field, media_paths = prepare_reading_audio_field(
                 item,
                 media_dir,
                 wk_voice=wk_voice or DEFAULT_WK_READING_VOICE,
                 tts_voice=tts_voice,
                 refresh=refresh_reading_audio,
             )
-            if media_path:
-                media_files.append(media_path)
+            if media_paths:
+                media_files.extend(media_paths)
+                audio_ok += 1
+            progress.advance()
         add_item_note(
             deck,
             model,
@@ -4764,6 +4783,8 @@ def build_pitch_leeches_deck(
             "pitch-leech",
             reading_audio_field=audio_field,
         )
+    if reading_audio:
+        progress.finish(ok_count=audio_ok)
     out = output_dir / "wk_pitch_leeches.apkg"
     write_apkg(deck, out, media_files=media_files or None)
     return out, deck
@@ -5293,7 +5314,7 @@ def build_vocab_cloze_deck(
     stage_interval_map = interval_map or load_srs_stage_interval_days(
         CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
     )
-    media_dir = output_dir / VOCAB_CLOZE_MEDIA_SUBDIR
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
     audio_ok = 0
     audio_cached = 0
@@ -5320,27 +5341,28 @@ def build_vocab_cloze_deck(
         meta = f"WK L{level} · SRS {srs} · template {template_label}"
         sentence_audio_field = ""
         if sentence_audio:
-            basename = vocab_cloze_audio_basename(vocab["id"])
-            dest = media_dir / basename
             tts_text = prepare_sentence_for_tts(
                 item.full_sentence,
                 item.vocab,
                 source_ja=item.source_ja,
             )
-            ok, was_cached = ensure_sentence_audio_file(
-                tts_text,
-                sentence_audio_voice,
-                dest,
-                refresh=refresh_sentence_audio,
-            )
-            if ok:
-                sentence_audio_field = f"[sound:{basename}]"
-                media_files.append(str(dest.resolve()))
-                audio_ok += 1
-                if was_cached:
-                    audio_cached += 1
-                else:
-                    audio_new += 1
+            basename = tts_audio_basename(tts_text, sentence_audio_voice)
+            if basename:
+                dest = media_dir / basename
+                ok, was_cached = ensure_sentence_audio_file(
+                    tts_text,
+                    sentence_audio_voice,
+                    dest,
+                    refresh=refresh_sentence_audio,
+                )
+                if ok:
+                    sentence_audio_field = f"[sound:{basename}]"
+                    media_files.append(str(dest.resolve()))
+                    audio_ok += 1
+                    if was_cached:
+                        audio_cached += 1
+                    else:
+                        audio_new += 1
         form_hint = vocab_cloze_form_hint(
             item.sentence_en,
             type_expression=type_expr,
@@ -5589,7 +5611,7 @@ def write_filtered_decks_json(output_dir: Path) -> Path:
     return path
 
 
-def write_deck_options_json(output_dir: Path) -> Path:
+def write_deck_options_json(output_dir: Path, deck_names: Sequence[str]) -> Path:
     path = output_dir / DECK_OPTIONS_JSON
     payload = {
         "generator_version": VERSION,
@@ -5599,11 +5621,44 @@ def write_deck_options_json(output_dir: Path) -> Path:
             "new_per_day": WK_FSRS_DEFAULT_NEW_PER_DAY,
             "reviews_per_day": WK_FSRS_DEFAULT_REVIEWS_PER_DAY,
         },
-        "deck_names": sorted(DECK_NAMES.values()),
+        "deck_names": sorted(set(deck_names)),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
+
+def default_sync_anki_addons() -> bool:
+    return sys.platform == "darwin"
+
+
+def maybe_sync_anki_addons(args: argparse.Namespace) -> None:
+    if args.dry_run or not args.sync_addons:
+        return
+    script = Path(__file__).resolve().parent / "scripts" / "sync_anki_addons.sh"
+    if not script.is_file():
+        print(
+            "Warning: add-on sync script missing; copy anki_addon/ manually.",
+            file=sys.stderr,
+        )
+        return
+    print()
+    print("Syncing Anki add-ons...")
+    try:
+        result = subprocess.run(
+            ["/bin/bash", str(script)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout:
+            print(result.stdout.rstrip())
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit code {result.returncode}"
+            print(f"Add-on sync failed: {detail}", file=sys.stderr)
+            print(f"Retry manually: {script}", file=sys.stderr)
+    except OSError as exc:
+        print(f"Add-on sync failed: {exc}", file=sys.stderr)
+        print(f"Retry manually: {script}", file=sys.stderr)
 
 
 def format_template_versions() -> str:
@@ -6038,7 +6093,16 @@ def parser_defaults_from_config(config: dict) -> dict:
         defaults["generate_decks"] = list(config["generate_decks"])
     if "output_dir" in config:
         defaults["output_dir"] = config["output_dir"]
-    for flag in ("only_started", "only_unlocked", "only_burned", "refresh_cache", "no_bundle", "dry_run", "no_wk_progress_filter"):
+    for flag in (
+        "only_started",
+        "only_unlocked",
+        "only_burned",
+        "refresh_cache",
+        "no_bundle",
+        "dry_run",
+        "no_wk_progress_filter",
+        "sync_anki_addons",
+    ):
         if flag in config:
             defaults[flag] = bool(config[flag])
     if "min_srs" in config:
@@ -6183,6 +6247,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         default=cfg.get("no_bundle", False),
         help="Do not write the combined out/wk_all.apkg file.",
+    )
+    sync_addons_default = cfg.get("sync_anki_addons")
+    if sync_addons_default is None:
+        sync_addons_default = default_sync_anki_addons()
+    parser.add_argument(
+        "--sync-addons",
+        action=argparse.BooleanOptionalAction,
+        default=bool(sync_addons_default),
+        help="After generating, rsync anki_addon/ into Anki's add-ons folder (default: on macOS).",
     )
     parser.add_argument(
         "--bootstrap-wk-scheduling",
@@ -6384,6 +6457,7 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
         print(f"  {bundle_path}  ← recommended import")
     print(f"  {path}")
     print_import_verification_help(bundle_path)
+    maybe_sync_anki_addons(args)
 
 
 def run_standalone_tae_kim_exercise_deck(args: argparse.Namespace, output_dir: Path) -> None:
@@ -6426,6 +6500,7 @@ def run_standalone_tae_kim_exercise_deck(args: argparse.Namespace, output_dir: P
         print(f"  {bundle_path}  ← recommended import")
     print(f"  {path}")
     print_import_verification_help(bundle_path)
+    maybe_sync_anki_addons(args)
 
 
 def main() -> None:
@@ -7056,7 +7131,10 @@ def main() -> None:
         )
     settings_path = write_filtered_deck_suggestions(output_dir)
     filtered_json_path = write_filtered_decks_json(output_dir)
-    deck_options_json_path = write_deck_options_json(output_dir)
+    deck_options_json_path = write_deck_options_json(
+        output_dir,
+        [deck.name for deck in built_decks],
+    )
     instructions_path = write_import_instructions(output_dir)
     history_path = append_run_history(
         output_dir,
@@ -7100,6 +7178,7 @@ def main() -> None:
     print(f"  {instructions_path}")
     print(f"  {history_path}")
     print_import_verification_help(bundle_path)
+    maybe_sync_anki_addons(args)
 
 
 if __name__ == "__main__":

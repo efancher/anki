@@ -63,7 +63,7 @@ def load_unlock_config() -> WkUnlockConfig:
         if not isinstance(payload, dict):
             continue
         return WkUnlockConfig(
-            mature_min_interval_days=int(payload.get("mature_min_interval_days", 21)),
+            mature_min_interval_days=int(payload.get("mature_min_interval_days", 7)),
             mature_require_all_card_types=bool(payload.get("mature_require_all_card_types", True)),
             burned_interval_days=int(payload.get("burned_interval_days", 365)),
         )
@@ -180,11 +180,19 @@ def on_collection_did_load(col) -> None:
     run_unlock_pass(quiet=True)
 
 
-def on_reviewer_did_end() -> None:
+def on_reviewer_will_end(*_args) -> None:
+    """Anki 25.09 calls reviewer_will_end hooks with no arguments."""
     run_unlock_pass(quiet=True)
 
 
-def setup_menu(qtwebengine) -> None:
+def _register_reviewer_end_hook() -> None:
+    if hasattr(gui_hooks, "reviewer_will_end"):
+        gui_hooks.reviewer_will_end.append(on_reviewer_will_end)
+    elif hasattr(gui_hooks, "reviewer_did_end"):
+        gui_hooks.reviewer_did_end.append(lambda: run_unlock_pass(quiet=True))
+
+
+def setup_menu() -> None:
     action = QAction("WK Run Unlock Pass", mw)
     action.triggered.connect(lambda: _menu_unlock_pass())
     mw.form.menuTools.addAction(action)
@@ -199,5 +207,5 @@ def _menu_unlock_pass() -> None:
 
 
 gui_hooks.collection_did_load.append(on_collection_did_load)
-gui_hooks.reviewer_did_end.append(on_reviewer_did_end)
+_register_reviewer_end_hook()
 gui_hooks.main_window_did_init.append(setup_menu)

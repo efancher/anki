@@ -45,9 +45,11 @@ from wk_decks import (
     DEFAULT_SENTENCE_AUDIO_VOICE,
     MODEL_TEMPLATE_VERSIONS,
     NOTE_TYPE_NAMES,
+    WK_SHARED_MEDIA_SUBDIR,
     ensure_sentence_audio_file,
     require_edge_tts,
     stable_guid,
+    tts_audio_basename,
     write_apkg,
 )
 
@@ -680,7 +682,7 @@ def build_tae_kim_exercise_deck(
     deck = genanki.Deck(EXERCISE_DECK_ID, EXERCISE_DECK_NAME)
     model = make_grammar_model()
     template_label = EXERCISE_TEMPLATE_VERSION
-    media_dir = output_dir / TAE_KIM_EXERCISE_MEDIA_SUBDIR
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
     audio_ok = 0
     audio_cached = 0
@@ -703,23 +705,24 @@ def build_tae_kim_exercise_deck(
             )
         sentence_audio_field = ""
         if sentence_audio:
-            basename = exercise_audio_basename(item.point_id)
-            dest = media_dir / basename
             tts_text = prepare_grammar_sentence_for_tts(item.full_sentence)
-            ok, was_cached = ensure_sentence_audio_file(
-                tts_text,
-                sentence_audio_voice,
-                dest,
-                refresh=refresh_sentence_audio,
-            )
-            if ok:
-                sentence_audio_field = f"[sound:{basename}]"
-                media_files.append(str(dest.resolve()))
-                audio_ok += 1
-                if was_cached:
-                    audio_cached += 1
-                else:
-                    audio_new += 1
+            basename = tts_audio_basename(tts_text, sentence_audio_voice)
+            if basename:
+                dest = media_dir / basename
+                ok, was_cached = ensure_sentence_audio_file(
+                    tts_text,
+                    sentence_audio_voice,
+                    dest,
+                    refresh=refresh_sentence_audio,
+                )
+                if ok:
+                    sentence_audio_field = f"[sound:{basename}]"
+                    media_files.append(str(dest.resolve()))
+                    audio_ok += 1
+                    if was_cached:
+                        audio_cached += 1
+                    else:
+                        audio_new += 1
         note = genanki.Note(
             model=model,
             fields=[

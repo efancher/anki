@@ -4,16 +4,42 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 
 **Recommended import:** `out/wk_all.apkg` — one file updates every active deck.
 
-**Planned (not yet implemented):** Full WK review replacement with Anki + FSRS — see [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md) for architecture, implementation tracker, and agent resume checklist.
+### Implementation status
 
-**Core SRS migration (Phase 2):** See [Core SRS migration](#core-srs-migration-wk--anki) below — one-time import with `--bootstrap-wk-scheduling`, `wk_unlock` addon, and `--no-wk-progress-filter` for supplementary decks.
+**Done — migration-ready.** WK reviews live in Anki + FSRS via:
+
+- **Core SRS decks** — WaniKani Core · Radicals / Kanji / Vocabulary
+- **One-time WK schedule bootstrap** — `core.bootstrap_scheduling` in `wk_deck_config.json`
+- **`wk_unlock` add-on** — radical → kanji → vocab unlock + supplementary unsuspend
+- **`no_wk_progress_filter`** — import full supplementary catalog; gate with `wk-locked` in Anki
+- **Filtered core decks** — `WK::Core Radicals/Kanji/Vocabulary`
+
+Follow [§2 First import](#2-first-import-migration) below. Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md).
+
+**Not done yet:** grammar gated by core kanji maturity; YouTube immersion ([planned doc](docs/wk_immersion_youtube_design.md)).
 
 ---
 
-## One-time setup
+## How to use this doc
+
+| If you are… | Start here |
+|-------------|------------|
+| Setting up for the first time | [§1 One-time setup](#1-one-time-setup) → [§2 First import](#2-first-import-migration) |
+| Studying day to day | [§3 Daily study](#3-daily-study) |
+| Regenerating after config or code changes | [§4 Regenerate & re-import](#4-regenerate--re-import) |
+| Tuning FSRS, unlocks, and study habits | [§12 Tips & tuning](#12-tips--tuning) |
+| Changing Tae Kim / grammar scope | [§5 Configuration](#5-configuration) |
+| Looking up a specific deck | [§6 Deck catalog](#6-deck-catalog) |
+| Something broke on import | [§10 Troubleshooting](#10-troubleshooting) |
+
+---
+
+## 1. One-time setup
+
+### Generator (Python)
 
 ```bash
-cd /path/to/anki
+cd /path/to/anki    # e.g. ~/anki
 python3 -m venv env_anki
 source env_anki/bin/activate
 pip install -r requirements.txt
@@ -22,372 +48,407 @@ export WANIKANI_API_TOKEN="your_token_here"
 python wk_decks.py --version
 ```
 
-Optional Anki add-ons (in `anki_addon/`):
+Also need **ffmpeg** on `PATH` for reading audio and dictation (macOS: `brew install ffmpeg`).
 
-- **wk_filtered_decks** — Tools → WK Setup Filtered Decks (reads `out/anki_filtered_decks.json`)
-- **wk_deck_options** — Tools → WK Apply Deck Options (assigns WK FSRS preset)
-- **wk_unlock** — unsuspend core + supplementary cards when prerequisites / linked vocab mature
+### Anki add-ons (desktop, required)
+
+Four add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
+
+**Manual install or one-time setup** (any platform):
+
+```bash
+~/anki/scripts/sync_anki_addons.sh
+# Quit Anki, then restart.
+```
+
+Disable auto-sync: `"sync_anki_addons": false` in config, or pass `--no-sync-addons`.
+
+**Other platforms:** `%APPDATA%\Anki2\addons21\` (Windows) or `~/.local/share/Anki2/addons21/` (Linux).
+
+**Verify** after restart — **Tools** menu should show:
+
+| Folder | Menu item |
+|--------|-----------|
+| `wk_filtered_decks` | **WK Setup Filtered Decks** |
+| `wk_deck_options` | **WK Apply Deck Options** |
+| `wk_unlock` | **WK Run Unlock Pass** |
+| `wk_adaptive_new` | **WK Adjust New Limits** |
+
+**Optional (dev):** symlink the four folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
+
+### Second machine (work desktop, etc.)
+
+AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered decks, tags) but **not** add-on code. Each desktop needs a **one-time** install of all four add-ons.
+
+| Syncs via AnkiWeb | Local install required |
+|-------------------|------------------------|
+| Cards, due dates, `wk-locked` / unlock results | Add-on folders in `addons21/` |
+| Deck option presets (`WK FSRS · New · …`) | **Tools → WK …** menu items |
+| Filtered decks you already built | Auto unlock / adaptive new on that machine |
+
+**On each additional desktop:**
+
+1. Clone this repo (or copy `anki_addon/` and `scripts/sync_anki_addons.sh`).
+2. Run the sync script (set `ANKI_ADDONS_DIR` on Windows/Linux):
+
+   ```bash
+   cd /path/to/anki
+   ./scripts/sync_anki_addons.sh
+   # Quit Anki on that machine, then restart.
+   ```
+
+   Windows (PowerShell):
+
+   ```powershell
+   $env:ANKI_ADDONS_DIR = "$env:APPDATA\Anki2\addons21"
+   .\scripts\sync_anki_addons.sh
+   ```
+
+3. **Verify** the four **Tools → WK …** menu items appear after restart.
+
+After that, use normal Anki sync. Unlock passes and adaptive new limits **run only on machines where the add-ons are installed** — run **WK Run Unlock Pass** / **WK Adjust New Limits** on any desktop before syncing if you want those effects everywhere without opening the other machine.
+
+**Desktop Anki is required** for add-ons. AnkiMobile can review synced cards but cannot run unlock or build filtered decks.
 
 ---
 
-## Core SRS migration (WK → Anki)
+## 2. First import (migration)
 
-One-time workflow to move WaniKani reviews into Anki + FSRS. After this, stop doing WK reviews; use Anki daily queues only.
+One-time path to move **WK reviews → Anki + FSRS**. After this, stop doing WK reviews; use Anki only.
+
+This replaces the old “Phase 2 migration” — it **is implemented**; these are the steps to run it.
 
 ### Before you start
 
-1. **Export a full Anki collection backup** (File → Export → include scheduling information).
-2. Install add-ons: `wk_deck_options`, `wk_filtered_decks`, `wk_unlock` (copy folders from `anki_addon/`).
-3. Confirm `WANIKANI_API_TOKEN` is set and `.wk_cache/` can sync (or refresh once on a working network).
+1. Export an Anki collection backup (File → Export, include scheduling).
+2. Complete [§1 add-on install](#anki-add-ons-desktop-required).
+3. Confirm `WANIKANI_API_TOKEN` is set (or `.wk_cache/` already populated from a prior run).
 
-### Migration steps
+### Steps
 
-1. **Export Anki collection backup** (again immediately before import if you changed anything).
-2. **Generate decks** with core + bootstrap scheduling and import-all supplementary gating:
+1. **Backup again** immediately before import if anything changed.
+2. **Generate** (defaults in `wk_deck_config.json`):
 
    ```bash
+   source env_anki/bin/activate
    python wk_decks.py --from-config
-   # equivalent to:
-   # python wk_decks.py --deck all --no-wk-progress-filter --bootstrap-wk-scheduling
    ```
 
-   Config defaults live in `wk_deck_config.json` (`core`, `no_wk_progress_filter`, `generate_decks` includes `core`).
+   Equivalent flags: `--no-wk-progress-filter --bootstrap-wk-scheduling` with `core` in `generate_decks`.
 
-3. **Import** `out/wk_all.apkg` into Anki → choose **Update note types** (Always update for `WK Core *`, vocab cloze v7+, conjugation v4+, dictation v3+).
-4. **Tools → WK Apply Deck Options** — assign WK FSRS preset; enable FSRS globally if prompted.
-5. **Install / enable wk_unlock** → **Tools → WK Run Unlock Pass** once (also runs automatically after reviews).
-6. **Tools → WK Setup Filtered Decks** — rebuild daily queues (searches include `-is:suspended`).
-7. **Verify in Browse:** `tag:wk-core` — spot-check due dates vs WaniKani; supplementary cards with `tag:wk-locked` should be suspended until linked vocab is Master+ in core.
-8. **Stop WK reviews.** Optional: continue WK lessons only for new unlocks until fully Anki-gated.
+   First run with `core.reading_audio: true` can take a long time (kanji TTS + WK vocab downloads). Progress bar on stderr; re-run fills failed clips.
+
+3. **Import** `out/wk_all.apkg` → **Update note types** (Always update when prompted).
+4. **Tools → WK Apply Deck Options** — assigns **WK FSRS** preset; enable FSRS globally if asked.
+5. **Tools → WK Run Unlock Pass** — unsuspends level-1 radicals and eligible cards (also runs on later desktop opens).
+6. **Tools → WK Setup Filtered Decks** — creates daily filtered decks from `out/anki_filtered_decks.json`.
+7. **Verify** in Browse:
+   - `tag:wk-core` — spot-check due dates vs WaniKani if you bootstrapped scheduling.
+   - `tag:wk-locked` — supplementary suspended until linked subject is mature in core.
+8. **Stop WK reviews.** Optional: keep WK **lessons** only until caught up in Anki.
 
 ### After migration
 
-- Re-run the generator only for **new WK catalog content** (new subjects), not to refresh unlock state — that is handled by `wk_unlock` inside Anki.
-- Weekly content sync: `python wk_decks.py --from-config` (without re-bootstrap if notes already have `wk-schedule-bootstrapped`).
-
-Design details: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md)
-
----
-
-## Active decks (`--deck all`)
-
-| Deck | File | Purpose |
-|------|------|---------|
-| **WaniKani Current and Next Radicals** | `wk_radicals_current_next.apkg` | Radicals at current, next, and locked-next WK level |
-| **WaniKani Phonetic Families** | `wk_phonetic_families.apkg` | On'yomi drills via Keisei phonetic components |
-| **WaniKani Verb Conjugation Practice** | `wk_conjugations_verbs.apkg` | Type-in verb forms (Master+ default) |
-| **WaniKani Adjective Conjugation Practice** | `wk_conjugations_adjectives.apkg` | Type-in adjective forms |
-| **WaniKani Verb Conjugation Reverse** | `wk_conjugations_reverse.apkg` | Conjugated → dictionary form |
-| **WaniKani Verb Type Practice** | `wk_verb_types.apkg` | Godan / ichidan / irregular |
-| **WaniKani Adjective Type Practice** | `wk_adjective_types.apkg` | い vs な adjective |
-| **WaniKani Vocabulary Context** | `wk_vocab_cloze.apkg` | Production cloze in WK sentences + TTS |
-| **Japanese Grammar Context** | `wk_grammar.apkg` | Grammar cloze from Hanabira (JLPT order) |
-
-### Removed from default bundle (still available individually)
-
-These are no longer in `--deck all`. Regenerate only if you still want them:
-
-- `wk_leeches.apkg`, `wk_verb_pairs.apkg`, `wk_confusables.apkg`
-- `wk_reading_keywords.apkg`, `wk_kanji_radicals.apkg`, `wk_pitch_leeches.apkg`
-
-Example: `python wk_decks.py --deck leeches --only-started`
+- Re-run the generator for **new WK catalog content** only — unlock state is handled by **wk_unlock** in Anki, not re-import.
+- Set `"core.bootstrap_scheduling": false` in `wk_deck_config.json` after the one-time WK interval import (see [§12](#12-tips--tuning)).
+- Routine sync: `python wk_decks.py --from-config`
 
 ---
 
-## Recommended weekly workflow
+## 3. Daily study
+
+### Core SRS (main queue)
+
+Use filtered decks:
+
+| Filtered deck | Underlying deck |
+|---------------|-----------------|
+| **WK::Core Radicals** | WaniKani Core · Radicals |
+| **WK::Core Kanji** | WaniKani Core · Kanji |
+| **WK::Core Vocabulary** | WaniKani Core · Vocabulary |
+
+Type **reading (kana)** on the front; meaning, reading audio, and mnemonics on the back. Kanji with multiple WK primary readings get multiple audio clips on the **back only**.
+
+### Supplementary decks
+
+Vocab cloze, dictation, conjugations, phonetic families, verb types, etc. Import with `tag:wk-locked`; **wk_unlock** unsuspends when linked **WkSubjectId** is mature in core (interval **≥ 7 days**, ≈ WK **Guru I**). **Grammar / Tae Kim exercises are not wk-locked** — see [Grammar gated by kanji](#grammar-gated-by-kanji-planned).
+
+Open **desktop Anki periodically** if you study on mobile, so unlock passes sync.
+
+### Grammar / Tae Kim
+
+Read on guidetojapanese.org; review in grammar decks. Cap scope in [§5 Configuration](#5-configuration). When you finish a Tae Kim subsection, update **WK::Grammar · Current Tae Kim lesson** (or bump `grammar.max_tae_kim_lesson` in config, regenerate, rebuild filtered decks).
+
+### Suggested daily order
+
+1. **WK::Core** filtered decks until empty (Radicals → Kanji → Vocabulary).
+2. **One** supplementary filtered deck if you have energy (dictation → vocab context → conjugations).
+3. **Grammar** when it matches what you are reading in Tae Kim.
+4. On a new item: fail if you must, read the back once, move on — no separate WK “lesson” step.
+
+Grammar is **not** gated by core kanji maturity today (see [§12](#12-tips--tuning)); use Tae Kim lesson caps and `max_unknown_kanji` instead.
+
+## 4. Regenerate & re-import
 
 ```bash
 source env_anki/bin/activate
-python wk_decks.py --deck all --only-started
+python wk_decks.py --from-config
 ```
 
-Import `out/wk_all.apkg` → choose **Update note types**.
+On macOS this also runs `scripts/sync_anki_addons.sh` (rsync + `__pycache__` cleanup). **Restart Anki** before using Tools menu add-ons if they changed.
 
-After import:
+Then in Anki:
 
-1. Tools → **WK Apply Deck Options** (FSRS preset on all WK decks)
-2. Tools → **WK Setup Filtered Decks** (daily queues)
-3. Enable **FSRS** globally in Anki if prompted
+1. Import `out/wk_all.apkg` → update note types / merge notes.
+2. **Tools → WK Apply Deck Options** (if new decks appeared).
+3. **Tools → WK Setup Filtered Decks**.
+4. **Tools → WK Run Unlock Pass** (optional; also on collection load).
+
+**Do not re-import to refresh unlock state** — that is **wk_unlock**’s job.
+
+**Preview:** `python wk_decks.py --from-config --dry-run`
 
 ---
 
-## Common commands
+## 5. Configuration
 
-```bash
-# Preview counts without writing files
-python wk_decks.py --deck all --only-started --dry-run
+Edit **`wk_deck_config.json`**, then `python wk_decks.py --from-config`.
 
-# Single deck
-python wk_decks.py --deck vocab-cloze --only-started
-python wk_decks.py --deck grammar
-python wk_decks.py --deck phonetic-families --only-started
+| Key | Typical value | Effect |
+|-----|---------------|--------|
+| `generate_decks` | includes `core`, … | Decks in `wk_all.apkg` |
+| `no_wk_progress_filter` | `true` | Full supplementary import + Anki gating |
+| `core.bootstrap_scheduling` | `true` | One-time WK interval import |
+| `core.reading_audio` | `true` | Vocab WK audio + kanji TTS |
+| `grammar.max_tae_kim_section` | `3` | Tae Kim chapter cap |
+| `grammar.max_tae_kim_lesson` | slug | Tae Kim subsection cap — see `tae_kim_lessons.json` |
 
-# Conjugation only (Master+ default)
-python wk_decks.py --deck conjugations-verbs --only-started
-
-# Radicals only (override WK level detection)
-python wk_decks.py --deck radicals --radical-current-level 12
-
-# Skip bundle (individual .apkg files only)
-python wk_decks.py --deck all --only-started --no-bundle
-
-# Force re-download WK / Hanabira / Keisei caches
-python wk_decks.py --deck all --only-started --refresh-cache
-```
+Example lesson slugs: `expressing-state-of-being`, `introduction-to-particles`, `adjectives` → tags like `tag:tk-lesson-basic-introduction-to-particles`.
 
 ---
 
-## Key filters and defaults
+## 6. Deck catalog
 
-| Flag | Default | Affects |
-|------|---------|---------|
-| `--only-started` | off | WK vocab/kanji in most decks |
-| `--min-srs` | 1 | WK progress filter (Guru+ ≈ 5, Master+ ≈ 7) |
-| `--vocab-cloze-min-srs` | 7 (Master+) | Vocab context deck only |
-| `--conjugation-min-srs` | 7 (Master+) | Conjugation decks only |
-| `--grammar-max-jlpt` | N2 | Grammar through this JLPT level |
-| `--grammar-max-tae-kim-section` | 6 | Grammar through this Tae Kim section (3=Basic, 4=Essential, 5=Special, 6=Advanced) |
-| `--grammar-max-examples` | 2 | Example cards per grammar point |
-| `--grammar-max-unknown-kanji` | 5 | Skip examples with too many unknown WK kanji |
-| `--grammar-no-wk-filter` | off | Include all Hanabira examples regardless of WK |
-| `--max-level` | 60 | Cap WK subject level |
-| `--sentence-audio` | on | TTS on vocab-cloze (edge-tts) |
-| `--no-sentence-audio` | | Skip TTS generation |
+### Core SRS
 
-Phonetic families always seed from **Apprentice+** kanji (`--min-srs` does not apply).
+| Deck | Purpose |
+|------|---------|
+| **WaniKani Core · Radicals** | Meaning; root unlock via empty prereqs |
+| **WaniKani Core · Kanji** | Type reading; multi-reading audio on back |
+| **WaniKani Core · Vocabulary** | Type reading; WK native audio on back |
 
-Radicals include **three levels**: current, next, and locked-next.
+### Supplementary (default config)
 
----
+| Deck | Gating |
+|------|--------|
+| Vocab Context, Dictation, Conjugations, Verb Types, Phonetic Families, … | `WkSubjectId` + `wk-locked` |
+| Grammar / Tae Kim exercises | JLPT + Tae Kim caps only |
+| Current and Next Radicals | Level preview (not core SRS) |
 
-## Grammar deck (Bunpro replacement path)
-
-**Source:** Hanabira JLPT grammar JSON (cached in `.wk_cache/hanabira_grammar/`).  
-**Study path:** Read [Tae Kim Grammar Guide](https://guidetojapanese.org/learn/grammar) for explanations; use Anki for **production** in example sentences.
-
-**Card type:** English hint + cloze sentence → type the missing grammar chunk (e.g. `けれども`).
-
-**Ordering:** Tae Kim subsection (reading order on [Basic Grammar](https://guidetojapanese.org/learn/grammar/basic)), then JLPT within each lesson.
-
-**Subsections use the page titles, not numbers.** After reading *Introduction to Particles*, review cards tagged:
-
-`tag:tk-lesson-basic-introduction-to-particles`
-
-| Subsection (Basic Grammar) | Anki tag |
-|----------------------------|----------|
-| Expressing state-of-being | `tag:tk-lesson-basic-expressing-state-of-being` |
-| Introduction to Particles | `tag:tk-lesson-basic-introduction-to-particles` |
-| Adjectives | `tag:tk-lesson-basic-adjectives` |
-| Verb Basics | `tag:tk-lesson-basic-verb-basics` |
-| … | (see `tae_kim_lessons.json`) |
-
-Practice-exercise pages (*State-of-being Practice Exercises*, etc.) have no Hanabira cards — do those on the site.
-
-**Read-then-review workflow:**
-
-```bash
-# After "Introduction to Particles" (includes that lesson and earlier ones)
-python wk_decks.py --deck grammar --grammar-max-tae-kim-lesson introduction-to-particles
-
-# Same thing, explicit chapter prefix
-python wk_decks.py --deck grammar --grammar-max-tae-kim-lesson basic:introduction-to-particles
-```
-
-In Anki: **Browse → `tag:tk-lesson-basic-introduction-to-particles`**, or edit filtered deck **WK::Grammar · Current Tae Kim lesson** to match whatever subsection you just read.
-
-Chapter-level caps (coarser, whole Basic Grammar at once) still work via `--grammar-max-tae-kim-section 3`.
-
-```bash
-# Grammar-only (no WK token required)
-python wk_decks.py --deck grammar --dry-run
-
-# N5–N4 grammar only, more examples
-python wk_decks.py --deck grammar --grammar-max-jlpt N4 --grammar-max-examples 3
-
-# Full N5–N2 with WK kanji filter (needs --only-started for vocab list)
-python wk_decks.py --deck grammar --only-started
-```
-
-**Attribution:** Hanabira grammar content is CC-licensed. Read Tae Kim for pedagogy; Hanabira supplies structured examples for SRS.
+Optional individual decks: leeches, verb pairs, confusables, etc. — `python wk_decks.py --deck leeches`
 
 ---
 
-## Vocab context cloze
+## 7. Filtered decks
 
-Production practice in WK context sentences. Type **`TypeExpression`** (full kanji when WK uses early spellings like `ふじ山` → type `富士山`).
-
-```bash
-python wk_decks.py --deck vocab-cloze --only-started
-python wk_decks.py --deck vocab-cloze --only-started --no-sentence-audio
-```
-
----
-
-## Conjugation decks
-
-```bash
-python wk_decks.py --deck conjugations-verbs --only-started
-python wk_decks.py --deck conjugations-adjectives --only-started
-python wk_decks.py --deck conjugations-reverse --only-started
-
-# Verify conjugation rules against fixtures
-python wk_decks.py --verify-conjugations-only --only-started
-python -m unittest tests.test_conjugations
-```
-
----
-
-## Phonetic families
-
-Requires Keisei DB (auto-downloaded to `.wk_cache/keisei/`). Skipped when no family has enough started kanji.
-
-```bash
-python wk_decks.py --deck phonetic-families --only-started
-```
-
----
-
-## Filtered decks (Anki)
-
-Written to `out/anki_filtered_decks.json`:
+From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered Decks** after import.
 
 | Name | Purpose |
 |------|---------|
-| **WK::Radicals Preview** | Current/next radicals |
-| **WK::Vocab Context** | Daily vocab production |
-| **WK::Grammar** | Early Basic subsections (state-of-being, particles, adjectives) |
-| **WK::Grammar · Current Tae Kim lesson** | Edit search to match the subsection you just read |
-| **WK::Phonetic Families** | Low-priority phonetic drill |
+| **WK::Core Radicals / Kanji / Vocabulary** | Daily core review |
+| **WK::Radicals Preview** | Level preview radicals |
+| **WK::Vocab Context** | Production cloze |
+| **WK::Dictation** | Hear → type reading |
+| **WK::Grammar** | Basic Grammar subsections |
+| **WK::Grammar · Current Tae Kim lesson** | Edit search to match current lesson |
+| **WK::Phonetic Families** | Phonetic on'yomi drills |
 
-Rebuild filtered decks after each import.
-
----
-
-## Output files
-
-```text
-out/
-  wk_all.apkg                 ← import this
-  wk_run_history.csv          ← per-run counts
-  anki_import_instructions.txt
-  anki_filtered_decks.json
-  anki_deck_options.json
-  wk_grammar.apkg             ← also in bundle
-  …individual deck files…
-.wk_cache/
-  hanabira_grammar/           ← grammar JSON cache
-  keisei/                     ← phonetic DB
-  sentence_audio/             ← TTS cache
-  pronunciation_audio/        ← WK vocab reading clips
-```
+All searches use `-is:suspended`.
 
 ---
 
-## Backup (Google Drive + launchd)
+## 8. Topic guides
 
-Back up **two things**: your **Anki profile** (SRS progress — irreplaceable) and the **generator repo** (config, `out/`, `.wk_cache/` — saves hours of re-download and reading-audio generation).
+**Grammar:** `python wk_decks.py --deck grammar` — Hanabira + Tae Kim ordering; browse by `tag:tk-lesson-basic-…`.
 
-Google Drive for Desktop mounts under **Finder → Locations → Google Drive**. On disk that is usually:
+**Vocab cloze:** production in WK sentences; type full kanji when needed.
 
-```text
-~/Google Drive/My Drive/
-```
+**Conjugation:** type-in forms; `--verify-conjugations-only` for rule checks.
 
-Backups land in:
+**Phonetic families:** Keisei DB in `.wk_cache/keisei/`.
 
-```text
-Google Drive/My Drive/anki/
-  backup.log
-  backups/
-    YYYY-MM-DD/
-      anki-repo/      ← ~/anki (includes .wk_cache, out/; excludes venv, gen_all.sh)
-      anki-profile/   ← ~/Library/Application Support/Anki2/User 1
-    latest/           ← symlink to most recent dated backup
-```
+**Dictation:** WK native audio on front (intentional).
 
-Dated backups older than **14 days** are pruned automatically (`BACKUP_RETENTION_DAYS=0` keeps all).
+---
 
-### Manual backup
-
-**Quit Anki first** (open collection = inconsistent backup).
+## 9. Backup
 
 ```bash
-~/anki/scripts/backup_to_google_drive.sh --dry-run   # preview
-~/anki/scripts/backup_to_google_drive.sh             # run
+~/anki/scripts/backup_to_google_drive.sh          # quit Anki first
+~/anki/scripts/install_backup_launchagent.sh install   # weekly Sunday 2:15 AM
 ```
 
-Options: `--repo-only`, `--anki-only`, `--force` (continue if Anki appears running — not recommended).
+Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs and retention.
 
-### Scheduled backup (launchd, recommended on macOS)
+---
 
-Install a **LaunchAgent** that runs every **Sunday at 2:15 AM** (local time; Mac must be awake):
+## 10. Troubleshooting
+
+**403 / Cloudflare:** Use existing `.wk_cache/` or run on a working network.
+
+**Missing Tools menu items:** [§1 add-ons](#anki-add-ons-desktop-required) not installed or failed to load.
+
+**wk_unlock failed to load on Anki 25+:** Update add-on files in `addons21/wk_unlock/` (or refresh symlink), then restart. Anki 25 removed `reviewer_did_end`; use `reviewer_will_end` (called with **no arguments** in 25.09). `main_window_did_init` no longer passes arguments to menu setup hooks.
+
+**Templates not updating:** Always update note types on re-import. Current: `WK Core Item` v5, vocab cloze v7, conjugation v4, dictation v3, grammar cloze v4+.
+
+**Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; check core subject maturity (≥ **7** day interval, Guru I equivalent).
+
+**Reading audio failures:** Re-run generator; optional `--refresh-reading-audio`.
+
+**FSRS:** Preset **WK FSRS** via **WK Apply Deck Options**.
+
+**AnkiWeb sync fails mid-upload (~40k items, “network error”):** First sync with reading + grammar TTS media is large (often **500MB–1GB+**, tens of thousands of files). Try: **Preferences → Network → increase sync timeout** (e.g. 120s); stable Wi‑Fi, no VPN; **Sync → upload** on desktop first. On mobile, enable **sync without media** until desktop upload finishes. **Tools → Check Media → Delete Unused** after re-imports (orphans accumulate). Study on desktop only if sync keeps failing — add-ons require desktop anyway. Regenerate with latest generator to dedupe shared audio (see [Media reuse](#media-reuse)).
+
+---
+
+## 12. Tips & tuning
+
+Practical improvements that do not require new features. Prefer these before adding decks or re-importing often.
+
+### Post-migration
+
+| Action | Why |
+|--------|-----|
+| Set `"core.bootstrap_scheduling": false` | Bootstrap patches WK `ivl`/`due` once. Re-importing with it on can fight FSRS. |
+| Do **not** weekly re-import | Only when templates, audio, config, or new WK levels in cache change. Unlock state is **wk_unlock**, not import. |
+
+### Adaptive new cards (`wk_adaptive_new`)
+
+Automatically scales **new cards/day** based on how many **due reviews** you have (WK-style: heavy review days → fewer lessons). Remaining new budget fills in priority order:
+
+1. **Radicals** → **Kanji** → **Vocabulary** → **Supplementary**
+
+Runs on collection load; manual pass: **Tools → WK Adjust New Limits**. Requires **WK Apply Deck Options** first (clones per-tier presets from **WK FSRS**).
+
+Optional config at `out/wk_adaptive_new_config.json` (or `WK_ADAPTIVE_NEW_CONFIG`):
+
+```json
+{
+  "daily_workload_target": 200,
+  "max_new_total": 15,
+  "supplementary_max_new": 5,
+  "review_count_scope": "tag:wk-core",
+  "auto_run_on_load": true
+}
+```
+
+Example: with defaults, **0 due reviews** → up to **15** new (radicals first); **100 due** → about **7** new; **200+ due** → **0** new until reviews shrink.
+
+Study core via **WK::Core \*** filtered decks as usual; Anki’s per-deck **new/day** limits enforce the allocation.
+
+### New cards: protect core (manual alternative)
+
+If you are **not** using `wk_adaptive_new`, the **WK FSRS** preset defaults to **15 new/day** shared across all decks using that preset. Grammar and supplementary decks can steal capacity from core.
+
+In Anki → **Deck options** → per-deck overrides on non-core decks:
+
+- **Core** decks: keep new cards (e.g. 10–15/day combined, or set per deck).
+- **Grammar, conjugations, phonetic families**: **0 new** or very low — study when you have time, not every morning.
+
+### FSRS retention
+
+Preset **desired retention** is **0.90**. After a few weeks:
+
+- Reviews feel too easy → try **0.85–0.88** (more reps).
+- Burden too high → try **0.92–0.93**.
+
+Change in deck options on the **WK FSRS** preset; give FSRS ~a month before tweaking again.
+
+### Unlock maturity (`wk_unlock`)
+
+Supplementary decks unsuspend when a linked **WkSubjectId** is mature in core (default: interval **≥ 7 days**, WaniKani **Guru I** / srs_stage 5). Optional config at `out/wk_unlock_config.json` (or `WK_UNLOCK_CONFIG`):
+
+```json
+{
+  "mature_min_interval_days": 7,
+  "mature_require_all_card_types": true,
+  "burned_interval_days": 365
+}
+```
+
+Try **14** for Guru II–equivalent stricter gating; **21** for old Master-like behavior.
+
+### Saved searches (Browse)
+
+Save these for quick health checks:
+
+| Search | Use |
+|--------|-----|
+| `tag:wk-core is:due` | Today’s core workload |
+| `tag:wk-locked` | Still gated by unlock |
+| `tag:wk-deps-met is:new` | Just unlocked — expect misses |
+| `deck:"WaniKani Core · Kanji" prop:lapses>3` | Kanji worth re-reading mnemonics for |
+
+### Mobile + desktop
+
+**wk_unlock** runs on desktop collection load. If you review on AnkiMobile, open **desktop Anki once a week** so unlock passes sync.
+
+### Media reuse
+
+The generator **caches** TTS and WK pronunciation in `.wk_cache/`, but Anki stores media by **filename**. Older builds duplicated files:
+
+| Before | After (current) |
+|--------|-----------------|
+| Core vocab: `wk_reading_vocabulary_*` + dictation: `wk_dictation_*` | Same `wk_reading_vocabulary_*` in `media/shared/` |
+| Grammar/Tae Kim: one file per card (`wk_grammar_*`) | One file per **sentence** (`wk_tts_{hash}.mp3`) shared across decks |
+| Separate folders per deck | Single **`media/shared/`** in the bundle |
+
+After upgrading, **re-import `wk_all.apkg`**, then **Tools → Check Media → Delete Unused** to drop orphaned copies from prior imports.
+
+### Leech handling
+
+Dedicated leech decks are optional (legacy). Anki’s **Browse → `tag:leech`** or sort by lapses is enough unless the same reading fails repeatedly.
+
+### Optional later
+
+| Idea | When it’s worth it |
+|------|---------------------|
+| Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading |
+| **Grammar gated by kanji** (runtime, not built) | Grammar feels too hard before core kanji mature — [below](#grammar-gated-by-kanji-planned) |
+| Conjugation filtered decks | You want **WK::Conjugations** in the filtered-deck workflow |
+| YouTube immersion deck | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) |
+
+### Grammar gated by kanji (planned)
+
+**Today:** grammar cards are **not** linked to **wk_unlock**. They import **active** (not `wk-locked`) subject only to **generator** filters:
+
+| Filter | Where | What it does |
+|--------|-------|--------------|
+| `grammar.max_jlpt`, `max_tae_kim_section`, `max_tae_kim_lesson` | `wk_deck_config.json` | Caps which grammar points are generated at all |
+| `grammar.max_unknown_kanji` (default 5) | Generator | Skips example sentences with too many kanji **not** in WK’s kanji+vocab character set |
+| `grammar.no_wk_filter` | Config | If `true`, ignores WK kanji set when counting unknown kanji |
+
+That WK kanji set is **everything in your WK cache up to `max_level`**, not what you have **mature in Anki core**. So a sentence can appear while you still struggle with half the kanji on the card — as long as those characters exist somewhere in WK’s catalog and the sentence has ≤ 5 “unknown” kanji by that definition.
+
+**Planned (not implemented):** gate grammar **inside Anki**, like vocab cloze and dictation:
+
+1. Import grammar notes with `tag:wk-locked` (and optionally a field listing required kanji or **WkSubjectId**s).
+2. **wk_unlock** (or similar) unsuspends a grammar card only when every kanji in the sentence is **mature in core** (same ≥ 7-day Guru I rule by default).
+3. New grammar drips in as your kanji knowledge grows — aligned with reading Tae Kim, not just with “WK has published this level.”
+
+**Until that exists:** rely on **Tae Kim lesson caps** (`grammar.max_tae_kim_lesson`), **`max_unknown_kanji`**, and studying grammar when it matches what you are reading. Lower `max_unknown_kanji` (e.g. 3) for stricter sentences at generate time; it still won’t track live Anki maturity.
+
+**Why it’s deferred:** grammar notes don’t carry **WkSubjectId** today, and sentences mix many kanji — the addon needs a “required kanji” list per note and a maturity check against core decks. Supplementary gating by single **WkSubjectId** was the simpler first step.
+
+---
+
+## 11. Reference
 
 ```bash
-~/anki/scripts/install_backup_launchagent.sh install
-~/anki/scripts/install_backup_launchagent.sh status
-~/anki/scripts/install_backup_launchagent.sh uninstall   # remove
+python wk_decks.py --from-config
+python wk_decks.py --deck core
+python -m pytest tests/ -q
 ```
 
-**Logs:**
-
-| Location | Contents |
-|----------|----------|
-| `Google Drive/My Drive/anki/backup.log` | Backup script log (also synced to Drive) |
-| `~/Library/Logs/anki-backup/backup.stdout.log` | launchd stdout |
-| `~/Library/Logs/anki-backup/backup.stderr.log` | launchd stderr |
-
-If the scheduled run finds Anki still open, it **skips the entire backup** (repo and profile). Close Anki before Sunday 2:15, or run a manual backup when Anki is quit.
-
-**Change the schedule:** edit `START_WEEKDAY`, `START_HOUR`, and `START_MINUTE` at the top of `scripts/install_backup_launchagent.sh`, then run `install` again.
-
-**Override Drive path:** set `GOOGLE_DRIVE_ROOT` before running the backup script (auto-detected if unset).
-
-**First-time tip:** after a long `wk_decks.py` run finishes reading audio, run one manual backup so `.wk_cache/` is on Drive before you rely on the weekly job.
-
----
-
-## Troubleshooting
-
-**403 / Cloudflare on WK API:** Generator falls back to `.wk_cache/` if present. Run once on a network that can reach the API, or use existing cache.
-
-**246 notes could not be imported:** This is exactly the conjugation deck count (168 verb/adj + 78 reverse). Anki kept an old note type without the type-in fields. Re-import `wk_all.apkg` and choose **Always update** for:
-
-- `WK Update-Safe Conjugation` (template v3)
-- `WK Update-Safe Conjugation Reverse` (template v3)
-
-Also update if prompted: `WK Update-Safe Vocab Cloze`, `WK Update-Safe Grammar Cloze`.
-
-Do **not** choose “Keep old note type” or “Create new note type”.
-
-**40 notes could not be imported:** This matches **Japanese Grammar Exercises** (Tae Kim practice) at your current grammar lesson cap. Those 40 cards use the same note type as **Japanese Grammar Context** (`WK Update-Safe Grammar Cloze`). Fix:
-
-1. Re-import `wk_all.apkg`.
-2. When prompted about note types, choose **Always update** for `WK Update-Safe Grammar Cloze` (needs FormHint field — template v4+).
-3. When prompted about **existing notes**, choose update/merge as well (Anki asks separately).
-4. In Browse, check deck **Japanese Grammar Exercises** — if it has 0 cards, delete that deck (notes only) and re-import once more.
-
-If Manage Note Types shows two grammar cloze types (e.g. from an old “Create new note type”), remove the stray one after moving any cards out of it.
-
-**Templates not updating:** Re-import with “Always update note type”. Check card Meta for template version (e.g. `v4` vocab-cloze).
-
-**Grammar deck empty:** Run with network once to populate Hanabira cache, or `--grammar-no-wk-filter`.
-
-**No phonetic families deck:** Normal if too few started kanji share a Keisei family.
-
-**FSRS:** Apply via add-on after import; preset name is **WK FSRS**.
-
----
-
-## Tests
-
-```bash
-python -m unittest discover -s tests -v
-```
-
----
-
-## Version
-
-Check: `python wk_decks.py --version`
-
-After template changes, re-import `wk_all.apkg` and update note types.
+**Related:** [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md) · [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) · [anki_addon/README.md](anki_addon/README.md) · [§12 Tips & tuning](#12-tips--tuning)

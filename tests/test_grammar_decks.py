@@ -316,6 +316,16 @@ class GrammarDeckTests(unittest.TestCase):
             "あっ、ふじさんだ！",
         )
 
+    def test_tts_audio_basename_dedupes_by_sentence(self) -> None:
+        from wk_decks import DEFAULT_SENTENCE_AUDIO_VOICE, tts_audio_basename
+
+        sentence = "私は学生だ。"
+        first = tts_audio_basename(sentence, DEFAULT_SENTENCE_AUDIO_VOICE)
+        second = tts_audio_basename(sentence, DEFAULT_SENTENCE_AUDIO_VOICE)
+        self.assertEqual(first, second)
+        self.assertTrue(first.startswith("wk_tts_"))
+        self.assertTrue(first.endswith(".mp3"))
+
     def test_grammar_audio_basename_is_stable(self) -> None:
         first = grammar_audio_basename("tk-fixture-state-being-casual-positive")
         second = grammar_audio_basename("tk-fixture-state-being-casual-positive")
@@ -345,7 +355,13 @@ class GrammarDeckTests(unittest.TestCase):
                     _path, deck, media = build_grammar_deck([SAMPLE_GRAMMAR_CARD], output_dir)
             note = deck.notes[0]
             self.assertEqual(note.fields[3], "casual state-of-being")
-            self.assertEqual(note.fields[9], f"[sound:{grammar_audio_basename(SAMPLE_GRAMMAR_CARD.point_id)}]")
+            from wk_decks import DEFAULT_SENTENCE_AUDIO_VOICE, tts_audio_basename
+
+            expected_sound = tts_audio_basename(
+                SAMPLE_GRAMMAR_CARD.full_sentence,
+                DEFAULT_SENTENCE_AUDIO_VOICE,
+            )
+            self.assertEqual(note.fields[9], f"[sound:{expected_sound}]")
             self.assertEqual(len(media), 1)
 
     def test_build_grammar_deck_sentence_audio_can_disable(self) -> None:

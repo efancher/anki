@@ -40,14 +40,19 @@ from wk_decks import (
     versioned_css,
     wk_mnemonic_html,
     write_apkg,
+    WK_SHARED_MEDIA_SUBDIR,
 )
-from wk_reading_audio import DEFAULT_WK_READING_VOICE, READING_AUDIO_CSS, prepare_reading_audio_field
+from wk_reading_audio import (
+    DEFAULT_WK_READING_VOICE,
+    READING_AUDIO_CSS,
+    ReadingAudioProgressBar,
+    prepare_reading_audio_field,
+)
 from wk_scheduling import WkCardScheduleSpec, schedule_spec_for_assignment
 
 CORE_RADICAL_KIND = "core-radical"
 CORE_ITEM_KIND = "core-item"
 CORE_TAG = "wk-core"
-CORE_READING_MEDIA_SUBDIR = "media/core_reading"
 
 
 def format_prerequisite_ids(subject: dict) -> str:
@@ -155,7 +160,6 @@ def make_core_item_model() -> WkModel:
                   {{#IsVocabulary}}<div class="prompt-hint">Vocabulary reading</div>{{/IsVocabulary}}
                 </div>
                 <div class="jp">{{Expression}}</div>
-                {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 <div class="type-answer">{{type:Reading}}</div>
                 </div>
                 """,
@@ -333,25 +337,28 @@ def _populate_core_item_deck(
 ) -> Dict[str, WkCardScheduleSpec]:
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
     media_files: List[str] = []
-    media_dir = output_dir / CORE_READING_MEDIA_SUBDIR
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     audio_ok = 0
 
     if reading_audio:
         print(f"Reading audio (vocab: WK {wk_voice}, kanji: TTS {tts_voice})...")
 
+    progress = ReadingAudioProgressBar(len(items), label="Reading audio", enabled=reading_audio)
+
     for subject in items:
         audio_field = ""
         if reading_audio:
-            audio_field, media_path = prepare_reading_audio_field(
+            audio_field, media_paths = prepare_reading_audio_field(
                 subject,
                 media_dir,
                 wk_voice=wk_voice,
                 tts_voice=tts_voice,
                 refresh=refresh_reading_audio,
             )
-            if media_path:
-                media_files.append(media_path)
+            if media_paths:
+                media_files.extend(media_paths)
                 audio_ok += 1
+            progress.advance()
 
         guid = add_core_item_note(
             deck,
@@ -372,7 +379,7 @@ def _populate_core_item_deck(
             schedule_specs[guid] = spec
 
     if reading_audio:
-        print(f"Reading audio: {audio_ok}/{len(items)} cards")
+        progress.finish(ok_count=audio_ok)
     if media_files:
         existing = list(getattr(deck, "wk_media_files", []) or [])
         deck.wk_media_files = existing + media_files

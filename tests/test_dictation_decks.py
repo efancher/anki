@@ -117,7 +117,7 @@ class DictationDeckTests(unittest.TestCase):
             self.assertEqual(len(media), 1)
             note = deck.notes[0]
             self.assertEqual(note.fields[1], "99")
-            self.assertTrue(note.fields[2].startswith("[sound:wk_dictation_"))
+            self.assertTrue(note.fields[2].startswith("[sound:wk_reading_vocabulary_"))
             self.assertEqual(note.fields[3], "猫")
             self.assertEqual(note.fields[4], "ねこ")
 

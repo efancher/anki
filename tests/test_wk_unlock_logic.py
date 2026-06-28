@@ -32,20 +32,20 @@ class WkUnlockLogicTests(unittest.TestCase):
         self.assertEqual(parse_prerequisite_ids(None), ())
 
     def test_card_meets_maturity_at_threshold(self) -> None:
-        config = WkUnlockConfig(mature_min_interval_days=21)
-        self.assertTrue(card_meets_maturity(CardState(ivl=21, queue=2), config=config))
-        self.assertFalse(card_meets_maturity(CardState(ivl=20, queue=2), config=config))
+        config = WkUnlockConfig(mature_min_interval_days=7)
+        self.assertTrue(card_meets_maturity(CardState(ivl=7, queue=2), config=config))
+        self.assertFalse(card_meets_maturity(CardState(ivl=6, queue=2), config=config))
         self.assertFalse(card_meets_maturity(CardState(ivl=30, queue=ANKI_QUEUE_SUSPENDED), config=config))
 
     def test_mature_requires_both_card_types(self) -> None:
-        config = WkUnlockConfig(mature_min_interval_days=21, mature_require_all_card_types=True)
+        config = WkUnlockConfig(mature_min_interval_days=7, mature_require_all_card_types=True)
         cards = (CardState(ivl=30, queue=2), CardState(ivl=5, queue=2))
         self.assertFalse(subject_is_mature(cards, config=config))
-        cards_mature = (CardState(ivl=30, queue=2), CardState(ivl=25, queue=2))
+        cards_mature = (CardState(ivl=30, queue=2), CardState(ivl=8, queue=2))
         self.assertTrue(subject_is_mature(cards_mature, config=config))
 
     def test_mature_any_card_when_not_require_all(self) -> None:
-        config = WkUnlockConfig(mature_min_interval_days=21, mature_require_all_card_types=False)
+        config = WkUnlockConfig(mature_min_interval_days=7, mature_require_all_card_types=False)
         cards = (CardState(ivl=30, queue=2), CardState(ivl=5, queue=2))
         self.assertTrue(subject_is_mature(cards, config=config))
 

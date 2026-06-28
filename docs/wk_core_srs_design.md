@@ -118,9 +118,11 @@ Current generator uses flat deck names (`WaniKani Current and Next Radicals`, et
 | `WkSubjectId` | WK subject id |
 | `PrerequisiteIds` | Comma-separated WK ids from `component_subject_ids` |
 
-**Core item (`WK Core Item` v4):** single **Review** template — recall meaning mentally, `{{type:Reading}}` on front; meaning + WK-highlighted mnemonics + `ReadingAudio` on back. Vocab: WK native pronunciation (Kyoko/Kenichi); kanji: edge-tts on primary reading kana. Radicals: meaning-only (`WK Core Radical` v2), no reading audio.
+**Core item (`WK Core Item` v5):** single **Review** template — recall meaning mentally, `{{type:Reading}}` on front (no audio); meaning + reading + `ReadingAudio` + mnemonics on back.
 
-**Leech item model (`WK Update-Safe Item` v6):** Meaning / Reading / Pitch; optional `ReadingAudio` when leech decks are built with `--reading-audio`.
+**Leech item model (`WK Update-Safe Item` v7):** Meaning / Reading / Pitch; optional `ReadingAudio` on **back only** when leech decks are built with `--reading-audio`.
+
+Radicals: meaning-only (`WK Core Radical` v2), no reading audio. Kanji audio: edge-tts for **each primary reading** on the back; vocab: one WK native clip.
 
 **Guid:** Keep `stable_guid("core-radical", id)` / `stable_guid("core-item", id)` — distinct from leech deck guids if both coexist during transition.
 
@@ -204,7 +206,7 @@ Prefer **`available_at`** for `due` when present; use stage table for `ivl` when
 **Triggers:**
 
 - `gui_hooks.collection_did_load`
-- `gui_hooks.reviewer_did_end` (after review session)
+- `gui_hooks.reviewer_will_end` (after review session; Anki 25+; was `reviewer_did_end`)
 - Tools → **WK Run Unlock Pass** (manual)
 - Optional: timer every 24h
 
@@ -226,7 +228,7 @@ Prefer **`available_at`** for `due` when present; use stage table for `ivl` when
 
 ```json
 {
-  "mature_min_interval_days": 21,
+  "mature_min_interval_days": 7,
   "mature_require_all_card_types": true,
   "burned_interval_days": 365
 }
@@ -310,14 +312,14 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 
 **`wk_unlock` addon** (runs on collection load, after reviews, Tools menu):
 
-1. **Mature** = core note’s active card interval ≥ 21 days (or burned ≥ 365).
+1. **Mature** = core note’s active card interval ≥ 7 days (Guru I; or burned ≥ 365).
 2. **Core unsuspend** — if `wk-locked` and every `PrerequisiteIds` entry is mature → unsuspend, tag `wk-deps-met`.
 3. **Supplementary unsuspend** — if `tag:wk-locked -tag:wk-core` and linked `WkSubjectId` is mature in core → unsuspend.
 
 **Import-time (one-time):**
 
 - Core: `patch_apkg_wk_scheduling()` suspends + `wk-locked` when WK assignment has no `unlocked_at` / `started_at`.
-- Supplementary: `supplementary_import_tags()` + `patch_apkg_supplementary_suspend()` when vocab not WK-mature (stage &lt; 7 and interval &lt; 21 days).
+- Supplementary: `supplementary_import_tags()` + `patch_apkg_supplementary_suspend()` when vocab not WK-mature (stage &lt; 5 and interval &lt; 7 days).
 
 **Filtered daily decks** (`wk_filtered_decks` addon): searches include `-is:suspended` so locked cards never appear. Core filtered decks (`WK::Core Radicals/Kanji/Vocabulary`) included in default JSON.
 
@@ -347,7 +349,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 1 | Design doc | **Done** | This file |
 | 2 | Cursor rule `.cursor/rules/wk-core-srs-design.mdc` | **Done** | |
 | 3 | Core deck builder (`--deck core`) | **Done** | `core_decks.py` |
-| 4 | Core note types + fields | **Done** | `WK Core Radical` v2, `WK Core Item` v4 (Review + type-in + mnemonics + audio) |
+| 4 | Core note types + fields | **Done** | `WK Core Radical` v2, `WK Core Item` v5 (Review + type-in + mnemonics + audio on back) |
 | 5 | `patch_apkg_wk_scheduling()` | **Done** | `wk_scheduling.py` |
 | 6 | SRS stage intervals from WK API | **Done** | `.wk_cache/spaced_repetition_systems.json` |
 | 7 | `wk_unlock` addon | **Done** | Core prereqs + supplementary unsuspend |
@@ -363,6 +365,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 17 | Grammar / Tae Kim core gating | **Not started** | Import caps only; O4 deferred |
 | 18 | Filtered decks for core SRS | **Done** | `WK::Core Radicals/Kanji/Vocabulary` in `FILTERED_DECK_DEFINITIONS` |
 | 19 | `WK::Core::` deck hierarchy | **Not started** | Flat names (O1) |
+| 20 | YouTube immersion mining | **Planned** | [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — after core stable |
 
 ---
 
@@ -393,7 +396,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 3. **Import full catalog** — suspend unready items; don’t omit notes. **Exclude WK-hidden subjects** (`hidden_at` set): 13 retired radicals, 25 retired vocab, 0 hidden kanji (as of cache audit).
 4. **One Review card per kanji/vocab** — reading type-in on front; meaning on back (`WK Core Item` v4).
 5. **Prerequisites from `component_subject_ids`** — kanji→radicals, vocab→kanji.
-6. **Supplementary waits on core vocab maturity** — `WkSubjectId` link + 21-day interval rule in addon.
+6. **Supplementary waits on core vocab maturity** — `WkSubjectId` link + 7-day (Guru I) interval rule in addon.
 7. **No ongoing WK sync** — re-import for catalog/template updates only.
 
 ## Open decisions / Phase 3
@@ -407,6 +410,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | O5 | Re-import scheduling merge? | Settled — protect if `wk-schedule-bootstrapped` |
 | O6 | Root radicals (empty `PrerequisiteIds`) auto-unlock? | **Done** — `prerequisites_met()` returns True when empty |
 | O7 | Filtered decks for core daily review? | **Done** — `WK::Core Radicals/Kanji/Vocabulary` |
+| O8 | YouTube immersion sentence mining? | **Planned** — [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md); YouTube-only v1 |
 
 ---
 
@@ -440,5 +444,6 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 ## Related docs
 
 - [wk_anki_runbook.md](../wk_anki_runbook.md) — current weekly import workflow
+- [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — **planned** YouTube sentence mining (deferred)
 - [anki_addon/README.md](../anki_addon/README.md) — filtered decks + FSRS preset addons
 - `.cursor/rules/wk-anki-template-versions.mdc` — bump templates when changing note types

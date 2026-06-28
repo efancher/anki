@@ -21,6 +21,7 @@ from wk_decks import (
     DECK_NAMES,
     MODEL_TEMPLATE_VERSIONS,
     NOTE_TYPE_NAMES,
+    WK_SHARED_MEDIA_SUBDIR,
     WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME,
     WkModel,
     first_reading,
@@ -35,14 +36,13 @@ from wk_decks import (
 from wk_reading_audio import (
     DEFAULT_WK_READING_VOICE,
     WK_READING_VOICES,
+    ReadingAudioProgressBar,
     _audio_extension,
     dictation_audio_basename,
     ensure_pronunciation_audio_file,
     select_pronunciation_audio,
     voice_actor_slug,
 )
-
-DICTATION_MEDIA_SUBDIR = "media/dictation"
 DEFAULT_DICTATION_VOICE = DEFAULT_WK_READING_VOICE
 DICTATION_DEFAULT_MIN_SRS = 7
 DICTATION_VOICES = WK_READING_VOICES
@@ -159,13 +159,14 @@ def build_dictation_deck(
     stage_interval_map = interval_map or load_srs_stage_interval_days(
         CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
     )
-    media_dir = output_dir / DICTATION_MEDIA_SUBDIR
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
     audio_ok = 0
     audio_cached = 0
     audio_new = 0
 
     print(f"Dictation audio (WaniKani native, voice={voice_actor})...")
+    progress = ReadingAudioProgressBar(len(items), label="Dictation audio")
     for item in items:
         vocab = item.vocab
         data = vocab["data"]
@@ -179,7 +180,7 @@ def build_dictation_deck(
             str((audio_entry or {}).get("content_type") or ""),
             str((audio_entry or {}).get("url") or ""),
         )
-        basename = dictation_audio_basename(vocab["id"], voice_actor, ext)
+        basename = dictation_audio_basename(vocab, voice_actor, ext)
         dest = media_dir / basename
         ok, was_cached = ensure_pronunciation_audio_file(
             vocab,
@@ -219,10 +220,11 @@ def build_dictation_deck(
             guid=guid,
         )
         deck.add_note(note)
+        progress.advance()
 
-    print(
-        f"Dictation audio: {audio_ok}/{len(items)} cards "
-        f"({audio_new} new, {audio_cached} cached)"
+    progress.finish(
+        ok_count=audio_ok,
+        detail=f"{audio_new} new, {audio_cached} cached",
     )
     deck.wk_media_files = media_files
     out = output_dir / "wk_dictation.apkg"

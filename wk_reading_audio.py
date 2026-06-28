@@ -7,10 +7,12 @@ edge-tts for kanji readings (WK has no kanji pronunciation clips).
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
+import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, TextIO, Tuple
 
 import requests
 
@@ -30,6 +32,90 @@ READING_AUDIO_CSS = """
 .reading-audio { margin: 10px auto 6px; }
 """
 
+PROGRESS_BAR_WIDTH = 40
+
+
+def format_progress_line(
+    current: int,
+    total: int,
+    *,
+    label: str,
+    width: int = PROGRESS_BAR_WIDTH,
+) -> str:
+    """Format a single-line progress bar (no trailing newline)."""
+    total = max(total, 1)
+    current = min(max(current, 0), total)
+    ratio = current / total
+    filled = int(width * ratio)
+    if filled >= width:
+        bar = "=" * width
+    else:
+        bar = "=" * filled + ">" + " " * (width - filled - 1)
+    pct = int(ratio * 100)
+    return f"{label}: [{bar}] {current}/{total} ({pct}%)"
+
+
+class ReadingAudioProgressBar:
+    """TTY progress bar for long reading-audio generation loops."""
+
+    def __init__(
+        self,
+        total: int,
+        *,
+        label: str = "Reading audio",
+        stream: Optional[TextIO] = None,
+        enabled: bool = True,
+    ) -> None:
+        self.total = max(int(total), 1)
+        self.label = label
+        self.stream = stream if stream is not None else sys.stderr
+        self.enabled = enabled and total > 0
+        self.current = 0
+        self._is_tty = (
+            self.enabled
+            and hasattr(self.stream, "isatty")
+            and self.stream.isatty()
+        )
+        self._plain_log_every = max(1, self.total // 100)
+
+    def advance(self) -> None:
+        if not self.enabled:
+            return
+        self.current = min(self.current + 1, self.total)
+        if self._is_tty:
+            self.stream.write("\r" + format_progress_line(self.current, self.total, label=self.label))
+            self.stream.flush()
+        elif (
+            self.current == 1
+            or self.current == self.total
+            or self.current % self._plain_log_every == 0
+        ):
+            print(
+                format_progress_line(self.current, self.total, label=self.label),
+                file=self.stream,
+            )
+
+    def finish(self, *, ok_count: int, detail: str = "") -> None:
+        if not self.enabled:
+            summary = f"{self.label}: {ok_count}/{self.total} cards"
+            if detail:
+                summary += f" ({detail})"
+            print(summary, file=self.stream)
+            return
+        suffix = f"{ok_count} with audio"
+        if detail:
+            suffix += f" · {detail}"
+        if self._is_tty:
+            self.current = self.total
+            line = format_progress_line(self.current, self.total, label=self.label)
+            line += f" · {suffix}"
+            self.stream.write("\r" + line + "\n")
+            self.stream.flush()
+        else:
+            summary = f"{self.label}: {self.total}/{self.total} cards ({suffix})"
+            print(summary, file=self.stream)
+
+
 _VOICE_SLUG_RE = re.compile(r"[^a-z0-9]+", re.I)
 
 
@@ -48,9 +134,38 @@ def _audio_extension(content_type: str, url: str) -> str:
     return "mp3"
 
 
-def reading_audio_basename(subject: dict, voice_actor: str, ext: str) -> str:
+def reading_filename_slug(reading: str) -> str:
+    """Stable ASCII slug for a kana reading (used in kanji audio filenames)."""
+    return hashlib.sha256(reading.encode("utf-8")).hexdigest()[:10]
+
+
+def kanji_tts_readings(subject: dict) -> List[str]:
+    """Distinct primary readings to synthesize for a kanji subject."""
+    seen: set[str] = set()
+    readings: List[str] = []
+    for reading in primary_readings(subject):
+        if reading and reading not in seen:
+            seen.add(reading)
+            readings.append(reading)
+    if not readings:
+        fallback = first_reading(subject)
+        if fallback:
+            readings.append(fallback)
+    return readings
+
+
+def reading_audio_basename(
+    subject: dict,
+    voice_actor: str,
+    ext: str,
+    *,
+    reading: Optional[str] = None,
+) -> str:
     kind = subject.get("object") or "subject"
     slug = voice_actor_slug(voice_actor)
+    if kind == "kanji" and reading:
+        rslug = reading_filename_slug(reading)
+        return f"wk_reading_kanji_{subject['id']}_{rslug}_{slug}.{ext}"
     return f"wk_reading_{kind}_{subject['id']}_{slug}.{ext}"
 
 
@@ -59,10 +174,9 @@ def pronunciation_audio_cache_path(vocab_id: int, voice_actor: str, ext: str) ->
     return PRONUNCIATION_AUDIO_CACHE_DIR / f"wk_dictation_{vocab_id}_{slug}.{ext}"
 
 
-def dictation_audio_basename(vocab_id: int, voice_actor: str, ext: str) -> str:
-    """Legacy dictation deck media name (same cache as reading audio for vocab)."""
-    slug = voice_actor_slug(voice_actor)
-    return f"wk_dictation_{vocab_id}_{slug}.{ext}"
+def dictation_audio_basename(vocab: dict, voice_actor: str, ext: str) -> str:
+    """Same packaged filename as core vocab reading audio (one file per vocab/voice)."""
+    return reading_audio_basename(vocab, voice_actor, ext)
 
 
 def select_pronunciation_audio(
@@ -131,10 +245,21 @@ def ensure_pronunciation_audio_file(
 
 def reading_tts_text(subject: dict) -> str:
     """Kana text for kanji TTS (first primary reading)."""
-    readings = primary_readings(subject)
-    if readings:
-        return readings[0]
-    return first_reading(subject) or ""
+    readings = kanji_tts_readings(subject)
+    return readings[0] if readings else ""
+
+
+def ensure_kanji_reading_audio_file(
+    subject: dict,
+    reading: str,
+    dest_path: Path,
+    *,
+    tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    refresh: bool = False,
+) -> Tuple[bool, bool]:
+    if not reading:
+        return False, False
+    return ensure_sentence_audio_file(reading, tts_voice, dest_path, refresh=refresh)
 
 
 def ensure_reading_audio_for_subject(
@@ -158,7 +283,13 @@ def ensure_reading_audio_for_subject(
         text = reading_tts_text(subject)
         if not text:
             return False, False
-        return ensure_sentence_audio_file(text, tts_voice, dest_path, refresh=refresh)
+        return ensure_kanji_reading_audio_file(
+            subject,
+            text,
+            dest_path,
+            tts_voice=tts_voice,
+            refresh=refresh,
+        )
     return False, False
 
 
@@ -169,14 +300,15 @@ def prepare_reading_audio_field(
     wk_voice: str = DEFAULT_WK_READING_VOICE,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh: bool = False,
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, List[str]]:
     """
-    Download/cache reading audio and return Anki [sound:…] field value plus media path.
-    Radicals and other types without readings return ("", None).
+    Download/cache reading audio and return Anki [sound:…] field value plus media paths.
+    Kanji: one clip per primary reading. Vocabulary: one WK native clip.
+    Radicals and other types without readings return ("", []).
     """
     obj = subject.get("object")
     if obj not in {"vocabulary", "kanji"}:
-        return "", None
+        return "", []
 
     if obj == "vocabulary":
         entry = select_pronunciation_audio(subject, voice_actor=wk_voice)
@@ -184,18 +316,32 @@ def prepare_reading_audio_field(
             str((entry or {}).get("content_type") or ""),
             str((entry or {}).get("url") or ""),
         )
-    else:
-        ext = "mp3"
+        basename = reading_audio_basename(subject, wk_voice, ext)
+        dest = media_dir / basename
+        ok, _was_cached = ensure_pronunciation_audio_file(
+            subject,
+            voice_actor=wk_voice,
+            dest_path=dest,
+            refresh=refresh,
+        )
+        if not ok:
+            return "", []
+        return f"[sound:{basename}]", [str(dest.resolve())]
 
-    basename = reading_audio_basename(subject, wk_voice, ext)
-    dest = media_dir / basename
-    ok, _was_cached = ensure_reading_audio_for_subject(
-        subject,
-        dest,
-        wk_voice=wk_voice,
-        tts_voice=tts_voice,
-        refresh=refresh,
-    )
-    if not ok:
-        return "", None
-    return f"[sound:{basename}]", str(dest.resolve())
+    sound_tags: List[str] = []
+    media_paths: List[str] = []
+    for reading in kanji_tts_readings(subject):
+        basename = reading_audio_basename(subject, wk_voice, "mp3", reading=reading)
+        dest = media_dir / basename
+        ok, _was_cached = ensure_kanji_reading_audio_file(
+            subject,
+            reading,
+            dest,
+            tts_voice=tts_voice,
+            refresh=refresh,
+        )
+        if not ok:
+            continue
+        sound_tags.append(f"[sound:{basename}]")
+        media_paths.append(str(dest.resolve()))
+    return "".join(sound_tags), media_paths

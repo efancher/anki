@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 SECONDS_PER_DAY = 86400
-DEFAULT_SUPPLEMENTARY_MATURE_MIN_SRS_STAGE = 7
-DEFAULT_SUPPLEMENTARY_MATURE_MIN_INTERVAL_DAYS = 21
+DEFAULT_SUPPLEMENTARY_MATURE_MIN_SRS_STAGE = 5  # WaniKani Guru I (first Guru)
+DEFAULT_SUPPLEMENTARY_MATURE_MIN_INTERVAL_DAYS = 7  # WK srs_stage 5 interval in WK_SRS_STAGE_INTERVAL_DAYS
 WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME = "spaced_repetition_systems.json"
 
 # WaniKani assignment srs_stage → approximate interval (days). Fallback when SRS API cache missing.
@@ -153,7 +153,7 @@ def wk_subject_mature_at_import(
     mature_interval_days: int = DEFAULT_SUPPLEMENTARY_MATURE_MIN_INTERVAL_DAYS,
     burned_interval_days: int = DEFAULT_BURNED_INTERVAL_DAYS,
 ) -> bool:
-    """True when linked vocab is WK-mature at bootstrap (Master+ or interval ≥ threshold)."""
+    """True when linked vocab is WK-mature at bootstrap (Guru I+ stage or interval ≥ threshold)."""
     if srs_stage >= min_srs_stage:
         return True
     if srs_stage <= 0:

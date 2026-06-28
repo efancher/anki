@@ -74,39 +74,102 @@ def load_definitions(path: Path) -> dict:
 
 
 def try_enable_fsrs(col: Any) -> Optional[str]:
+    """Enable FSRS when possible; return a user-facing note if manual setup is needed."""
     try:
-        from anki.collection import SchedulerVersion
-    except ImportError:
-        return "Could not import SchedulerVersion; enable FSRS manually in Preferences → Review."
-
-    if not hasattr(col, "sched_ver") or not hasattr(col, "set_scheduler"):
-        return "This Anki build does not expose scheduler APIs; enable FSRS manually in Preferences → Review."
-
-    try:
-        if col.sched_ver() != SchedulerVersion.V2:
-            col.set_scheduler(SchedulerVersion.V2)
+        if hasattr(col, "v3_scheduler") and hasattr(col, "set_v3_scheduler"):
+            if col.v3_scheduler():
+                return None
+            if hasattr(col, "sched_ver") and col.sched_ver() != 2:
+                if hasattr(col, "upgrade_to_v2_scheduler"):
+                    col.upgrade_to_v2_scheduler()
+                else:
+                    return "Enable FSRS manually in Preferences → Review."
+            col.set_v3_scheduler(True)
             return "Enabled FSRS scheduler for the collection."
     except Exception as exc:  # noqa: BLE001
         return f"Could not enable FSRS automatically ({exc}); enable it in Preferences → Review."
+
+    if hasattr(col, "sched_ver") and hasattr(col, "set_scheduler"):
+        try:
+            from anki.collection import SchedulerVersion
+        except ImportError:
+            return None
+        try:
+            if col.sched_ver() != SchedulerVersion.V2:
+                col.set_scheduler(SchedulerVersion.V2)
+                return "Enabled FSRS scheduler for the collection."
+        except Exception as exc:  # noqa: BLE001
+            return f"Could not enable FSRS automatically ({exc}); enable it in Preferences → Review."
     return None
+
+
+def _deck_id_for_name(decks: Any, name: str) -> Optional[int]:
+    """Return deck id if it exists; do not create a new deck."""
+    if hasattr(decks, "id_for_name"):
+        deck_id = decks.id_for_name(name)
+        return int(deck_id) if deck_id else None
+    deck_id = decks.id(name, default=False)
+    return int(deck_id) if deck_id else None
+
+
+def _config_entry_name(entry: Any, decks: Any) -> str:
+    if isinstance(entry, dict):
+        return str(entry.get("name") or "")
+    conf = decks.get_config(entry)
+    if isinstance(conf, dict):
+        return str(conf.get("name") or "")
+    return str(getattr(conf, "name", "") or "")
+
+
+def _config_id_from_entry(entry: Any) -> DeckConfigId:
+    if isinstance(entry, dict):
+        return DeckConfigId(entry["id"])
+    return DeckConfigId(entry)
+
+
+def _apply_preset_fields(conf: Any, preset: dict) -> None:
+    desired_retention = float(preset.get("desired_retention", 0.9))
+    new_per_day = int(preset.get("new_per_day", 15))
+    reviews_per_day = int(preset.get("reviews_per_day", 200))
+    if isinstance(conf, dict):
+        conf["desiredRetention"] = desired_retention
+        conf.setdefault("new", {})["perDay"] = new_per_day
+        conf.setdefault("rev", {})["perDay"] = reviews_per_day
+        return
+    conf.desired_retention = desired_retention
+    conf.new_per_day = new_per_day
+    conf.reviews_per_day = reviews_per_day
+
+
+def _add_config_id(decks: Any, name: str) -> DeckConfigId:
+    created = decks.add_config(name)
+    if isinstance(created, dict):
+        return DeckConfigId(created["id"])
+    return DeckConfigId(created)
+
+
+def _assign_deck_config(decks: Any, deck_id: int, conf_id: DeckConfigId) -> None:
+    if hasattr(decks, "set_config_id_for_deck_dict"):
+        deck = decks.get(deck_id)
+        decks.set_config_id_for_deck_dict(deck, conf_id)
+        return
+    decks.set_deck_config_id(DeckId(deck_id), conf_id)
 
 
 def upsert_preset(col: Any, preset: dict) -> DeckConfigId:
     name = str(preset.get("name") or "WK FSRS")
+    decks = col.decks
     conf_id: Optional[DeckConfigId] = None
-    for cid in col.decks.all_config():
-        conf = col.decks.get_config(cid)
-        if conf.name == name:
-            conf_id = cid
+    for entry in decks.all_config():
+        if _config_entry_name(entry, decks) == name:
+            conf_id = _config_id_from_entry(entry)
             break
     if conf_id is None:
-        conf_id = col.decks.add_config(name)
+        conf_id = _add_config_id(decks, name)
 
-    conf = col.decks.get_config(conf_id)
-    conf.desired_retention = float(preset.get("desired_retention", 0.9))
-    conf.new_per_day = int(preset.get("new_per_day", 15))
-    conf.reviews_per_day = int(preset.get("reviews_per_day", 200))
-    col.decks.update_config(conf)
+    conf = decks.get_config(conf_id)
+    _apply_preset_fields(conf, preset)
+    decks.update_config(conf)
     return conf_id
 
 
@@ -136,12 +199,12 @@ def apply_deck_options() -> None:
     missing = 0
     lines: List[str] = []
     for deck_name in deck_names:
-        deck_id = col.decks.id(str(deck_name), default=False)
+        deck_id = _deck_id_for_name(col.decks, str(deck_name))
         if not deck_id:
             missing += 1
             lines.append(f"missing deck: {deck_name}")
             continue
-        col.decks.set_deck_config_id(DeckId(deck_id), conf_id)
+        _assign_deck_config(col.decks, deck_id, conf_id)
         assigned += 1
         lines.append(f"preset applied: {deck_name}")
 

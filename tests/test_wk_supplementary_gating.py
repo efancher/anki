@@ -16,7 +16,6 @@ if str(REPO_ROOT) not in sys.path:
 from wk_decks import (
     FILTERED_DECK_DEFINITIONS,
     WK_SRS_STAGE_GURU_1,
-    WK_SRS_STAGE_MASTER,
     all_vocab_subjects,
     passes_progress_filter,
     supplementary_import_tags,
@@ -43,15 +42,15 @@ class WkSupplementaryGatingTests(unittest.TestCase):
     def test_wk_subject_mature_at_import_by_stage(self) -> None:
         self.assertTrue(
             wk_subject_mature_at_import(
-                WK_SRS_STAGE_MASTER,
+                WK_SRS_STAGE_GURU_1,
                 min_srs_stage=DEFAULT_SUPPLEMENTARY_MATURE_MIN_SRS_STAGE,
             )
         )
         self.assertFalse(
             wk_subject_mature_at_import(
-                WK_SRS_STAGE_GURU_1,
+                WK_SRS_STAGE_GURU_1 - 1,
                 min_srs_stage=DEFAULT_SUPPLEMENTARY_MATURE_MIN_SRS_STAGE,
-                interval_map={5: 6},
+                interval_map={4: 6},
                 mature_interval_days=DEFAULT_SUPPLEMENTARY_MATURE_MIN_INTERVAL_DAYS,
             )
         )
@@ -73,7 +72,7 @@ class WkSupplementaryGatingTests(unittest.TestCase):
 
     def test_supplementary_import_tags_omits_locked_when_mature(self) -> None:
         vocab = mock_vocab(42)
-        assignment_index = {42: {"data": {"subject_id": 42, "srs_stage": WK_SRS_STAGE_MASTER}}}
+        assignment_index = {42: {"data": {"subject_id": 42, "srs_stage": WK_SRS_STAGE_GURU_1}}}
         tags = supplementary_import_tags(vocab, assignment_index)
         self.assertNotIn("wk-locked", tags)
 

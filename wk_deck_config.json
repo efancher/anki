@@ -17,6 +17,7 @@
   "only_started": false,
   "no_wk_progress_filter": true,
   "no_bundle": false,
+  "sync_anki_addons": true,
   "grammar": {
     "max_jlpt": "N5",
     "max_tae_kim_section": 3,

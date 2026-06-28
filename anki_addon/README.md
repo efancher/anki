@@ -93,7 +93,7 @@ Create `out/wk_unlock_config.json` (or set `WK_UNLOCK_CONFIG`):
 
 ```json
 {
-  "mature_min_interval_days": 21,
+  "mature_min_interval_days": 7,
   "mature_require_all_card_types": true,
   "burned_interval_days": 365
 }
@@ -102,3 +102,36 @@ Create `out/wk_unlock_config.json` (or set `WK_UNLOCK_CONFIG`):
 Design and implementation tracker: [docs/wk_core_srs_design.md](../docs/wk_core_srs_design.md)
 
 Migration playbook (one-time WK → Anki core SRS): [wk_anki_runbook.md](../wk_anki_runbook.md#core-srs-migration-wk--anki)
+
+---
+
+# WK Adaptive New (review-aware lesson limits)
+
+Scales daily **new cards/day** per deck tier based on due review load. Priority:
+radicals → kanji → vocabulary → supplementary.
+
+## Install once
+
+Copy the `wk_adaptive_new` folder into Anki's add-ons folder (same path as above),
+then restart Anki.
+
+## Setup
+
+1. **Tools → WK Apply Deck Options** (creates the base **WK FSRS** preset).
+2. **Tools → WK Adjust New Limits** — creates per-tier presets and assigns decks.
+
+Runs automatically on collection load when `auto_run_on_load` is true (default).
+
+## Optional config
+
+Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
+
+```json
+{
+  "daily_workload_target": 200,
+  "max_new_total": 15,
+  "supplementary_max_new": 5,
+  "review_count_scope": "tag:wk-core",
+  "auto_run_on_load": true
+}
+```
