@@ -135,3 +135,37 @@ Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
   "auto_run_on_load": true
 }
 ```
+
+---
+
+# WK Health Check (collection sanity stats)
+
+Read-only checks you can run in desktop Anki after import, **WK Adjust New Limits**, or anytime you want confidence that scheduling was not wiped.
+
+## Install once
+
+Copy the `wk_health_check` folder into Anki's add-ons folder (same path as above),
+then restart Anki.
+
+## Usage
+
+**Tools → WK Health Check**
+
+The report includes:
+
+- Core deck counts (new / learn / review / mature / reps)
+- Whether any core cards have review history (`reps > 0`)
+- Suspicious cards (e.g. reps > 0 but still `new`)
+- Priority tags (`tk-grammar-*`, `jlpt-n5-*`)
+- WK FSRS preset on core decks
+- WK:: filtered decks present and **reschedule** enabled
+- `wk_study_priority.json` found on disk
+
+Each run saves `wk_health_snapshot.json` in your Anki profile folder. The next run compares review-card and reps totals to that snapshot — **sharp drops** after re-import may mean scheduling was reset (check `core.bootstrap_scheduling` in config).
+
+## Suggested workflow
+
+1. Run **WK Health Check** before re-import (baseline snapshot).
+2. Import `out/wk_all.apkg` with **Update** (not replace).
+3. Run **WK Health Check** again — review cards and total reps should not fall sharply.
+4. Run **WK Adjust New Limits** — run health check once more; reps/review counts should stay stable (only new-card order / limits change).

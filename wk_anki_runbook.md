@@ -52,7 +52,7 @@ Also need **ffmpeg** on `PATH` for reading audio and dictation (macOS: `brew ins
 
 ### Anki add-ons (desktop, required)
 
-Four add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
+Five add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
 
 **Manual install or one-time setup** (any platform):
 
@@ -73,12 +73,13 @@ Disable auto-sync: `"sync_anki_addons": false` in config, or pass `--no-sync-add
 | `wk_deck_options` | **WK Apply Deck Options** |
 | `wk_unlock` | **WK Run Unlock Pass** |
 | `wk_adaptive_new` | **WK Adjust New Limits** |
+| `wk_health_check` | **WK Health Check** |
 
-**Optional (dev):** symlink the four folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
+**Optional (dev):** symlink the five folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
 
 ### Second machine (work desktop, etc.)
 
-AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered decks, tags) but **not** add-on code. Each desktop needs a **one-time** install of all four add-ons.
+AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered decks, tags) but **not** add-on code. Each desktop needs a **one-time** install of all five add-ons.
 
 | Syncs via AnkiWeb | Local install required |
 |-------------------|------------------------|
@@ -142,10 +143,11 @@ This replaces the old “Phase 2 migration” — it **is implemented**; these a
 4. **Tools → WK Apply Deck Options** — assigns **WK FSRS** preset; enable FSRS globally if asked.
 5. **Tools → WK Run Unlock Pass** — unsuspends level-1 radicals and eligible cards (also runs on later desktop opens).
 6. **Tools → WK Setup Filtered Decks** — creates daily filtered decks from `out/anki_filtered_decks.json`.
-7. **Verify** in Browse:
+7. **Tools → WK Health Check** — sanity stats (review history, filtered-deck reschedule, priority tags). Run again after import to compare against the saved snapshot.
+8. **Verify** in Browse:
    - `tag:wk-core` — spot-check due dates vs WaniKani if you bootstrapped scheduling.
    - `tag:wk-locked` — supplementary suspended until linked subject is mature in core.
-8. **Stop WK reviews.** Optional: keep WK **lessons** only until caught up in Anki.
+9. **Stop WK reviews.** Optional: keep WK **lessons** only until caught up in Anki.
 
 ### After migration
 
