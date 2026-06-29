@@ -182,9 +182,10 @@ Read on guidetojapanese.org; review in grammar decks. Cap scope in [§5 Configur
 ### Suggested daily order
 
 1. **WK::Core** filtered decks until empty (Radicals → Kanji → Vocabulary).
-2. **One** supplementary filtered deck if you have energy (dictation → vocab context → conjugations).
-3. **Grammar** when it matches what you are reading in Tae Kim.
-4. On a new item: fail if you must, read the back once, move on — no separate WK “lesson” step.
+2. **Tae Kim track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5** equivalents) while reading Tae Kim.
+3. **One** supplementary filtered deck if you have energy (dictation → vocab context → conjugations).
+4. **Grammar** cloze when it matches what you are reading in Tae Kim.
+5. On a new item: fail if you must, read the back once, move on — no separate WK “lesson” step.
 
 Grammar is **not** gated by core kanji maturity today (see [§12](#12-tips--tuning)); use Tae Kim lesson caps and `max_unknown_kanji` instead.
 
@@ -243,7 +244,7 @@ Example lesson slugs: `expressing-state-of-being`, `introduction-to-particles`, 
 |------|--------|
 | Vocab Context, Dictation, Conjugations, Verb Types, Phonetic Families, … | `WkSubjectId` + `wk-locked` |
 | Grammar / Tae Kim exercises | JLPT + Tae Kim caps only |
-| Current and Next Radicals | Level preview (not core SRS) |
+| Current and Next Radicals | *(removed from default — use core radicals; `--deck radicals` still builds)* |
 
 Optional individual decks: leeches, verb pairs, confusables, etc. — `python wk_decks.py --deck leeches`
 
@@ -256,7 +257,12 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | Name | Purpose |
 |------|---------|
 | **WK::Core Radicals / Kanji / Vocabulary** | Daily core review |
-| **WK::Radicals Preview** | Level preview radicals |
+| **WK::Tae Kim · Grammar Vocab** | Kanji/vocab in Tae Kim lesson text (`tag:tk-grammar-vocab`) |
+| **WK::Tae Kim · Grammar Prereq Kanji** | Kanji needed to unlock grammar vocab (`tag:tk-grammar-prereq tag:kanji`) |
+| **WK::Tae Kim · Grammar Prereq Radicals** | Radicals for grammar chain (`tag:tk-grammar-prereq tag:radical`) |
+| **WK::N5 · Kanji & Vocab** | WK levels 1–10 band (`tag:jlpt-n5-vocab`) |
+| **WK::N5 · Prereq Kanji** | Kanji needed for N5 items (`tag:jlpt-n5-prereq tag:kanji`) |
+| **WK::N5 · Prereq Radicals** | Radicals needed for N5 items (`tag:jlpt-n5-prereq tag:radical`) |
 | **WK::Vocab Context** | Production cloze |
 | **WK::Dictation** | Hear → type reading |
 | **WK::Grammar** | Basic Grammar subsections |
@@ -304,9 +310,36 @@ Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs a
 
 **Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; check core subject maturity (≥ **7** day interval, Guru I equivalent).
 
+**Counts jumped after import / filtered-deck rebuild:** Usually **not** new unique cards — see [Filtered decks inflated counts](#filtered-decks-inflated-counts-after-import).
+
 **Reading audio failures:** Re-run generator; optional `--refresh-reading-audio`.
 
 **FSRS:** Preset **WK FSRS** via **WK Apply Deck Options**.
+
+### Filtered decks inflated counts after import
+
+You finished core for the day, then imported and ran **WK Setup Filtered Decks** — and suddenly many **New** / **Review** counts appear. Common causes:
+
+| Cause | What happened |
+|-------|----------------|
+| **More filtered decks** | Each `WK::…` deck shows its own queue (up to its limit). Six Tae Kim/N5 decks can each list ~20 cards — often the **same** physical cards you already saw in `WK::Core *`, not six times more work. |
+| **New tags on re-import** | `tk-grammar-*` / `jlpt-n5-*` tags route cards into new filtered searches they did not match before. |
+| **Unlock pass** | **wk_unlock** on load unsuspends eligible `wk-locked` cards → they become **New**. |
+| **Bootstrap re-import** | If `"core.bootstrap_scheduling": true` in config, re-import can re-apply WK intervals and fight FSRS. Set it **`false`** after your one-time migration. |
+| **Reschedule in filtered decks** | Must be **on** for daily WK filtered decks. If off, Good/Easy show **(end)** and FSRS does not update — see below. |
+
+**What to do**
+
+1. Set `"core.bootstrap_scheduling": false` in `wk_deck_config.json` before routine re-imports.
+2. For today: study **one** track only — e.g. finish `WK::Core *` **or** the Tae Kim/N5 prereq chain, not both in parallel.
+3. Check unique workload in Browse: `tag:wk-core is:due` and `tag:wk-core is:new` — that is the real due set, not the sum of every filtered deck badge.
+4. If **Good / Easy show (end)**: filtered deck has **Reschedule cards based on my answers** disabled. Regenerate, run **WK Setup Filtered Decks**, or per deck: gear icon → Options → enable reschedule. Without it, filtered-deck reviews do not stick.
+
+### Good / Easy show “(end)” in a filtered deck
+
+Anki shows **1m · 10m · (end) · (end)** when the filtered deck is in **cram mode** (reschedule **off**). Again/Hard may still show learning-step times, but Good/Easy only remove the card from the filtered queue — **home-deck FSRS does not advance**.
+
+WK core study is meant to run **through filtered decks with reschedule on**. After fixing, buttons show normal intervals (e.g. 10m / 4d / …).
 
 **AnkiWeb sync fails mid-upload (~40k items, “network error”):** First sync with reading + grammar TTS media is large (often **500MB–1GB+**, tens of thousands of files). Try: **Preferences → Network → increase sync timeout** (e.g. 120s); stable Wi‑Fi, no VPN; **Sync → upload** on desktop first. On mobile, enable **sync without media** until desktop upload finishes. **Tools → Check Media → Delete Unused** after re-imports (orphans accumulate). Study on desktop only if sync keeps failing — add-ons require desktop anyway. Regenerate with latest generator to dedupe shared audio (see [Media reuse](#media-reuse)).
 
@@ -346,6 +379,17 @@ Optional config at `out/wk_adaptive_new_config.json` (or `WK_ADAPTIVE_NEW_CONFIG
 Example: with defaults, **0 due reviews** → up to **15** new (radicals first); **100 due** → about **7** new; **200+ due** → **0** new until reviews shrink.
 
 Study core via **WK::Core \*** filtered decks as usual; Anki’s per-deck **new/day** limits enforce the allocation.
+
+**JLPT + Tae Kim priority:** regenerate writes `out/wk_study_priority.json`. **Tae Kim links use the “Vocabulary used in this section” list on each practice page** (part1 of guidetojapanese `*_ex.html` pages up to your lesson cap — not production-exercise context sentences or Hanabira grammar examples). Core notes get split tags for filtered decks:
+
+| Tag | Meaning |
+|-----|---------|
+| `tk-grammar-vocab` | Kanji/vocab in Tae Kim **exercise** text |
+| `tk-grammar-prereq` | Radicals/kanji needed for those |
+| `jlpt-n5-vocab` | Kanji/vocab at WK levels 1–10 (N5 band) |
+| `jlpt-n5-prereq` | Radicals/kanji needed for N5 items |
+
+**WK Adjust New Limits** reorders new cards in all three core decks when that file is present.
 
 ### New cards: protect core (manual alternative)
 

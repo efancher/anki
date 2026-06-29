@@ -33,6 +33,8 @@ from .logic import (
 ADDON_NAME = "WK Adaptive New"
 DEFAULT_CONFIG_NAME = "wk_adaptive_new_config.json"
 DEFAULT_DECK_OPTIONS_JSON = "anki_deck_options.json"
+ANKI_CARD_TYPE_NEW = 0
+STUDY_PRIORITY_JSON = "wk_study_priority.json"
 SUPPLEMENTARY_PRESET_SUFFIX = "Supplementary"
 
 TIER_SUFFIX_BY_DECK = {
@@ -202,6 +204,84 @@ def count_review_load(col: Any, scope: str) -> int:
     return len(col.find_cards(f"{scope} is:due"))
 
 
+def candidate_study_priority_paths() -> List[Path]:
+    paths: List[Path] = []
+    env_path = os.environ.get("WK_STUDY_PRIORITY_JSON")
+    if env_path:
+        paths.append(Path(env_path).expanduser())
+    paths.extend(
+        [
+            Path.home() / "anki" / "out" / STUDY_PRIORITY_JSON,
+            Path.cwd() / "out" / STUDY_PRIORITY_JSON,
+            Path.cwd() / STUDY_PRIORITY_JSON,
+        ]
+    )
+    seen = set()
+    unique: List[Path] = []
+    for path in paths:
+        key = str(path.expanduser())
+        if key not in seen:
+            seen.add(key)
+            unique.append(path.expanduser())
+    return unique
+
+
+def load_priority_scores() -> Dict[int, int]:
+    for path in candidate_study_priority_paths():
+        if not path.is_file():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        subjects = payload.get("subjects") or {}
+        scores: Dict[int, int] = {}
+        for key, entry in subjects.items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                subject_id = int(key)
+            except ValueError:
+                continue
+            scores[subject_id] = int(entry.get("priority_score", 0))
+        return scores
+    return {}
+
+
+def _wk_subject_id_from_note(note: Any) -> Optional[int]:
+    model = note.note_type()
+    field_names = model["flds"]
+    name_to_ord = {field["name"]: index for index, field in enumerate(field_names)}
+    ord_index = name_to_ord.get("WkSubjectId")
+    if ord_index is None:
+        return None
+    text = (note.fields[ord_index] or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def reposition_new_cards_by_priority(col: Any, deck_name: str, priority_scores: Mapping[int, int]) -> int:
+    card_ids = col.find_cards(f'deck:"{deck_name}" is:new -is:suspended')
+    if not card_ids:
+        return 0
+    entries: List[Tuple[int, int]] = []
+    for card_id in card_ids:
+        card = col.get_card(card_id)
+        note = col.get_note(card.nid)
+        subject_id = _wk_subject_id_from_note(note)
+        score = priority_scores.get(subject_id, 999_999_999) if subject_id is not None else 999_999_999
+        entries.append((score, int(card_id)))
+    entries.sort(key=lambda item: (item[0], item[1]))
+    for position, (_, card_id) in enumerate(entries, start=1):
+        card = col.get_card(card_id)
+        if int(card.type) != ANKI_CARD_TYPE_NEW:
+            continue
+        card.due = position
+        col.update_card(card)
+    return len(entries)
+
+
 def count_available_new(col: Any, deck_name: str) -> int:
     return len(col.find_cards(f'deck:"{deck_name}" is:new -is:suspended'))
 
@@ -288,6 +368,12 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
     budget, allocations = build_tier_plan(review_load, tiers, config=config)
     supplementary_decks = load_supplementary_deck_names()
     lines = apply_allocations(col, config, allocations, supplementary_decks)
+    priority_scores = load_priority_scores()
+    if priority_scores:
+        for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK, CORE_VOCABULARY_DECK):
+            reordered = reposition_new_cards_by_priority(col, deck_name, priority_scores)
+            if reordered:
+                lines.append(f"{deck_name}: reordered {reordered} new by JLPT/Tae Kim priority")
     summary_lines = [
         f"Review load ({config.review_count_scope}): {review_load}",
         f"New budget: {budget}",

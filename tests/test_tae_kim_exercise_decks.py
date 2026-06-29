@@ -14,12 +14,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from tae_kim_exercise_decks import (
     collect_tae_kim_exercise_cards,
+    collect_tae_kim_section_vocabulary_entries,
     exercise_audio_basename,
     exercise_page_within_cap,
     exercise_point_id,
     fetch_tae_kim_exercise_html,
     load_tae_kim_exercise_page_specs,
     parse_tae_kim_exercise_page,
+    parse_tae_kim_vocabulary_section,
+    vocabulary_term_from_list_item,
 )
 from tae_kim_mapping import tae_kim_lesson_by_slug
 
@@ -98,6 +101,18 @@ PARTICLE_INLINE_SNIPPET = """
 <div class="botmenu"></div>
 """
 
+COPULA_VOCABULARY_SNIPPET = """
+<h2 id="part1">Vocabulary used in this section</h2>
+<div class="sumbox">
+<ol>
+<li><a href="#">人</a> - person</li>
+<li>友達 【ともだち】 - friend</li>
+<li>学生 【がくせい】 - student</li>
+</ol>
+</div>
+<h2 id="part2">Conjugation Exercise 1</h2>
+"""
+
 
 class TaeKimExerciseDeckTests(unittest.TestCase):
     def test_load_registry_includes_copula_page(self) -> None:
@@ -149,6 +164,33 @@ class TaeKimExerciseDeckTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertIn("＿＿＿", items[0].cloze_sentence)
         self.assertEqual(items[0].type_expression, "も")
+
+    def test_parse_vocabulary_section_terms(self) -> None:
+        self.assertEqual(vocabulary_term_from_list_item("人 - person"), "人")
+        self.assertEqual(
+            vocabulary_term_from_list_item("友達 【ともだち】 - friend"),
+            "友達",
+        )
+        terms = parse_tae_kim_vocabulary_section(COPULA_VOCABULARY_SNIPPET)
+        self.assertEqual(terms, ["人", "友達", "学生"])
+
+    def test_collect_section_vocabulary_respects_lesson_cap(self) -> None:
+        cache_path = REPO_ROOT / ".wk_cache" / "tae_kim_exercises" / "copula_ex.json"
+        if not cache_path.is_file():
+            try:
+                fetch_tae_kim_exercise_html("copula_ex.html", refresh=True)
+            except RuntimeError:
+                self.skipTest("copula_ex cache unavailable and network fetch failed")
+        lesson_one = collect_tae_kim_section_vocabulary_entries(
+            max_tae_kim_lesson="expressing-state-of-being",
+        )
+        through_particles = collect_tae_kim_section_vocabulary_entries(
+            max_tae_kim_lesson="introduction-to-particles",
+        )
+        self.assertGreater(len(lesson_one), 0)
+        self.assertGreater(len(through_particles), len(lesson_one))
+        term_text = " ".join(term for _, term in through_particles)
+        self.assertNotIn("底", term_text)
 
     def test_exercise_page_within_lesson_cap(self) -> None:
         copula = next(spec for spec in load_tae_kim_exercise_page_specs() if spec.page == "copula_ex.html")

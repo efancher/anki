@@ -31,7 +31,7 @@ This creates/rebuilds filtered decks under the **WK** deck group:
 - WK::Leeches
 - WK::Meaning Leeches
 - WK::Reading Leeches
-- WK::Radicals Preview
+- WK::Core Radicals / Kanji / Vocabulary
 - WK::Confusables Light
 
 ## Optional: default JSON path

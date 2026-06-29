@@ -49,10 +49,16 @@ from wk_reading_audio import (
     prepare_reading_audio_field,
 )
 from wk_scheduling import WkCardScheduleSpec, schedule_spec_for_assignment
+from wk_study_priority import SubjectPriority, priority_score_for, priority_tags, wk_level_to_jlpt
 
 CORE_RADICAL_KIND = "core-radical"
 CORE_ITEM_KIND = "core-item"
 CORE_TAG = "wk-core"
+
+
+def priority_score_fallback(subject: dict) -> int:
+    level = int((subject.get("data") or {}).get("level") or 60)
+    return priority_score_for(wk_level_to_jlpt(level), level)
 
 
 def format_prerequisite_ids(subject: dict) -> str:
@@ -227,6 +233,7 @@ def add_core_item_note(
     kind: str,
     *,
     reading_audio_field: str = "",
+    priority_entry: Optional[SubjectPriority] = None,
 ) -> str:
     data = subject["data"]
     expr = data.get("characters") or ""
@@ -258,6 +265,8 @@ def add_core_item_note(
             CORE_TAG,
             subject.get("object") or "item",
             f"wk-level-{data.get('level', 0)}",
+            *(priority_tags(priority_entry, subject_object=subject.get("object") or "")
+              if priority_entry is not None else []),
         ],
         guid=guid,
     )
@@ -272,6 +281,7 @@ def build_core_radical_deck(
     *,
     bootstrap_scheduling: bool = False,
     suspend_unstarted: bool = True,
+    priority_index: Optional[Dict[int, SubjectPriority]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     from wk_decks import radical_display_html
 
@@ -281,10 +291,20 @@ def build_core_radical_deck(
     deck.wk_media_files = media_paths
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
 
-    for radical in sorted(radicals, key=lambda item: (item["data"].get("level", 999), radical_display(item))):
+    for radical in sorted(
+        radicals,
+        key=lambda item: (
+            (priority_index or {}).get(int(item["id"])).priority_score
+            if (priority_index or {}).get(int(item["id"])) is not None
+            else priority_score_fallback(item),
+            item["data"].get("level", 999),
+            radical_display(item),
+        ),
+    ):
         data = radical["data"]
         level = int(data.get("level") or 0)
         guid = stable_guid(CORE_RADICAL_KIND, radical["id"])
+        priority_entry = (priority_index or {}).get(int(radical["id"]))
         note = genanki.Note(
             model=model,
             fields=[
@@ -301,6 +321,8 @@ def build_core_radical_deck(
                 CORE_TAG,
                 "radical",
                 f"wk-level-{level}",
+                *(priority_tags(priority_entry, subject_object=radical.get("object") or "radical")
+                  if priority_entry is not None else []),
             ],
             guid=guid,
         )
@@ -334,6 +356,7 @@ def _populate_core_item_deck(
     wk_voice: str,
     tts_voice: str,
     refresh_reading_audio: bool,
+    priority_index: Optional[Dict[int, SubjectPriority]] = None,
 ) -> Dict[str, WkCardScheduleSpec]:
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
     media_files: List[str] = []
@@ -367,6 +390,7 @@ def _populate_core_item_deck(
             assignment_index,
             CORE_ITEM_KIND,
             reading_audio_field=audio_field,
+            priority_entry=(priority_index or {}).get(int(subject["id"])),
         )
         spec = _schedule_spec_for_subject(
             CORE_ITEM_KIND,
@@ -397,12 +421,19 @@ def build_core_kanji_deck(
     wk_voice: str = DEFAULT_WK_READING_VOICE,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_reading_audio: bool = False,
+    priority_index: Optional[Dict[int, SubjectPriority]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-kanji"], DECK_NAMES["core-kanji"])
     model = make_core_item_model()
     sorted_items = sorted(
         kanji_items,
-        key=lambda item: (item["data"].get("level", 999), item["data"].get("characters") or ""),
+        key=lambda item: (
+            (priority_index or {}).get(int(item["id"])).priority_score
+            if (priority_index or {}).get(int(item["id"])) is not None
+            else priority_score_fallback(item),
+            item["data"].get("level", 999),
+            item["data"].get("characters") or "",
+        ),
     )
     schedule_specs = _populate_core_item_deck(
         deck,
@@ -416,6 +447,7 @@ def build_core_kanji_deck(
         wk_voice=wk_voice,
         tts_voice=tts_voice,
         refresh_reading_audio=refresh_reading_audio,
+        priority_index=priority_index,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_kanji.apkg"
@@ -434,12 +466,19 @@ def build_core_vocab_deck(
     wk_voice: str = DEFAULT_WK_READING_VOICE,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_reading_audio: bool = False,
+    priority_index: Optional[Dict[int, SubjectPriority]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-vocabulary"], DECK_NAMES["core-vocabulary"])
     model = make_core_item_model()
     sorted_items = sorted(
         vocab_items,
-        key=lambda item: (item["data"].get("level", 999), item["data"].get("characters") or ""),
+        key=lambda item: (
+            (priority_index or {}).get(int(item["id"])).priority_score
+            if (priority_index or {}).get(int(item["id"])) is not None
+            else priority_score_fallback(item),
+            item["data"].get("level", 999),
+            item["data"].get("characters") or "",
+        ),
     )
     schedule_specs = _populate_core_item_deck(
         deck,
@@ -453,6 +492,7 @@ def build_core_vocab_deck(
         wk_voice=wk_voice,
         tts_voice=tts_voice,
         refresh_reading_audio=refresh_reading_audio,
+        priority_index=priority_index,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_vocabulary.apkg"

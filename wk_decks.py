@@ -351,6 +351,9 @@ RUN_HISTORY_COLUMNS = [
     "bundled_decks",
 ]
 FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
+# Core daily queues must reschedule (FSRS updates on home deck). If reschedule is off,
+# Good/Easy show "(end)" and reviews do not stick.
+FILTERED_DECK_RESCHEDULE_DEFAULT = True
 
 FILTERED_DECK_DEFINITIONS = [
     {
@@ -372,8 +375,38 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Radicals Preview",
-        "search": 'deck:"WaniKani Current and Next Radicals" -is:suspended',
+        "name": "WK::Tae Kim · Grammar Vocab",
+        "search": 'tag:wk-core tag:tk-grammar-vocab -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Tae Kim · Grammar Prereq Kanji",
+        "search": 'tag:wk-core tag:tk-grammar-prereq tag:kanji -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Tae Kim · Grammar Prereq Radicals",
+        "search": 'tag:wk-core tag:tk-grammar-prereq tag:radical -is:suspended',
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::N5 · Kanji & Vocab",
+        "search": 'tag:wk-core tag:jlpt-n5-vocab -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::N5 · Prereq Kanji",
+        "search": 'tag:wk-core tag:jlpt-n5-prereq tag:kanji -is:suspended',
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::N5 · Prereq Radicals",
+        "search": 'tag:wk-core tag:jlpt-n5-prereq tag:radical -is:suspended',
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
@@ -5600,12 +5633,23 @@ def write_filtered_deck_suggestions(output_dir: Path) -> Path:
     return path
 
 
+def normalized_filtered_deck_definitions() -> List[dict]:
+    return [
+        {
+            **spec,
+            "reschedule": spec.get("reschedule", FILTERED_DECK_RESCHEDULE_DEFAULT),
+        }
+        for spec in FILTERED_DECK_DEFINITIONS
+    ]
+
+
 def write_filtered_decks_json(output_dir: Path) -> Path:
     path = output_dir / FILTERED_DECKS_JSON
     payload = {
         "generator_version": VERSION,
         "order_labels": {"relative_overdueness": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS},
-        "decks": FILTERED_DECK_DEFINITIONS,
+        "reschedule_default": FILTERED_DECK_RESCHEDULE_DEFAULT,
+        "decks": normalized_filtered_deck_definitions(),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -6737,6 +6781,27 @@ def main() -> None:
             min_srs=supplementary_min_srs(args, args.dictation_min_srs),
             voice_actor=args.dictation_voice,
         )
+    core_priority_index: Dict[int, object] = {}
+    if "core-radical" in wanted or "core-kanji" in wanted or "core-vocabulary" in wanted:
+        from wk_study_priority import build_core_priority_index, write_study_priority_json
+        from tae_kim_exercise_decks import collect_tae_kim_section_vocabulary_entries
+
+        tae_kim_priority_entries = collect_tae_kim_section_vocabulary_entries(
+            max_tae_kim_section=args.grammar_max_tae_kim_section,
+            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+            refresh=args.refresh_cache,
+        )
+        core_priority_index = build_core_priority_index(
+            core_radical_items,
+            core_kanji_items,
+            core_vocab_items,
+            tae_kim_priority_entries=tae_kim_priority_entries,
+        )
+        priority_path = write_study_priority_json(output_dir, core_priority_index)
+        print(
+            f"Core study priority: {priority_path} ({len(core_priority_index)} subjects, "
+            f"{len(tae_kim_priority_entries)} Tae Kim section vocabulary terms)"
+        )
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
@@ -6893,6 +6958,7 @@ def main() -> None:
                 output_dir,
                 bootstrap_scheduling=bootstrap,
                 suspend_unstarted=suspend_unstarted,
+                priority_index=core_priority_index,
             )
             created.append(path)
             built_decks.append(deck)
@@ -6904,6 +6970,7 @@ def main() -> None:
                 output_dir,
                 bootstrap_scheduling=bootstrap,
                 suspend_unstarted=suspend_unstarted,
+                priority_index=core_priority_index,
                 **reading_audio_kwargs,
             )
             created.append(path)
@@ -6916,6 +6983,7 @@ def main() -> None:
                 output_dir,
                 bootstrap_scheduling=bootstrap,
                 suspend_unstarted=suspend_unstarted,
+                priority_index=core_priority_index,
                 **reading_audio_kwargs,
             )
             created.append(path)

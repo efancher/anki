@@ -18,7 +18,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Sequence, Tuple
+from typing import List, NamedTuple, Optional, Sequence, Set, Tuple
 
 import genanki
 
@@ -113,6 +113,12 @@ _QA_PAIR_RE = re.compile(
     r"(?P<answer>[^<]*)</span></span>(?P<suffix>[\s\S]*?)</td>\s*</tr>",
     re.IGNORECASE,
 )
+_PART1_VOCABULARY_SECTION_RE = re.compile(
+    r'<h2 id="part1">Vocabulary used in this section</h2>(.*?)(?=<h2 id="part2">)',
+    re.IGNORECASE | re.DOTALL,
+)
+_VOCAB_LIST_ITEM_WITH_READING_RE = re.compile(r"^(.+?)【[^】]+】")
+_VOCAB_LIST_ITEM_TERM_RE = re.compile(r"^(.+?)\s+-\s+")
 
 
 class ExercisePageSpec(NamedTuple):
@@ -206,6 +212,36 @@ def _plain_text(fragment: str) -> str:
     text = _TAG_RE.sub("", fragment)
     text = html_module.unescape(text)
     return _WS_RE.sub(" ", text).strip()
+
+
+def vocabulary_term_from_list_item(text: str) -> Optional[str]:
+    """Extract the Japanese term from a part1 vocabulary list item."""
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    match = _VOCAB_LIST_ITEM_WITH_READING_RE.match(cleaned)
+    if match:
+        return match.group(1).strip()
+    match = _VOCAB_LIST_ITEM_TERM_RE.match(cleaned)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def parse_tae_kim_vocabulary_section(html_text: str) -> List[str]:
+    """Return deduplicated Japanese terms from the part1 vocabulary list on a practice page."""
+    match = _PART1_VOCABULARY_SECTION_RE.search(html_text)
+    if not match:
+        return []
+    terms: List[str] = []
+    seen: Set[str] = set()
+    for li_html in re.findall(r"<li>(.*?)</li>", match.group(1), re.IGNORECASE | re.DOTALL):
+        term = vocabulary_term_from_list_item(_plain_text(li_html))
+        if not term or term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return terms
 
 
 def _normalize_answer(answer: str) -> str:
@@ -603,6 +639,44 @@ def exercise_page_within_cap(
     if max_chapter != "basic":
         return True
     return parent.num <= max_lesson_num
+
+
+def collect_tae_kim_section_vocabulary_entries(
+    *,
+    max_tae_kim_section: int = 6,
+    max_tae_kim_lesson: Optional[str] = None,
+    refresh: bool = False,
+) -> List[Tuple[int, str]]:
+    """Map Tae Kim practice-page vocabulary lists to (lesson_order, term) pairs for core priority."""
+    from wk_study_priority import lesson_sort_key
+
+    lesson_cap: Optional[Tuple[str, int]] = None
+    if max_tae_kim_lesson:
+        lesson_cap = parse_tae_kim_lesson_cap(max_tae_kim_lesson)
+
+    entries: List[Tuple[int, str]] = []
+    for spec in load_tae_kim_exercise_page_specs():
+        if spec.skip:
+            continue
+        if not exercise_page_within_cap(
+            spec,
+            max_tae_kim_section=max_tae_kim_section,
+            lesson_cap=lesson_cap,
+        ):
+            continue
+        parent = tae_kim_lesson_by_slug(spec.chapter, spec.parent_lesson)
+        practice = tae_kim_lesson_by_slug(spec.chapter, spec.practice_lesson)
+        if parent is None:
+            continue
+        section = tae_kim_section_by_num(parent.section_num)
+        if section is None:
+            continue
+        lesson = practice or parent
+        order = lesson_sort_key(section.num, lesson.num)
+        html_text = fetch_tae_kim_exercise_html(spec.page, refresh=refresh)
+        for term in parse_tae_kim_vocabulary_section(html_text):
+            entries.append((order, term))
+    return entries
 
 
 def collect_tae_kim_exercise_cards(
