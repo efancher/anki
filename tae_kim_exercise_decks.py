@@ -200,6 +200,29 @@ def _strip_parenthetical_notes(text: str) -> str:
     return re.sub(r"\s*\([^)]+\)", "", text).strip()
 
 
+_SPEAKER_HINTS = {
+    "female": "Female speaker (omit だ)",
+    "male": "Male speaker (use だ)",
+}
+
+
+def _parenthetical_notes_from_html(fragment: str) -> List[str]:
+    plain = _plain_text(fragment)
+    return [note.strip() for note in re.findall(r"\(([^)]+)\)", plain) if note.strip()]
+
+
+def _answer_row_hint_notes(notes: Sequence[str]) -> str:
+    """Turn Tae Kim answer-row parentheticals into front-of-card hints."""
+    parts: List[str] = []
+    for note in notes:
+        key = note.strip().lower()
+        if key in _SPEAKER_HINTS:
+            parts.append(_SPEAKER_HINTS[key])
+        else:
+            parts.append(note.strip())
+    return " · ".join(parts)
+
+
 def _qa_hint_from_question(question_html: str) -> str:
     question_plain = _plain_text(question_html)
     match = re.search(r"Ｑ\d+）\s*(.+)", question_plain)
@@ -475,9 +498,13 @@ def _parse_qa_pairs(
         else:
             yes_no = ""
         prefix = f"{yes_no}、" if yes_no else ""
+        row_notes = _parenthetical_notes_from_html(match.group("suffix"))
+        row_hint = _answer_row_hint_notes(row_notes)
         full_sentence = _strip_parenthetical_notes(f"{prefix}{answer}{suffix}")
         cloze_sentence = _strip_parenthetical_notes(f"{prefix}{CLOZE_BLANK_DISPLAY}{suffix}")
         hint = _qa_hint_from_question(match.group("question"))
+        if row_hint:
+            hint = f"{hint} · {row_hint}"
         sentence_en = (
             f"{hint} — Yes"
             if yes_no == "うん"

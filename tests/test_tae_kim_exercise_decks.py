@@ -150,10 +150,42 @@ class TaeKimExerciseDeckTests(unittest.TestCase):
             formation="Noun + だ",
         )
         self.assertEqual(len(items), 2)
-        self.assertEqual(items[0].hint, "友達？")
+        self.assertEqual(items[0].hint, "友達？ · Female speaker (omit だ)")
         self.assertEqual(items[0].cloze_sentence, "うん、＿＿＿。")
         self.assertEqual(items[0].full_sentence, "うん、友達。")
         self.assertEqual(items[1].cloze_sentence, "ううん、＿＿＿。")
+
+    def test_parse_qa_pairs_child_female_speaker(self) -> None:
+        snippet = """
+<h2 id="part4">Question Answer Exercise</h2>
+<div id="exercise4">
+<table class="large" border="0" cellspacing="8">
+<tr><td>Ｑ８）　子供？</td></tr>
+<tr><td>Ａ８）　うん、<span class="answerline"><span class="hide">子供</span></span>。 <span style="font-size:.7em;">(female)</span></td></tr>
+</table>
+</div>
+<div class="botmenu"></div>
+"""
+        items = parse_tae_kim_exercise_page(snippet, page="copula_ex.html", formation="Noun + だ")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].type_expression, "子供")
+        self.assertIn("Female speaker", items[0].hint)
+
+    def test_parse_qa_pairs_male_speaker(self) -> None:
+        snippet = """
+<h2 id="part4">Question Answer Exercise</h2>
+<div id="exercise4">
+<table class="large" border="0" cellspacing="8">
+<tr><td>Ｑ４）　そう？</td></tr>
+<tr><td>Ａ４）　うん、<span class="answerline"><span class="hide">そうだ</span></span>。 <span style="font-size:.7em;">(male)</span></td></tr>
+</table>
+</div>
+<div class="botmenu"></div>
+"""
+        items = parse_tae_kim_exercise_page(snippet, page="copula_ex.html", formation="Noun + だ")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].type_expression, "そうだ")
+        self.assertIn("Male speaker", items[0].hint)
 
     def test_parse_inline_particle_cloze(self) -> None:
         items = parse_tae_kim_exercise_page(
