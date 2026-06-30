@@ -82,8 +82,13 @@ def save_snapshot(payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _home_deck_id(card) -> int:
+    odid = int(getattr(card, "odid", 0) or 0)
+    return odid if odid else int(card.did)
+
+
 def _deck_name_for_card(col, card) -> str:
-    return col.decks.name(card.did)
+    return col.decks.name(_home_deck_id(card))
 
 
 def _note_field_map(note) -> Dict[str, int]:
@@ -117,6 +122,11 @@ def gather_card_snapshots(col) -> List[CardSnapshot]:
                 continue
             seen.add(card_id)
             card = col.get_card(card_id)
+            home_id = _home_deck_id(card)
+            queue_id = int(card.did)
+            filtered_queue_name = None
+            if home_id != queue_id:
+                filtered_queue_name = col.decks.name(queue_id)
             snapshots.append(
                 CardSnapshot(
                     card_id=card_id,
@@ -128,6 +138,7 @@ def gather_card_snapshots(col) -> List[CardSnapshot]:
                     ivl=int(card.ivl),
                     reps=int(card.reps),
                     lapses=int(card.lapses),
+                    filtered_queue_deck_name=filtered_queue_name,
                 )
             )
     return snapshots

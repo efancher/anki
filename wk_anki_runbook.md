@@ -179,15 +179,21 @@ Open **desktop Anki periodically** if you study on mobile, so unlock passes sync
 
 ### Grammar / Tae Kim
 
-Read on guidetojapanese.org; review in grammar decks. Cap scope in [§5 Configuration](#5-configuration). When you finish a Tae Kim subsection, update **WK::Grammar · Current Tae Kim lesson** (or bump `grammar.max_tae_kim_lesson` in config, regenerate, rebuild filtered decks).
+Read on guidetojapanese.org; review in grammar decks. Cap scope in [§5 Configuration](#5-configuration). When you finish a Tae Kim subsection, bump `grammar.max_tae_kim_lesson` in config, regenerate, and run **WK Setup Filtered Decks** (updates **WK::Grammar · Current Tae Kim lesson** and **WK::Grammar Exercises · Current Tae Kim lesson** automatically).
+
+| Home deck | Filtered queue | Content |
+|-----------|----------------|---------|
+| **Japanese Grammar Context** | **WK::Grammar**, **WK::Grammar · Current Tae Kim lesson** | Hanabira / pattern clozes |
+| **Japanese Grammar Exercises** | **WK::Grammar Exercises**, **WK::Grammar Exercises · Current Tae Kim lesson** | Tae Kim site practice (`copula_ex.html`, etc.) |
+| **WaniKani Core *** | **WK::Tae Kim · Grammar Vocab / Prereq *** | WK kanji/vocab tagged for Tae Kim (not exercise cards) |
 
 ### Suggested daily order
 
 1. **WK::Core** filtered decks until empty (Radicals → Kanji → Vocabulary).
-2. **Tae Kim track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5** equivalents) while reading Tae Kim.
-3. **One** supplementary filtered deck if you have energy (dictation → vocab context → conjugations).
-4. **Grammar** cloze when it matches what you are reading in Tae Kim.
-5. On a new item: fail if you must, read the back once, move on — no separate WK “lesson” step.
+2. **Tae Kim WK track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5** equivalents) — these are **core** cards, not grammar exercises.
+3. **WK::Grammar Exercises** (or **· Current Tae Kim lesson**) while doing Tae Kim practice pages.
+4. **One** other supplementary filtered deck if you have energy (dictation → vocab context → conjugations).
+5. **WK::Grammar** (Context deck) for Hanabira pattern review when useful.
 
 Grammar is **not** gated by core kanji maturity today (see [§12](#12-tips--tuning)); use Tae Kim lesson caps and `max_unknown_kanji` instead.
 
@@ -267,8 +273,10 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::N5 · Prereq Radicals** | Radicals needed for N5 items (`tag:jlpt-n5-prereq tag:radical`) |
 | **WK::Vocab Context** | Production cloze |
 | **WK::Dictation** | Hear → type reading |
-| **WK::Grammar** | Basic Grammar subsections |
-| **WK::Grammar · Current Tae Kim lesson** | Edit search to match current lesson |
+| **WK::Grammar** | Hanabira pattern clozes (**Japanese Grammar Context**) |
+| **WK::Grammar · Current Tae Kim lesson** | Context cards for current reading lesson (from config cap) |
+| **WK::Grammar Exercises** | Tae Kim practice type-in (**Japanese Grammar Exercises**, up to lesson cap) |
+| **WK::Grammar Exercises · Current Tae Kim lesson** | Practice cards for current reading lesson only |
 | **WK::Phonetic Families** | Phonetic on'yomi drills |
 
 All searches use `-is:suspended`.

@@ -429,9 +429,9 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Grammar · Current Tae Kim lesson",
-        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-introduction-to-particles -is:suspended',
-        "limit": 20,
+        "name": "WK::Grammar Exercises",
+        "search": 'deck:"Japanese Grammar Exercises" tag:tae-kim-exercise -is:suspended',
+        "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
@@ -5602,10 +5602,17 @@ def append_run_history(output_dir: Path, row: Dict[str, Any]) -> Path:
     return path
 
 
-def write_filtered_deck_suggestions(output_dir: Path) -> Path:
+def write_filtered_deck_suggestions(
+    output_dir: Path,
+    *,
+    max_tae_kim_lesson: Optional[str] = None,
+) -> Path:
     path = output_dir / "anki_filtered_decks.txt"
     lines = ["Suggested Anki filtered decks", ""]
-    for index, deck in enumerate(FILTERED_DECK_DEFINITIONS, start=1):
+    for index, deck in enumerate(
+        effective_filtered_deck_definitions(max_tae_kim_lesson=max_tae_kim_lesson),
+        start=1,
+    ):
         lines.extend(
             [
                 f"{index}. {deck['name']}",
@@ -5633,23 +5640,91 @@ def write_filtered_deck_suggestions(output_dir: Path) -> Path:
     return path
 
 
-def normalized_filtered_deck_definitions() -> List[dict]:
+def _tae_kim_current_lesson_tag(max_tae_kim_lesson: str) -> Optional[str]:
+    """Lesson tag for the reading lesson referenced by a grammar cap string."""
+    from tae_kim_mapping import tae_kim_lesson_from_cap, tae_kim_lesson_tags
+
+    lesson = tae_kim_lesson_from_cap(max_tae_kim_lesson)
+    if lesson is None or not lesson.has_cards:
+        return None
+    return next(
+        (tag for tag in tae_kim_lesson_tags(lesson) if tag.startswith("tk-lesson-")),
+        None,
+    )
+
+
+def grammar_context_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Optional[dict]:
+    """Filtered deck for Hanabira/context grammar on the current reading lesson only."""
+    lesson_tag = _tae_kim_current_lesson_tag(max_tae_kim_lesson)
+    if lesson_tag is None:
+        return None
+    return {
+        "name": "WK::Grammar · Current Tae Kim lesson",
+        "search": (
+            f'deck:"{DECK_NAMES["grammar"]}" '
+            f"tag:{lesson_tag} -is:suspended"
+        ),
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    }
+
+
+def grammar_exercise_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Optional[dict]:
+    """Filtered deck for Tae Kim practice exercises on the current reading lesson only."""
+    lesson_tag = _tae_kim_current_lesson_tag(max_tae_kim_lesson)
+    if lesson_tag is None:
+        return None
+    return {
+        "name": "WK::Grammar Exercises · Current Tae Kim lesson",
+        "search": (
+            f'deck:"{DECK_NAMES["tae-kim-exercises"]}" '
+            f"tag:tae-kim-exercise tag:{lesson_tag} -is:suspended"
+        ),
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    }
+
+
+def effective_filtered_deck_definitions(
+    *,
+    max_tae_kim_lesson: Optional[str] = None,
+) -> List[dict]:
+    decks = list(FILTERED_DECK_DEFINITIONS)
+    if max_tae_kim_lesson:
+        for builder in (
+            grammar_context_current_lesson_filtered_deck,
+            grammar_exercise_current_lesson_filtered_deck,
+        ):
+            current = builder(max_tae_kim_lesson)
+            if current is not None:
+                decks.append(current)
+    return decks
+
+
+def normalized_filtered_deck_definitions(
+    *,
+    max_tae_kim_lesson: Optional[str] = None,
+) -> List[dict]:
     return [
         {
             **spec,
             "reschedule": spec.get("reschedule", FILTERED_DECK_RESCHEDULE_DEFAULT),
         }
-        for spec in FILTERED_DECK_DEFINITIONS
+        for spec in effective_filtered_deck_definitions(max_tae_kim_lesson=max_tae_kim_lesson)
     ]
 
 
-def write_filtered_decks_json(output_dir: Path) -> Path:
+def write_filtered_decks_json(
+    output_dir: Path,
+    *,
+    max_tae_kim_lesson: Optional[str] = None,
+) -> Path:
     path = output_dir / FILTERED_DECKS_JSON
     payload = {
         "generator_version": VERSION,
         "order_labels": {"relative_overdueness": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS},
         "reschedule_default": FILTERED_DECK_RESCHEDULE_DEFAULT,
-        "decks": normalized_filtered_deck_definitions(),
+        "decks": normalized_filtered_deck_definitions(max_tae_kim_lesson=max_tae_kim_lesson),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -7197,8 +7272,14 @@ def main() -> None:
             bundle_path,
             media_files=bundled_media_files or None,
         )
-    settings_path = write_filtered_deck_suggestions(output_dir)
-    filtered_json_path = write_filtered_decks_json(output_dir)
+    settings_path = write_filtered_deck_suggestions(
+        output_dir,
+        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+    )
+    filtered_json_path = write_filtered_decks_json(
+        output_dir,
+        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+    )
     deck_options_json_path = write_deck_options_json(
         output_dir,
         [deck.name for deck in built_decks],

@@ -17,6 +17,9 @@ from wk_decks import (
     FILTERED_DECK_DEFINITIONS,
     WK_SRS_STAGE_GURU_1,
     all_vocab_subjects,
+    effective_filtered_deck_definitions,
+    grammar_context_current_lesson_filtered_deck,
+    grammar_exercise_current_lesson_filtered_deck,
     passes_progress_filter,
     supplementary_import_tags,
     supplementary_min_srs,
@@ -138,6 +141,30 @@ class WkSupplementaryGatingTests(unittest.TestCase):
                 spec["search"],
                 msg=f"Missing -is:suspended in {spec['name']}",
             )
+        for spec in effective_filtered_deck_definitions(
+            max_tae_kim_lesson="introduction-to-particles",
+        ):
+            self.assertIn(
+                "-is:suspended",
+                spec["search"],
+                msg=f"Missing -is:suspended in {spec['name']}",
+            )
+
+    def test_current_tae_kim_lesson_filtered_decks_follow_config_cap(self) -> None:
+        context = grammar_context_current_lesson_filtered_deck("introduction-to-particles")
+        exercises = grammar_exercise_current_lesson_filtered_deck("introduction-to-particles")
+        self.assertIsNotNone(context)
+        self.assertIsNotNone(exercises)
+        self.assertIn("tag:tk-lesson-basic-introduction-to-particles", context["search"])
+        self.assertIn("Japanese Grammar Context", context["search"])
+        self.assertIn("tag:tk-lesson-basic-introduction-to-particles", exercises["search"])
+        self.assertIn("tag:tae-kim-exercise", exercises["search"])
+        self.assertIn("Japanese Grammar Exercises", exercises["search"])
+        names = [d["name"] for d in effective_filtered_deck_definitions(
+            max_tae_kim_lesson="introduction-to-particles",
+        )]
+        self.assertIn("WK::Grammar · Current Tae Kim lesson", names)
+        self.assertIn("WK::Grammar Exercises · Current Tae Kim lesson", names)
 
 
 if __name__ == "__main__":

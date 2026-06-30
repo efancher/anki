@@ -241,7 +241,7 @@ class TaeKimExerciseDeckTests(unittest.TestCase):
         parent = tae_kim_lesson_by_slug("basic", "expressing-state-of-being")
         self.assertIsNotNone(parent)
         for card in lesson_one:
-            self.assertEqual(card.tae_kim_lesson.slug, "state-of-being-practice")
+            self.assertEqual(card.tae_kim_lesson.slug, "expressing-state-of-being")
 
     def test_build_exercise_deck_bundles_audio(self) -> None:
         from tae_kim_exercise_decks import build_tae_kim_exercise_deck
@@ -264,7 +264,7 @@ class TaeKimExerciseDeckTests(unittest.TestCase):
             self.assertEqual(apkg_path.name, "wk_tae_kim_exercises.apkg")
             self.assertEqual(len(deck.notes), 1)
             self.assertEqual(len(media), 1)
-            self.assertTrue(deck.notes[0].fields[9].startswith("[sound:wk_tk_ex_"))
+            self.assertTrue(deck.notes[0].fields[9].startswith("[sound:wk_tts_"))
 
 
 if __name__ == "__main__":

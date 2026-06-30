@@ -42,6 +42,8 @@ EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::Dictation",
     "WK::Grammar",
     "WK::Grammar · Current Tae Kim lesson",
+    "WK::Grammar Exercises",
+    "WK::Grammar Exercises · Current Tae Kim lesson",
     "WK::Phonetic Families",
 )
 
@@ -62,6 +64,7 @@ class CardSnapshot:
     ivl: int
     reps: int
     lapses: int
+    filtered_queue_deck_name: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,14 @@ def note_has_tag(note: NoteSnapshot, tag: str) -> bool:
 
 def is_core_card(card: CardSnapshot) -> bool:
     return card.deck_name in CORE_DECK_NAMES
+
+
+def count_core_cards_in_filtered_queues(cards: Sequence[CardSnapshot]) -> int:
+    return sum(
+        1
+        for card in cards
+        if is_core_card(card) and card.filtered_queue_deck_name is not None
+    )
 
 
 def is_active_card(card: CardSnapshot) -> bool:
@@ -287,6 +298,13 @@ def build_health_report(
     report.add(SEVERITY_INFO, f"Core notes (tag:wk-core): {len(core_notes)}")
     report.add(SEVERITY_INFO, f"Core cards: {len(core_cards)}")
 
+    in_filtered = count_core_cards_in_filtered_queues(cards)
+    if in_filtered:
+        report.add(
+            SEVERITY_INFO,
+            f"{in_filtered} core cards currently in WK filtered queues (scheduling unchanged).",
+        )
+
     for deck_name in CORE_DECK_NAMES:
         counts = deck_counts_from_cards(cards, deck_name)
         if counts.new + counts.learn + counts.review + counts.relearning + counts.suspended == 0:
@@ -408,6 +426,8 @@ def format_health_report(report: HealthReport) -> str:
     body = "\n".join(f"{icon.get(line.severity, '?')} {line.message}" for line in report.lines)
     footer = (
         "\n\nTip: run again after import or WK Adjust New Limits. "
-        "Review-card and reps totals should not drop sharply unless you reset scheduling."
+        "Review-card and reps totals should not drop sharply unless you reset scheduling. "
+        "After WK Setup Filtered Decks, home deck counts may look lower while cards sit in "
+        "WK:: queues — metrics here use home decks and should stay stable."
     )
     return header + body + footer

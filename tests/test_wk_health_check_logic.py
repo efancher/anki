@@ -19,8 +19,10 @@ from logic import (  # noqa: E402
     build_collection_metrics,
     build_health_report,
     compare_metric_snapshots,
+    count_core_cards_in_filtered_queues,
     find_duplicate_wk_subject_ids,
     find_suspicious_scheduling_cards,
+    is_core_card,
     snapshot_payload,
 )
 
@@ -91,6 +93,47 @@ class WkHealthCheckLogicTests(unittest.TestCase):
         )
         messages = [line.message for line in report.lines]
         self.assertTrue(any("reps > 0" in message for message in messages))
+
+    def test_core_metrics_use_home_deck_not_filtered_queue(self) -> None:
+        home = _card(card_id=1, deck_name=CORE_KANJI_DECK, reps=5, ivl=10)
+        in_queue = _card(
+            card_id=2,
+            deck_name=CORE_KANJI_DECK,
+            filtered_queue_deck_name="WK::Core Kanji",
+            reps=3,
+            ivl=8,
+        )
+        misclassified = _card(
+            card_id=3,
+            deck_name="WK::Core Kanji",
+            reps=3,
+            ivl=8,
+        )
+        metrics = build_collection_metrics([home, in_queue, misclassified])
+        self.assertEqual(metrics.core_reps_total, 8)
+        self.assertEqual(metrics.core_review_cards, 2)
+        self.assertTrue(is_core_card(in_queue))
+        self.assertFalse(is_core_card(misclassified))
+        self.assertEqual(count_core_cards_in_filtered_queues([home, in_queue]), 1)
+
+    def test_health_report_notes_filtered_queue_cards(self) -> None:
+        cards = [
+            _card(
+                deck_name=CORE_KANJI_DECK,
+                filtered_queue_deck_name="WK::Core Kanji",
+            )
+        ]
+        report = build_health_report(
+            cards=cards,
+            notes=[NoteSnapshot(1, "a", CORE_KANJI_DECK, ("wk-core",), 1)],
+            deck_presets=[],
+            filtered_decks=[],
+            study_priority_path=None,
+            study_priority_subject_count=0,
+            collection_mod=None,
+        )
+        messages = [line.message for line in report.lines]
+        self.assertTrue(any("filtered queues" in message for message in messages))
 
 
 if __name__ == "__main__":

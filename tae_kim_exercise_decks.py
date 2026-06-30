@@ -729,7 +729,7 @@ def collect_tae_kim_exercise_cards(
                     type_expression=item.type_expression,
                     hint=item.hint,
                     tae_kim_section=section,
-                    tae_kim_lesson=practice or parent,
+                    tae_kim_lesson=parent,
                 )
             )
 

@@ -479,6 +479,12 @@ def tae_kim_card_tags(
     return tags
 
 
+def tae_kim_lesson_from_cap(value: str, *, default_chapter: str = "basic") -> Optional[TaeKimLesson]:
+    """Resolve the reading lesson referenced by a grammar lesson cap string."""
+    chapter, lesson_num = parse_tae_kim_lesson_cap(value, default_chapter=default_chapter)
+    return tae_kim_lesson(chapter, lesson_num)
+
+
 def tae_kim_section_within_cap(section_num: int, max_section: int) -> bool:
     """Include grammar from section 3 upward through max_section (reading-order cap)."""
     grammar_min = 3
