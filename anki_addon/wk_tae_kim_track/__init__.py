@@ -279,7 +279,7 @@ def bump_tae_kim_lesson() -> None:
     run_tae_kim_track_sync(quiet=False, update_filtered=True)
 
 
-def on_collection_loaded() -> None:
+def on_collection_did_load(col) -> None:
     config = load_track_config(create_from_template=False)
     if config is None or not config.auto_run_on_load:
         return
@@ -299,4 +299,4 @@ def add_menu_actions() -> None:
 
 
 gui_hooks.main_window_did_init.append(add_menu_actions)
-gui_hooks.collection_did_load.append(on_collection_loaded)
+gui_hooks.collection_did_load.append(on_collection_did_load)
