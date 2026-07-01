@@ -15,11 +15,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from wk_decks import (
     FILTERED_DECK_DEFINITIONS,
+    FILTERED_DECK_SEARCH_DUE_OR_NEW,
+    FILTERED_DECK_SEARCH_NOT_MATURE,
     WK_SRS_STAGE_GURU_1,
     all_vocab_subjects,
+    daily_filtered_deck_search,
     effective_filtered_deck_definitions,
     grammar_context_current_lesson_filtered_deck,
     grammar_exercise_current_lesson_filtered_deck,
+    prereq_filtered_deck_search,
     passes_progress_filter,
     supplementary_import_tags,
     supplementary_min_srs,
@@ -134,21 +138,51 @@ class WkSupplementaryGatingTests(unittest.TestCase):
         )
         self.assertEqual(intervals[2], 1)
 
-    def test_filtered_deck_searches_exclude_suspended(self) -> None:
+    def test_filtered_deck_searches_scope_daily_workload(self) -> None:
+        prereq_names = {
+            "WK::Tae Kim · Grammar Prereq Kanji",
+            "WK::Tae Kim · Grammar Prereq Radicals",
+            "WK::N5 · Prereq Kanji",
+            "WK::N5 · Prereq Radicals",
+        }
         for spec in FILTERED_DECK_DEFINITIONS:
+            self.assertIn(
+                FILTERED_DECK_SEARCH_DUE_OR_NEW,
+                spec["search"],
+                msg=f"Missing due/new scope in {spec['name']}",
+            )
             self.assertIn(
                 "-is:suspended",
                 spec["search"],
                 msg=f"Missing -is:suspended in {spec['name']}",
             )
+            if spec["name"] in prereq_names:
+                self.assertIn(
+                    FILTERED_DECK_SEARCH_NOT_MATURE,
+                    spec["search"],
+                    msg=f"Missing wk-mature exclusion in {spec['name']}",
+                )
+            else:
+                self.assertNotIn(
+                    FILTERED_DECK_SEARCH_NOT_MATURE,
+                    spec["search"],
+                    msg=f"Unexpected wk-mature exclusion in {spec['name']}",
+                )
         for spec in effective_filtered_deck_definitions(
             max_tae_kim_lesson="introduction-to-particles",
         ):
-            self.assertIn(
-                "-is:suspended",
-                spec["search"],
-                msg=f"Missing -is:suspended in {spec['name']}",
-            )
+            self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, spec["search"])
+
+    def test_prereq_filtered_deck_search_helper(self) -> None:
+        search = prereq_filtered_deck_search("tag:wk-core tag:tk-grammar-prereq tag:kanji")
+        self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, search)
+        self.assertIn(FILTERED_DECK_SEARCH_NOT_MATURE, search)
+        self.assertIn("-is:suspended", search)
+
+    def test_daily_filtered_deck_search_helper(self) -> None:
+        search = daily_filtered_deck_search('deck:"WaniKani Core · Kanji"')
+        self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, search)
+        self.assertNotIn(FILTERED_DECK_SEARCH_NOT_MATURE, search)
 
     def test_current_tae_kim_lesson_filtered_decks_follow_config_cap(self) -> None:
         context = grammar_context_current_lesson_filtered_deck("introduction-to-particles")

@@ -354,89 +354,140 @@ FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
 # Core daily queues must reschedule (FSRS updates on home deck). If reschedule is off,
 # Good/Easy show "(end)" and reviews do not stick.
 FILTERED_DECK_RESCHEDULE_DEFAULT = True
+# Only cards that need action today — avoids "review ahead" with little scheduling benefit.
+FILTERED_DECK_SEARCH_DUE_OR_NEW = "(is:due OR is:new)"
+FILTERED_DECK_SEARCH_NOT_SUSPENDED = "-is:suspended"
+# wk_unlock tags Guru I+ subjects (interval ≥ 7d on all card types) as wk-mature.
+FILTERED_DECK_SEARCH_NOT_MATURE = "-tag:wk-mature"
+
+
+def filtered_deck_search(*parts: str) -> str:
+    """Join Anki search clauses for a filtered-deck definition."""
+    return " ".join(part for part in parts if part)
+
+
+def daily_filtered_deck_search(*clauses: str) -> str:
+    """Due/new cards only — matches Anki guidance for reschedule-on filtered decks."""
+    return filtered_deck_search(
+        *clauses,
+        FILTERED_DECK_SEARCH_DUE_OR_NEW,
+        FILTERED_DECK_SEARCH_NOT_SUSPENDED,
+    )
+
+
+def prereq_filtered_deck_search(*tag_clauses: str) -> str:
+    """Prereq chain decks: still-needed items only (not already Guru / wk-mature)."""
+    return filtered_deck_search(
+        *tag_clauses,
+        FILTERED_DECK_SEARCH_DUE_OR_NEW,
+        FILTERED_DECK_SEARCH_NOT_MATURE,
+        FILTERED_DECK_SEARCH_NOT_SUSPENDED,
+    )
+
 
 FILTERED_DECK_DEFINITIONS = [
     {
         "name": "WK::Core Radicals",
-        "search": 'deck:"WaniKani Core · Radicals" -is:suspended',
+        "search": daily_filtered_deck_search('deck:"WaniKani Core · Radicals"'),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Core Kanji",
-        "search": 'deck:"WaniKani Core · Kanji" -is:suspended',
+        "search": daily_filtered_deck_search('deck:"WaniKani Core · Kanji"'),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Core Vocabulary",
-        "search": 'deck:"WaniKani Core · Vocabulary" -is:suspended',
+        "search": daily_filtered_deck_search('deck:"WaniKani Core · Vocabulary"'),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Tae Kim · Grammar Vocab",
-        "search": 'tag:wk-core tag:tk-grammar-vocab -is:suspended',
+        "search": daily_filtered_deck_search(
+            "tag:wk-core tag:tk-grammar-vocab",
+        ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Tae Kim · Grammar Prereq Kanji",
-        "search": 'tag:wk-core tag:tk-grammar-prereq tag:kanji -is:suspended',
+        "search": prereq_filtered_deck_search(
+            "tag:wk-core tag:tk-grammar-prereq tag:kanji",
+        ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Tae Kim · Grammar Prereq Radicals",
-        "search": 'tag:wk-core tag:tk-grammar-prereq tag:radical -is:suspended',
+        "search": prereq_filtered_deck_search(
+            "tag:wk-core tag:tk-grammar-prereq tag:radical",
+        ),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::N5 · Kanji & Vocab",
-        "search": 'tag:wk-core tag:jlpt-n5-vocab -is:suspended',
+        "search": daily_filtered_deck_search(
+            "tag:wk-core tag:jlpt-n5-vocab",
+        ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::N5 · Prereq Kanji",
-        "search": 'tag:wk-core tag:jlpt-n5-prereq tag:kanji -is:suspended',
+        "search": prereq_filtered_deck_search(
+            "tag:wk-core tag:jlpt-n5-prereq tag:kanji",
+        ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::N5 · Prereq Radicals",
-        "search": 'tag:wk-core tag:jlpt-n5-prereq tag:radical -is:suspended',
+        "search": prereq_filtered_deck_search(
+            "tag:wk-core tag:jlpt-n5-prereq tag:radical",
+        ),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Vocab Context",
-        "search": 'deck:"WaniKani Vocabulary Context" -is:suspended',
+        "search": daily_filtered_deck_search('deck:"WaniKani Vocabulary Context"'),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Dictation",
-        "search": 'deck:"WaniKani Dictation" -is:suspended',
+        "search": daily_filtered_deck_search('deck:"WaniKani Dictation"'),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Grammar",
-        "search": 'deck:"Japanese Grammar Context" tag:tk-lesson-basic-expressing-state-of-being OR tag:tk-lesson-basic-introduction-to-particles OR tag:tk-lesson-basic-adjectives -is:suspended',
+        "search": daily_filtered_deck_search(
+            'deck:"Japanese Grammar Context" '
+            "(tag:tk-lesson-basic-expressing-state-of-being OR "
+            "tag:tk-lesson-basic-introduction-to-particles OR "
+            "tag:tk-lesson-basic-adjectives)",
+        ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Grammar Exercises",
-        "search": 'deck:"Japanese Grammar Exercises" tag:tae-kim-exercise -is:suspended',
+        "search": daily_filtered_deck_search(
+            'deck:"Japanese Grammar Exercises" tag:tae-kim-exercise',
+        ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Phonetic Families",
-        "search": 'deck:"WaniKani Phonetic Families" tag:priority-low -is:suspended',
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Phonetic Families" tag:priority-low',
+        ),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
@@ -5660,9 +5711,8 @@ def grammar_context_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Opt
         return None
     return {
         "name": "WK::Grammar · Current Tae Kim lesson",
-        "search": (
-            f'deck:"{DECK_NAMES["grammar"]}" '
-            f"tag:{lesson_tag} -is:suspended"
+        "search": daily_filtered_deck_search(
+            f'deck:"{DECK_NAMES["grammar"]}" tag:{lesson_tag}',
         ),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
@@ -5676,9 +5726,9 @@ def grammar_exercise_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Op
         return None
     return {
         "name": "WK::Grammar Exercises · Current Tae Kim lesson",
-        "search": (
+        "search": daily_filtered_deck_search(
             f'deck:"{DECK_NAMES["tae-kim-exercises"]}" '
-            f"tag:tae-kim-exercise tag:{lesson_tag} -is:suspended"
+            f"tag:tae-kim-exercise tag:{lesson_tag}",
         ),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,

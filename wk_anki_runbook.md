@@ -266,11 +266,11 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 |------|---------|
 | **WK::Core Radicals / Kanji / Vocabulary** | Daily core review |
 | **WK::Tae Kim · Grammar Vocab** | Kanji/vocab in Tae Kim lesson text (`tag:tk-grammar-vocab`) |
-| **WK::Tae Kim · Grammar Prereq Kanji** | Kanji needed to unlock grammar vocab (`tag:tk-grammar-prereq tag:kanji`) |
-| **WK::Tae Kim · Grammar Prereq Radicals** | Radicals for grammar chain (`tag:tk-grammar-prereq tag:radical`) |
+| **WK::Tae Kim · Grammar Prereq Kanji** | Kanji still needed for grammar vocab (`tk-grammar-prereq`, not yet `wk-mature`) |
+| **WK::Tae Kim · Grammar Prereq Radicals** | Radicals still needed for grammar chain (`tk-grammar-prereq`, not yet `wk-mature`) |
 | **WK::N5 · Kanji & Vocab** | WK levels 1–10 band (`tag:jlpt-n5-vocab`) |
-| **WK::N5 · Prereq Kanji** | Kanji needed for N5 items (`tag:jlpt-n5-prereq tag:kanji`) |
-| **WK::N5 · Prereq Radicals** | Radicals needed for N5 items (`tag:jlpt-n5-prereq tag:radical`) |
+| **WK::N5 · Prereq Kanji** | Kanji still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
+| **WK::N5 · Prereq Radicals** | Radicals still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
 | **WK::Vocab Context** | Production cloze |
 | **WK::Dictation** | Hear → type reading |
 | **WK::Grammar** | Hanabira pattern clozes (**Japanese Grammar Context**) |
@@ -279,7 +279,7 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::Grammar Exercises · Current Tae Kim lesson** | Practice cards for current reading lesson only |
 | **WK::Phonetic Families** | Phonetic on'yomi drills |
 
-All searches use `-is:suspended`.
+All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only — no review-ahead), and **Relative overdueness** ordering. **Prereq** decks also use `-tag:wk-mature` so Guru I+ items (interval ≥ 7d on all card types, tagged by **wk_unlock**) drop out once they satisfy the chain.
 
 ---
 
@@ -337,6 +337,7 @@ You finished core for the day, then imported and ran **WK Setup Filtered Decks**
 | **Unlock pass** | **wk_unlock** on load unsuspends eligible `wk-locked` cards → they become **New**. |
 | **Bootstrap re-import** | If `"core.bootstrap_scheduling": true` in config, re-import can re-apply WK intervals and fight FSRS. Set it **`false`** after your one-time migration. |
 | **Reschedule in filtered decks** | Must be **on** for daily WK filtered decks. If off, Good/Easy show **(end)** and FSRS does not update — see below. |
+| **Review-ahead in filtered decks** | Searches use `(is:due OR is:new)` so rebuilds do not pull far-future reviews (little scheduling benefit per Anki manual). Order is **Relative overdueness** among that set. |
 
 **What to do**
 
