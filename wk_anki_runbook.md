@@ -52,7 +52,7 @@ Also need **ffmpeg** on `PATH` for reading audio and dictation (macOS: `brew ins
 
 ### Anki add-ons (desktop, required)
 
-Five add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
+Six add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
 
 **Manual install or one-time setup** (any platform):
 
@@ -74,12 +74,13 @@ Disable auto-sync: `"sync_anki_addons": false` in config, or pass `--no-sync-add
 | `wk_unlock` | **WK Run Unlock Pass** |
 | `wk_adaptive_new` | **WK Adjust New Limits** |
 | `wk_health_check` | **WK Health Check** |
+| `wk_tae_kim_track` | **WK Sync Tae Kim Track**, **WK Bump Tae Kim Lesson** |
 
-**Optional (dev):** symlink the five folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
+**Optional (dev):** symlink the six folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
 
 ### Second machine (work desktop, etc.)
 
-AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered decks, tags) but **not** add-on code. Each desktop needs a **one-time** install of all five add-ons.
+AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered decks, tags) but **not** add-on code. Each desktop needs a **one-time** install of all six add-ons.
 
 | Syncs via AnkiWeb | Local install required |
 |-------------------|------------------------|
@@ -105,7 +106,7 @@ AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered dec
    .\scripts\sync_anki_addons.sh
    ```
 
-3. **Verify** the four **Tools → WK …** menu items appear after restart.
+3. **Verify** the **Tools → WK …** menu items appear after restart (including **WK Sync Tae Kim Track**).
 
 After that, use normal Anki sync. Unlock passes and adaptive new limits **run only on machines where the add-ons are installed** — run **WK Run Unlock Pass** / **WK Adjust New Limits** on any desktop before syncing if you want those effects everywhere without opening the other machine.
 
@@ -179,7 +180,7 @@ Open **desktop Anki periodically** if you study on mobile, so unlock passes sync
 
 ### Grammar / Tae Kim
 
-Read on guidetojapanese.org; review in grammar decks. Cap scope in [§5 Configuration](#5-configuration). When you finish a Tae Kim subsection, bump `grammar.max_tae_kim_lesson` in config, regenerate, and run **WK Setup Filtered Decks** (updates **WK::Grammar · Current Tae Kim lesson** and **WK::Grammar Exercises · Current Tae Kim lesson** automatically).
+Read on guidetojapanese.org; review in grammar decks. Cap exercise deck scope in [§5 Configuration](#5-configuration). **Grammar role tags** (`tk-grammar-vocab`, `tk-grammar-prereq`) are applied at **runtime** by **wk_tae_kim_track** — not on each re-import. After your first regenerate with the track map, copy `out/wk_tae_kim_track_config.json` into your profile (the add-on does this on first sync), then use **Tools → WK Sync Tae Kim Track** or **WK Bump Tae Kim Lesson** when you finish a subsection (updates **WK::Grammar · Current Tae Kim lesson** and **WK::Grammar Exercises · Current Tae Kim lesson** automatically).
 
 | Home deck | Filtered queue | Content |
 |-----------|----------------|---------|
@@ -211,7 +212,8 @@ Then in Anki:
 1. Import `out/wk_all.apkg` → update note types / merge notes.
 2. **Tools → WK Apply Deck Options** (if new decks appeared).
 3. **Tools → WK Setup Filtered Decks**.
-4. **Tools → WK Run Unlock Pass** (optional; also on collection load).
+4. **Tools → WK Sync Tae Kim Track** (first time after track-map regenerate; also runs on collection load).
+5. **Tools → WK Run Unlock Pass** (optional; also on collection load).
 
 **Do not re-import to refresh unlock state** — that is **wk_unlock**’s job.
 
@@ -333,7 +335,7 @@ You finished core for the day, then imported and ran **WK Setup Filtered Decks**
 | Cause | What happened |
 |-------|----------------|
 | **More filtered decks** | Each `WK::…` deck shows its own queue (up to its limit). Six Tae Kim/N5 decks can each list ~20 cards — often the **same** physical cards you already saw in `WK::Core *`, not six times more work. |
-| **New tags on re-import** | `tk-grammar-*` / `jlpt-n5-*` tags route cards into new filtered searches they did not match before. |
+| **New tags on re-import** | `jlpt-n5-*` tags route cards into new filtered searches they did not match before. `tk-grammar-*` tags change via **wk_tae_kim_track**, not import. |
 | **Unlock pass** | **wk_unlock** on load unsuspends eligible `wk-locked` cards → they become **New**. |
 | **Bootstrap re-import** | If `"core.bootstrap_scheduling": true` in config, re-import can re-apply WK intervals and fight FSRS. Set it **`false`** after your one-time migration. |
 | **Reschedule in filtered decks** | Must be **on** for daily WK filtered decks. If off, Good/Easy show **(end)** and FSRS does not update — see below. |
@@ -391,14 +393,14 @@ Example: with defaults, **0 due reviews** → up to **15** new (radicals first);
 
 Study core via **WK::Core \*** filtered decks as usual; Anki’s per-deck **new/day** limits enforce the allocation.
 
-**JLPT + Tae Kim priority:** regenerate writes `out/wk_study_priority.json`. **Tae Kim links use the “Vocabulary used in this section” list on each practice page** (part1 of guidetojapanese `*_ex.html` pages up to your lesson cap — not production-exercise context sentences or Hanabira grammar examples). Core notes get split tags for filtered decks:
+**JLPT + Tae Kim priority:** regenerate writes `out/wk_study_priority.json` and `out/wk_tae_kim_track_map.json`. **Tae Kim links use the “Vocabulary used in this section” list on each practice page** (part1 of guidetojapanese `*_ex.html` pages through your section cap — not production-exercise context sentences or Hanabira grammar examples). Core notes get JLPT split tags at import; **Tae Kim grammar role tags are runtime-only**:
 
-| Tag | Meaning |
-|-----|---------|
-| `tk-grammar-vocab` | Kanji/vocab in Tae Kim **exercise** text |
-| `tk-grammar-prereq` | Radicals/kanji needed for those |
-| `jlpt-n5-vocab` | Kanji/vocab at WK levels 1–10 (N5 band) |
-| `jlpt-n5-prereq` | Radicals/kanji needed for N5 items |
+| Tag | Meaning | Applied |
+|-----|---------|---------|
+| `tk-grammar-vocab` | Kanji/vocab in Tae Kim section vocabulary lists | **wk_tae_kim_track** (profile `wk_tae_kim_track.json`) |
+| `tk-grammar-prereq` | Radicals/kanji needed for those | **wk_tae_kim_track** |
+| `jlpt-n5-vocab` | Kanji/vocab at WK levels 1–10 (N5 band) | import |
+| `jlpt-n5-prereq` | Radicals/kanji needed for N5 items | import |
 
 **WK Adjust New Limits** reorders new cards in all three core decks when that file is present.
 

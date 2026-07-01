@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "anki_addon" / "wk_adaptive_new"))
+LOGIC_PATH = REPO_ROOT / "anki_addon" / "wk_adaptive_new" / "logic.py"
 
-from logic import (  # noqa: E402
-    TierAvailability,
-    allocate_new_by_priority,
-    build_tier_plan,
-    compute_new_budget,
-    WkAdaptiveNewConfig,
-)
+
+def _load_logic_module():
+    spec = importlib.util.spec_from_file_location("wk_adaptive_new_logic", LOGIC_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["wk_adaptive_new_logic"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+logic = _load_logic_module()
+TierAvailability = logic.TierAvailability
+allocate_new_by_priority = logic.allocate_new_by_priority
+build_tier_plan = logic.build_tier_plan
+compute_new_budget = logic.compute_new_budget
+WkAdaptiveNewConfig = logic.WkAdaptiveNewConfig
 
 
 class WkAdaptiveNewLogicTests(unittest.TestCase):

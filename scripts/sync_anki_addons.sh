@@ -21,13 +21,14 @@ WK_ADDONS=(
   wk_unlock
   wk_adaptive_new
   wk_health_check
+  wk_tae_kim_track
 )
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--dry-run]
 
-  Sync anki_addon/{wk_deck_options,wk_filtered_decks,wk_unlock,wk_adaptive_new,wk_health_check}
+  Sync anki_addon/{wk_deck_options,wk_filtered_decks,wk_unlock,wk_adaptive_new,wk_health_check,wk_tae_kim_track}
   into Anki's add-ons directory (rsync, removes stale files).
 
   Set ANKI_ADDONS_DIR to override the destination.

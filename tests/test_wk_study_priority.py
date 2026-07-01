@@ -9,6 +9,7 @@ from tae_kim_mapping import TaeKimLesson, TaeKimSection
 from wk_study_priority import (
     build_core_priority_index,
     build_tae_kim_subject_orders,
+    build_tae_kim_track_map,
     jlpt_sort_rank,
     priority_score_for,
     priority_tags,
@@ -268,6 +269,54 @@ class WkStudyPriorityTests(unittest.TestCase):
         self.assertNotIn(1020, orders)
         self.assertNotIn(3991, orders)
         self.assertNotIn(3436, orders)
+
+    def test_build_tae_kim_track_map_splits_direct_and_prereq(self) -> None:
+        radical = {
+            "id": 100,
+            "object": "radical",
+            "data": {"characters": "学", "level": 1},
+        }
+        kanji = {
+            "id": 1,
+            "object": "kanji",
+            "data": {"characters": "学", "level": 8, "component_subject_ids": [100]},
+        }
+        vocab = {
+            "id": 30,
+            "object": "vocabulary",
+            "data": {"characters": "学生", "level": 5, "component_subject_ids": [1]},
+        }
+        vocabulary_by_lesson = {
+            "expressing-state-of-being": [(30001, "学生")],
+        }
+        track_map = build_tae_kim_track_map(
+            [radical],
+            [kanji],
+            [vocab],
+            vocabulary_by_lesson,
+            reading_lesson_order=["expressing-state-of-being", "introduction-to-particles"],
+        )
+        self.assertEqual(track_map["reading_lessons"], ["expressing-state-of-being"])
+        lesson = track_map["lessons"]["expressing-state-of-being"]
+        self.assertIn(30, lesson["direct_subject_ids"])
+        self.assertIn(1, lesson["prereq_subject_ids"])
+        self.assertIn(100, lesson["prereq_subject_ids"])
+        self.assertNotIn(30, lesson["prereq_subject_ids"])
+
+    def test_priority_tags_omit_grammar_role_when_disabled(self) -> None:
+        from wk_study_priority import TK_GRAMMAR_VOCAB_TAG, SubjectPriority
+
+        entry = SubjectPriority(
+            subject_id=1,
+            wk_level=5,
+            jlpt="N5",
+            priority_score=0,
+            tae_kim_order=30001,
+            tae_kim_direct=True,
+        )
+        tags = priority_tags(entry, subject_object="vocabulary", include_grammar_role_tags=False)
+        self.assertNotIn(TK_GRAMMAR_VOCAB_TAG, tags)
+        self.assertIn("tk-priority-30001", tags)
 
 
 if __name__ == "__main__":

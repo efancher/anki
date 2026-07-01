@@ -485,6 +485,69 @@ def tae_kim_lesson_from_cap(value: str, *, default_chapter: str = "basic") -> Op
     return tae_kim_lesson(chapter, lesson_num)
 
 
+def tae_kim_reading_lessons_for_chapter(chapter_slug: str) -> List[TaeKimLesson]:
+    """Reading lessons (has_cards) in sidebar order for a chapter."""
+    return sorted(
+        (lesson for lesson in tae_kim_lessons_for_chapter(chapter_slug) if lesson.has_cards),
+        key=lambda lesson: lesson.num,
+    )
+
+
+def tae_kim_next_reading_lesson_from_cap(
+    value: str,
+    *,
+    default_chapter: str = "basic",
+    lookahead: int = 1,
+) -> Optional[TaeKimLesson]:
+    """Next reading lesson after the cap — for ahead-of-lesson prerequisite study."""
+    if lookahead <= 0:
+        return None
+    chapter, lesson_num = parse_tae_kim_lesson_cap(value, default_chapter=default_chapter)
+    reading_lessons = tae_kim_reading_lessons_for_chapter(chapter)
+    for index, lesson in enumerate(reading_lessons):
+        if lesson.num != lesson_num:
+            continue
+        next_index = index + lookahead
+        if next_index < len(reading_lessons):
+            return reading_lessons[next_index]
+        return None
+    return None
+
+
+def tae_kim_reading_lesson_slugs(chapter_slug: str = "basic") -> List[str]:
+    return [lesson.slug for lesson in tae_kim_reading_lessons_for_chapter(chapter_slug)]
+
+
+def tae_kim_active_and_ahead_lessons(
+    cap_slug: str,
+    reading_lessons: Sequence[str],
+    *,
+    ahead_prereq_lessons: int = 0,
+    chapter: str = "basic",
+) -> Tuple[List[str], List[str]]:
+    """Reading lessons through cap (active) and the next N slugs (ahead prereq only)."""
+    ordered = list(reading_lessons) or tae_kim_reading_lesson_slugs(chapter)
+    cap_index = -1
+    for index, slug in enumerate(ordered):
+        if slug == cap_slug:
+            cap_index = index
+            break
+    if cap_index < 0:
+        cap = tae_kim_lesson_by_slug(chapter, cap_slug)
+        if cap is None:
+            return [], []
+        for index, slug in enumerate(ordered):
+            lesson = tae_kim_lesson_by_slug(chapter, slug)
+            if lesson is not None and lesson.num == cap.num:
+                cap_index = index
+                break
+    if cap_index < 0:
+        return [], []
+    active = ordered[: cap_index + 1]
+    ahead = ordered[cap_index + 1 : cap_index + 1 + max(0, ahead_prereq_lessons)]
+    return active, ahead
+
+
 def tae_kim_section_within_cap(section_num: int, max_section: int) -> bool:
     """Include grammar from section 3 upward through max_section (reading-order cap)."""
     grammar_min = 3

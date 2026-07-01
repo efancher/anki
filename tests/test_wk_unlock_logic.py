@@ -2,27 +2,36 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WK_UNLOCK_DIR = REPO_ROOT / "anki_addon" / "wk_unlock"
-if str(WK_UNLOCK_DIR) not in sys.path:
-    sys.path.insert(0, str(WK_UNLOCK_DIR))
+LOGIC_PATH = REPO_ROOT / "anki_addon" / "wk_unlock" / "logic.py"
 
-from logic import (  # noqa: E402
-    ANKI_QUEUE_SUSPENDED,
-    CardState,
-    NoteUnlockState,
-    WkUnlockConfig,
-    build_mature_subject_ids,
-    card_meets_maturity,
-    parse_prerequisite_ids,
-    prerequisites_met,
-    subject_is_mature,
-    unlock_actions_for_notes,
-)
+
+def _load_logic_module():
+    spec = importlib.util.spec_from_file_location("wk_unlock_logic", LOGIC_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["wk_unlock_logic"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+logic = _load_logic_module()
+ANKI_QUEUE_SUSPENDED = logic.ANKI_QUEUE_SUSPENDED
+CardState = logic.CardState
+NoteUnlockState = logic.NoteUnlockState
+WkUnlockConfig = logic.WkUnlockConfig
+build_mature_subject_ids = logic.build_mature_subject_ids
+card_meets_maturity = logic.card_meets_maturity
+parse_prerequisite_ids = logic.parse_prerequisite_ids
+prerequisites_met = logic.prerequisites_met
+subject_is_mature = logic.subject_is_mature
+unlock_actions_for_notes = logic.unlock_actions_for_notes
+supplementary_unlock_actions_for_notes = logic.supplementary_unlock_actions_for_notes
 
 
 class WkUnlockLogicTests(unittest.TestCase):
@@ -99,8 +108,6 @@ class WkUnlockLogicTests(unittest.TestCase):
         self.assertEqual(actions, [])
 
     def test_supplementary_unlock_when_linked_vocab_mature(self) -> None:
-        from logic import supplementary_unlock_actions_for_notes
-
         cloze = NoteUnlockState(
             note_id=3,
             wk_subject_id=100,
@@ -115,8 +122,6 @@ class WkUnlockLogicTests(unittest.TestCase):
         self.assertIn("wk-locked", actions[0].remove_tags)
 
     def test_supplementary_no_unlock_when_vocab_not_mature(self) -> None:
-        from logic import supplementary_unlock_actions_for_notes
-
         cloze = NoteUnlockState(
             note_id=3,
             wk_subject_id=100,

@@ -6908,14 +6908,25 @@ def main() -> None:
         )
     core_priority_index: Dict[int, object] = {}
     if "core-radical" in wanted or "core-kanji" in wanted or "core-vocabulary" in wanted:
-        from wk_study_priority import build_core_priority_index, write_study_priority_json
-        from tae_kim_exercise_decks import collect_tae_kim_section_vocabulary_entries
+        from tae_kim_exercise_decks import collect_tae_kim_vocabulary_by_reading_lesson
+        from tae_kim_mapping import tae_kim_reading_lesson_slugs
+        from wk_study_priority import (
+            build_core_priority_index,
+            build_tae_kim_track_map,
+            write_study_priority_json,
+            write_tae_kim_track_config_template,
+            write_tae_kim_track_map,
+        )
 
-        tae_kim_priority_entries = collect_tae_kim_section_vocabulary_entries(
+        vocabulary_by_lesson = collect_tae_kim_vocabulary_by_reading_lesson(
             max_tae_kim_section=args.grammar_max_tae_kim_section,
-            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
             refresh=args.refresh_cache,
         )
+        tae_kim_priority_entries = [
+            entry
+            for entries in vocabulary_by_lesson.values()
+            for entry in entries
+        ]
         core_priority_index = build_core_priority_index(
             core_radical_items,
             core_kanji_items,
@@ -6923,9 +6934,26 @@ def main() -> None:
             tae_kim_priority_entries=tae_kim_priority_entries,
         )
         priority_path = write_study_priority_json(output_dir, core_priority_index)
+        track_map = build_tae_kim_track_map(
+            core_radical_items,
+            core_kanji_items,
+            core_vocab_items,
+            vocabulary_by_lesson,
+            reading_lesson_order=tae_kim_reading_lesson_slugs(),
+        )
+        track_map_path = write_tae_kim_track_map(output_dir, track_map)
+        track_config_path = write_tae_kim_track_config_template(
+            output_dir,
+            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
+        )
         print(
             f"Core study priority: {priority_path} ({len(core_priority_index)} subjects, "
             f"{len(tae_kim_priority_entries)} Tae Kim section vocabulary terms)"
+        )
+        print(
+            f"Tae Kim track map: {track_map_path} "
+            f"({len(track_map.get('reading_lessons') or [])} reading lessons); "
+            f"config template: {track_config_path}"
         )
     print(f"Eligible vocab: {len(vocab_items)}")
     print(f"Eligible kanji: {len(kanji_items)}")
@@ -7084,6 +7112,7 @@ def main() -> None:
                 bootstrap_scheduling=bootstrap,
                 suspend_unstarted=suspend_unstarted,
                 priority_index=core_priority_index,
+                include_grammar_role_tags=False,
             )
             created.append(path)
             built_decks.append(deck)
@@ -7096,6 +7125,7 @@ def main() -> None:
                 bootstrap_scheduling=bootstrap,
                 suspend_unstarted=suspend_unstarted,
                 priority_index=core_priority_index,
+                include_grammar_role_tags=False,
                 **reading_audio_kwargs,
             )
             created.append(path)
@@ -7109,6 +7139,7 @@ def main() -> None:
                 bootstrap_scheduling=bootstrap,
                 suspend_unstarted=suspend_unstarted,
                 priority_index=core_priority_index,
+                include_grammar_role_tags=False,
                 **reading_audio_kwargs,
             )
             created.append(path)

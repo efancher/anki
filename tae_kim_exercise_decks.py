@@ -18,7 +18,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 import genanki
 
@@ -704,6 +704,62 @@ def collect_tae_kim_section_vocabulary_entries(
         for term in parse_tae_kim_vocabulary_section(html_text):
             entries.append((order, term))
     return entries
+
+
+def collect_tae_kim_section_vocabulary_for_reading_lesson(
+    lesson: TaeKimLesson,
+    *,
+    refresh: bool = False,
+) -> List[Tuple[int, str]]:
+    """Vocabulary list from the practice page tied to one reading lesson (for ahead prereqs)."""
+    from wk_study_priority import lesson_sort_key
+
+    entries: List[Tuple[int, str]] = []
+    for spec in load_tae_kim_exercise_page_specs():
+        if spec.skip or spec.parent_lesson != lesson.slug:
+            continue
+        parent = tae_kim_lesson_by_slug(spec.chapter, spec.parent_lesson)
+        practice = tae_kim_lesson_by_slug(spec.chapter, spec.practice_lesson)
+        if parent is None:
+            continue
+        section = tae_kim_section_by_num(parent.section_num)
+        if section is None:
+            continue
+        lesson_for_order = practice or parent
+        order = lesson_sort_key(section.num, lesson_for_order.num)
+        html_text = fetch_tae_kim_exercise_html(spec.page, refresh=refresh)
+        for term in parse_tae_kim_vocabulary_section(html_text):
+            entries.append((order, term))
+    return entries
+
+
+def collect_tae_kim_vocabulary_by_reading_lesson(
+    *,
+    max_tae_kim_section: int = 6,
+    refresh: bool = False,
+) -> Dict[str, List[Tuple[int, str]]]:
+    """Map each reading lesson slug to part1 vocabulary (lesson_order, term) pairs."""
+    from collections import defaultdict
+
+    from wk_study_priority import lesson_sort_key
+
+    by_lesson: Dict[str, List[Tuple[int, str]]] = defaultdict(list)
+    for spec in load_tae_kim_exercise_page_specs():
+        if spec.skip:
+            continue
+        parent = tae_kim_lesson_by_slug(spec.chapter, spec.parent_lesson)
+        if parent is None:
+            continue
+        section = tae_kim_section_by_num(parent.section_num)
+        if section is None or not tae_kim_section_within_cap(section.num, max_tae_kim_section):
+            continue
+        practice = tae_kim_lesson_by_slug(spec.chapter, spec.practice_lesson)
+        lesson = practice or parent
+        order = lesson_sort_key(section.num, lesson.num)
+        html_text = fetch_tae_kim_exercise_html(spec.page, refresh=refresh)
+        for term in parse_tae_kim_vocabulary_section(html_text):
+            by_lesson[spec.parent_lesson].append((order, term))
+    return dict(by_lesson)
 
 
 def collect_tae_kim_exercise_cards(

@@ -234,6 +234,7 @@ def add_core_item_note(
     *,
     reading_audio_field: str = "",
     priority_entry: Optional[SubjectPriority] = None,
+    include_grammar_role_tags: bool = False,
 ) -> str:
     data = subject["data"]
     expr = data.get("characters") or ""
@@ -265,8 +266,11 @@ def add_core_item_note(
             CORE_TAG,
             subject.get("object") or "item",
             f"wk-level-{data.get('level', 0)}",
-            *(priority_tags(priority_entry, subject_object=subject.get("object") or "")
-              if priority_entry is not None else []),
+            *(priority_tags(
+                priority_entry,
+                subject_object=subject.get("object") or "",
+                include_grammar_role_tags=include_grammar_role_tags,
+            ) if priority_entry is not None else []),
         ],
         guid=guid,
     )
@@ -282,6 +286,7 @@ def build_core_radical_deck(
     bootstrap_scheduling: bool = False,
     suspend_unstarted: bool = True,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
+    include_grammar_role_tags: bool = False,
 ) -> Tuple[Path, genanki.Deck]:
     from wk_decks import radical_display_html
 
@@ -321,8 +326,11 @@ def build_core_radical_deck(
                 CORE_TAG,
                 "radical",
                 f"wk-level-{level}",
-                *(priority_tags(priority_entry, subject_object=radical.get("object") or "radical")
-                  if priority_entry is not None else []),
+                *(priority_tags(
+                    priority_entry,
+                    subject_object=radical.get("object") or "radical",
+                    include_grammar_role_tags=include_grammar_role_tags,
+                ) if priority_entry is not None else []),
             ],
             guid=guid,
         )
@@ -357,6 +365,7 @@ def _populate_core_item_deck(
     tts_voice: str,
     refresh_reading_audio: bool,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
+    include_grammar_role_tags: bool = False,
 ) -> Dict[str, WkCardScheduleSpec]:
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
     media_files: List[str] = []
@@ -391,6 +400,7 @@ def _populate_core_item_deck(
             CORE_ITEM_KIND,
             reading_audio_field=audio_field,
             priority_entry=(priority_index or {}).get(int(subject["id"])),
+            include_grammar_role_tags=include_grammar_role_tags,
         )
         spec = _schedule_spec_for_subject(
             CORE_ITEM_KIND,
@@ -422,6 +432,7 @@ def build_core_kanji_deck(
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_reading_audio: bool = False,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
+    include_grammar_role_tags: bool = False,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-kanji"], DECK_NAMES["core-kanji"])
     model = make_core_item_model()
@@ -448,6 +459,7 @@ def build_core_kanji_deck(
         tts_voice=tts_voice,
         refresh_reading_audio=refresh_reading_audio,
         priority_index=priority_index,
+        include_grammar_role_tags=include_grammar_role_tags,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_kanji.apkg"
@@ -467,6 +479,7 @@ def build_core_vocab_deck(
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_reading_audio: bool = False,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
+    include_grammar_role_tags: bool = False,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-vocabulary"], DECK_NAMES["core-vocabulary"])
     model = make_core_item_model()
@@ -493,6 +506,7 @@ def build_core_vocab_deck(
         tts_voice=tts_voice,
         refresh_reading_audio=refresh_reading_audio,
         priority_index=priority_index,
+        include_grammar_role_tags=include_grammar_role_tags,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_vocabulary.apkg"

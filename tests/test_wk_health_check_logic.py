@@ -2,29 +2,39 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "anki_addon" / "wk_health_check"))
+LOGIC_PATH = REPO_ROOT / "anki_addon" / "wk_health_check" / "logic.py"
 
-from logic import (  # noqa: E402
-    ANKI_CARD_TYPE_NEW,
-    ANKI_CARD_TYPE_REVIEW,
-    ANKI_QUEUE_SUSPENDED,
-    CORE_KANJI_DECK,
-    CardSnapshot,
-    NoteSnapshot,
-    build_collection_metrics,
-    build_health_report,
-    compare_metric_snapshots,
-    count_core_cards_in_filtered_queues,
-    find_duplicate_wk_subject_ids,
-    find_suspicious_scheduling_cards,
-    is_core_card,
-    snapshot_payload,
-)
+
+def _load_logic_module():
+    spec = importlib.util.spec_from_file_location("wk_health_check_logic", LOGIC_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["wk_health_check_logic"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+logic = _load_logic_module()
+ANKI_CARD_TYPE_NEW = logic.ANKI_CARD_TYPE_NEW
+ANKI_CARD_TYPE_REVIEW = logic.ANKI_CARD_TYPE_REVIEW
+ANKI_QUEUE_SUSPENDED = logic.ANKI_QUEUE_SUSPENDED
+CORE_KANJI_DECK = logic.CORE_KANJI_DECK
+CardSnapshot = logic.CardSnapshot
+NoteSnapshot = logic.NoteSnapshot
+build_collection_metrics = logic.build_collection_metrics
+build_health_report = logic.build_health_report
+compare_metric_snapshots = logic.compare_metric_snapshots
+count_core_cards_in_filtered_queues = logic.count_core_cards_in_filtered_queues
+find_duplicate_wk_subject_ids = logic.find_duplicate_wk_subject_ids
+find_suspicious_scheduling_cards = logic.find_suspicious_scheduling_cards
+is_core_card = logic.is_core_card
+snapshot_payload = logic.snapshot_payload
 
 
 def _card(**kwargs) -> CardSnapshot:

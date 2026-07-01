@@ -16,6 +16,8 @@ from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from grammar_decks import GrammarCardItem, JLPT_LEVELS
 
 STUDY_PRIORITY_JSON = "wk_study_priority.json"
+TAE_KIM_TRACK_MAP_JSON = "wk_tae_kim_track_map.json"
+TAE_KIM_TRACK_CONFIG_JSON = "wk_tae_kim_track_config.json"
 
 JLPT_WEIGHT = 10000
 WK_LEVEL_WEIGHT = 100
@@ -135,14 +137,20 @@ def priority_score_for(
     return score
 
 
-def priority_tags(entry: SubjectPriority, *, subject_object: str = "") -> List[str]:
+def priority_tags(
+    entry: SubjectPriority,
+    *,
+    subject_object: str = "",
+    include_grammar_role_tags: bool = True,
+) -> List[str]:
     tags = [f"priority-jlpt-{entry.jlpt}"]
     if entry.tae_kim_order is not None:
         tags.append(f"tk-priority-{entry.tae_kim_order:04d}")
-        if entry.tae_kim_direct and subject_object in ("kanji", "vocabulary"):
-            tags.append(TK_GRAMMAR_VOCAB_TAG)
-        elif not entry.tae_kim_direct:
-            tags.append(TK_GRAMMAR_PREREQ_TAG)
+        if include_grammar_role_tags:
+            if entry.tae_kim_direct and subject_object in ("kanji", "vocabulary"):
+                tags.append(TK_GRAMMAR_VOCAB_TAG)
+            elif not entry.tae_kim_direct:
+                tags.append(TK_GRAMMAR_PREREQ_TAG)
     if entry.n5_direct and subject_object in ("kanji", "vocabulary"):
         tags.append(JLPT_N5_VOCAB_TAG)
     if entry.n5_prereq:
@@ -345,6 +353,63 @@ def write_study_priority_json(output_dir: Path, index: Mapping[int, SubjectPrior
             }
             for subject_id, entry in sorted(index.items())
         }
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def build_tae_kim_track_map(
+    radical_items: Sequence[dict],
+    kanji_items: Sequence[dict],
+    vocab_items: Sequence[dict],
+    vocabulary_by_lesson: Mapping[str, Sequence[Tuple[int, str]]],
+    *,
+    reading_lesson_order: Sequence[str],
+) -> dict:
+    """Per-lesson direct/prereq subject ids for runtime Tae Kim track sync."""
+    subjects_by_id = {
+        int(subject["id"]): subject
+        for subject in (*radical_items, *kanji_items, *vocab_items)
+    }
+    lessons: Dict[str, dict] = {}
+    for slug in reading_lesson_order:
+        entries = vocabulary_by_lesson.get(slug) or ()
+        if not entries:
+            continue
+        direct_orders = build_tae_kim_subject_orders(kanji_items, vocab_items, entries)
+        all_orders = propagate_tae_kim_prerequisite_orders(direct_orders, subjects_by_id)
+        direct_ids = sorted(direct_orders.keys())
+        prereq_ids = sorted(subject_id for subject_id in all_orders if subject_id not in direct_orders)
+        lesson_order = min(order for order, _ in entries)
+        lessons[slug] = {
+            "order": lesson_order,
+            "direct_subject_ids": direct_ids,
+            "prereq_subject_ids": prereq_ids,
+        }
+    return {
+        "reading_lessons": [slug for slug in reading_lesson_order if slug in lessons],
+        "lessons": lessons,
+    }
+
+
+def write_tae_kim_track_map(output_dir: Path, payload: Mapping[str, object]) -> Path:
+    path = output_dir / TAE_KIM_TRACK_MAP_JSON
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def write_tae_kim_track_config_template(
+    output_dir: Path,
+    *,
+    max_tae_kim_lesson: Optional[str],
+    ahead_prereq_lessons: int = 1,
+) -> Path:
+    path = output_dir / TAE_KIM_TRACK_CONFIG_JSON
+    payload = {
+        "max_tae_kim_lesson": max_tae_kim_lesson,
+        "ahead_prereq_lessons": ahead_prereq_lessons,
+        "auto_run_on_load": True,
+        "auto_update_filtered_decks": True,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path

@@ -169,3 +169,40 @@ Each run saves `wk_health_snapshot.json` in your Anki profile folder. The next r
 2. Import `out/wk_all.apkg` with **Update** (not replace).
 3. Run **WK Health Check** again — review cards and total reps should not fall sharply.
 4. Run **WK Adjust New Limits** — run health check once more; reps/review counts should stay stable (only new-card order / limits change).
+
+---
+
+# WK Tae Kim Track (runtime grammar role tags)
+
+`tk-grammar-vocab` and `tk-grammar-prereq` tags are **not** baked into core notes at import. Regenerate once to write the track map; the add-on applies role tags from your current lesson cap at runtime.
+
+## Install once
+
+Copy the `wk_tae_kim_track` folder into Anki's add-ons folder (same path as above),
+then restart Anki.
+
+## After core deck import
+
+1. Regenerate: `python wk_decks.py --from-config` (writes `out/wk_tae_kim_track_map.json` and `out/wk_tae_kim_track_config.json`).
+2. Import `out/wk_all.apkg` with **Update**.
+3. Sync add-ons: `./scripts/sync_anki_addons.sh` (or auto-sync on macOS), then restart Anki.
+4. On first run, the add-on copies `out/wk_tae_kim_track_config.json` into your profile as `wk_tae_kim_track.json` (edit lesson cap there — not in `wk_deck_config.json` for day-to-day bumps).
+5. **Tools → WK Sync Tae Kim Track** — applies grammar role tags and rebuilds **WK::Grammar · Current Tae Kim lesson** filtered decks.
+6. When you finish a subsection: **Tools → WK Bump Tae Kim Lesson** (or edit `wk_tae_kim_track.json` and sync again).
+
+Runs automatically on collection load when `auto_run_on_load` is true (default).
+
+## Profile config
+
+`~/Library/Application Support/Anki2/[profile]/wk_tae_kim_track.json`:
+
+```json
+{
+  "max_tae_kim_lesson": "expressing-state-of-being",
+  "ahead_prereq_lessons": 1,
+  "auto_run_on_load": true,
+  "auto_update_filtered_decks": true
+}
+```
+
+Track map path: set `WK_TAE_KIM_TRACK_MAP` or place `wk_tae_kim_track_map.json` in `out/` (default after regenerate).

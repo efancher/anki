@@ -191,7 +191,7 @@ def _core_note_tags(subject: dict, index: Mapping[int, object]) -> Set[str]:
     subject_id = int(subject["id"])
     entry = index[subject_id]
     obj = str(subject.get("object") or "")
-    tags = set(priority_tags(entry, subject_object=obj))
+    tags = set(priority_tags(entry, subject_object=obj, include_grammar_role_tags=False))
     tags.add("wk-core")
     if obj == "kanji":
         tags.add("kanji")
