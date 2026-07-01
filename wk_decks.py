@@ -351,6 +351,7 @@ RUN_HISTORY_COLUMNS = [
     "bundled_decks",
 ]
 FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS = 10
+CORE_FILTERED_DECK_CARD_LIMIT = 5
 # Core daily queues must reschedule (FSRS updates on home deck). If reschedule is off,
 # Good/Easy show "(end)" and reviews do not stick.
 FILTERED_DECK_RESCHEDULE_DEFAULT = True
@@ -389,19 +390,19 @@ FILTERED_DECK_DEFINITIONS = [
     {
         "name": "WK::Core Radicals",
         "search": daily_filtered_deck_search('deck:"WaniKani Core · Radicals"'),
-        "limit": 20,
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Core Kanji",
         "search": daily_filtered_deck_search('deck:"WaniKani Core · Kanji"'),
-        "limit": 25,
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
         "name": "WK::Core Vocabulary",
         "search": daily_filtered_deck_search('deck:"WaniKani Core · Vocabulary"'),
-        "limit": 25,
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
