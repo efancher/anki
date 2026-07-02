@@ -14,7 +14,7 @@ from typing import List, Optional
 
 from anki.decks import DeckId, FilteredDeckConfig
 from aqt import gui_hooks, mw
-from aqt.qt import QAction
+from aqt.qt import QAction, QFileDialog
 from aqt.utils import showInfo, showWarning, tooltip
 
 from .logic import (
@@ -37,13 +37,38 @@ def profile_config_path() -> Path:
     return Path(mw.pm.profileFolder()) / TRACK_CONFIG_FILENAME
 
 
+def profile_map_pointer_path() -> Path:
+    return Path(mw.pm.profileFolder()) / "wk_tae_kim_track_map_path.txt"
+
+
+def profile_template_pointer_path() -> Path:
+    return Path(mw.pm.profileFolder()) / "wk_tae_kim_track_config_path.txt"
+
+
+def _read_saved_path(pointer_path: Path) -> Optional[Path]:
+    if not pointer_path.is_file():
+        return None
+    text = pointer_path.read_text(encoding="utf-8").strip()
+    if not text:
+        return None
+    return Path(text).expanduser()
+
+
+def _save_path_pointer(pointer_path: Path, target: Path) -> None:
+    pointer_path.write_text(str(target.expanduser().resolve()), encoding="utf-8")
+
+
 def candidate_map_paths() -> List[Path]:
     paths: List[Path] = []
     env_path = os.environ.get("WK_TAE_KIM_TRACK_MAP")
     if env_path:
         paths.append(Path(env_path).expanduser())
+    saved = _read_saved_path(profile_map_pointer_path())
+    if saved is not None:
+        paths.append(saved)
     paths.extend(
         [
+            Path(mw.pm.profileFolder()) / TRACK_MAP_FILENAME,
             Path.home() / "anki" / "out" / TRACK_MAP_FILENAME,
             Path.cwd() / "out" / TRACK_MAP_FILENAME,
             Path.cwd() / TRACK_MAP_FILENAME,
@@ -64,8 +89,12 @@ def candidate_template_config_paths() -> List[Path]:
     env_path = os.environ.get("WK_TAE_KIM_TRACK_CONFIG")
     if env_path:
         paths.append(Path(env_path).expanduser())
+    saved = _read_saved_path(profile_template_pointer_path())
+    if saved is not None:
+        paths.append(saved)
     paths.extend(
         [
+            Path(mw.pm.profileFolder()) / TEMPLATE_CONFIG_FILENAME,
             Path.home() / "anki" / "out" / TEMPLATE_CONFIG_FILENAME,
             Path.cwd() / "out" / TEMPLATE_CONFIG_FILENAME,
             Path.cwd() / TEMPLATE_CONFIG_FILENAME,
@@ -81,13 +110,38 @@ def candidate_template_config_paths() -> List[Path]:
     return unique
 
 
-def load_track_map() -> Optional[dict]:
+def pick_track_map_path(*, prompt: bool = True) -> Optional[Path]:
     for path in candidate_map_paths():
-        if not path.is_file():
-            continue
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else None
-    return None
+        if path.is_file():
+            return path
+
+    if not prompt:
+        return None
+
+    start_dir = str(Path.home() / "anki" / "out")
+    if not Path(start_dir).exists():
+        start_dir = str(Path.home())
+
+    selected, _ = QFileDialog.getOpenFileName(
+        mw,
+        f"Select {TRACK_MAP_FILENAME}",
+        start_dir,
+        "JSON Files (*.json)",
+    )
+    if not selected:
+        return None
+    chosen = Path(selected)
+    if chosen.is_file():
+        _save_path_pointer(profile_map_pointer_path(), chosen)
+    return chosen
+
+
+def load_track_map(*, prompt: bool = True) -> Optional[dict]:
+    path = pick_track_map_path(prompt=prompt)
+    if path is None or not path.is_file():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else None
 
 
 def load_track_config(*, create_from_template: bool = True) -> Optional[TaeKimTrackConfig]:
@@ -111,7 +165,30 @@ def load_track_config(*, create_from_template: bool = True) -> Optional[TaeKimTr
             continue
         profile_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return config
-    return None
+
+    start_dir = str(Path.home() / "anki" / "out")
+    if not Path(start_dir).exists():
+        start_dir = str(Path.home())
+    selected, _ = QFileDialog.getOpenFileName(
+        mw,
+        f"Select {TEMPLATE_CONFIG_FILENAME}",
+        start_dir,
+        "JSON Files (*.json)",
+    )
+    if not selected:
+        return None
+    chosen = Path(selected)
+    if not chosen.is_file():
+        return None
+    _save_path_pointer(profile_template_pointer_path(), chosen)
+    payload = json.loads(chosen.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    config = parse_track_config(payload)
+    if config is None:
+        return None
+    profile_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return config
 
 
 def save_track_config(config: TaeKimTrackConfig) -> None:
@@ -283,7 +360,7 @@ def on_collection_did_load(col) -> None:
     config = load_track_config(create_from_template=False)
     if config is None or not config.auto_run_on_load:
         return
-    if load_track_map() is None:
+    if load_track_map(prompt=False) is None:
         return
     run_tae_kim_track_sync(quiet=True)
 

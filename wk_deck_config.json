@@ -21,7 +21,7 @@
   "grammar": {
     "max_jlpt": "N5",
     "max_tae_kim_section": 3,
-    "max_tae_kim_lesson": "adjectives",
+    "max_tae_kim_lesson": "past-tense",
     "max_examples": 5,
     "max_unknown_kanji": 5,
     "no_wk_filter": false,
