@@ -34,8 +34,9 @@
     "min_srs": 7,
     "voice": "Kyoko"
   },
+  "fetch_wk_review_statistics": false,
   "core": {
-    "bootstrap_scheduling": true,
+    "bootstrap_scheduling": false,
     "import_all_subjects": true,
     "suspend_unstarted": true,
     "reading_audio": true,

@@ -129,6 +129,11 @@ DEFAULT_GENERATE_DECKS = (
     "grammar",
 )
 
+# Legacy decks that use WaniKani review_statistics (leech scoring), not Anki ivl/due.
+DECKS_NEEDING_WK_REVIEW_STATISTICS = frozenset(
+    {"leeches", "pitch-leeches", "confusables", "verb-pairs"}
+)
+
 # Keisei phonetic-semantic DB (GPL-3.0, mwil/wanikani-userscripts).
 # Pinned commit for stable raw JSON URLs; auto-downloaded into .wk_cache/keisei/.
 KEISEI_DB_COMMIT = "8ee517737d604f1df0ff103a33b69f1f07218815"
@@ -1302,6 +1307,7 @@ def write_bundled_apkg(
     path: Path,
     *,
     media_files: Optional[Sequence[str]] = None,
+    patch_apkg_scheduling: bool = False,
 ) -> None:
     if not decks:
         return
@@ -1314,8 +1320,9 @@ def write_bundled_apkg(
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
     patch_apkg_deck_options(path)
-    maybe_patch_apkg_wk_scheduling(path, decks)
-    patch_apkg_supplementary_suspend(path)
+    if patch_apkg_scheduling:
+        maybe_patch_apkg_wk_scheduling(path, decks)
+        patch_apkg_supplementary_suspend(path)
 
 
 # Default FSRS-5 weights shipped with Anki 23.10+ (used when preset is created on import).
@@ -1444,15 +1451,22 @@ def maybe_patch_apkg_wk_scheduling(apkg_path: Path, decks: Sequence[genanki.Deck
     return patch_apkg_wk_scheduling(apkg_path, specs, interval_map=interval_map)
 
 
-def write_apkg(deck: genanki.Deck, path: Path, *, media_files: Optional[Sequence[str]] = None) -> None:
+def write_apkg(
+    deck: genanki.Deck,
+    path: Path,
+    *,
+    media_files: Optional[Sequence[str]] = None,
+    patch_apkg_scheduling: bool = False,
+) -> None:
     models = list(deck.models.values())
     package = genanki.Package(deck)
     attach_deck_media(package, [deck])
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(models))
     patch_apkg_deck_options(path)
-    maybe_patch_apkg_wk_scheduling(path, [deck])
-    patch_apkg_supplementary_suspend(path)
+    if patch_apkg_scheduling:
+        maybe_patch_apkg_wk_scheduling(path, [deck])
+        patch_apkg_supplementary_suspend(path)
 
 
 def subject_is_hidden(subject: dict) -> bool:
@@ -5557,6 +5571,11 @@ def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
     return normalized
 
 
+def decks_need_wk_review_statistics(wanted: Set[str]) -> bool:
+    """True when a requested deck uses WaniKani review_statistics (leech scoring)."""
+    return bool(normalize_wanted_decks(wanted) & DECKS_NEEDING_WK_REVIEW_STATISTICS)
+
+
 def wanted_decks(args: argparse.Namespace) -> Set[str]:
     if args.deck != "all":
         return normalize_wanted_decks({args.deck})
@@ -6368,6 +6387,9 @@ def parser_defaults_from_config(config: dict) -> dict:
     if "min_srs" in rendaku:
         defaults["rendaku_min_srs"] = rendaku["min_srs"]
 
+    if "fetch_wk_review_statistics" in config:
+        defaults["fetch_wk_review_statistics"] = bool(config["fetch_wk_review_statistics"])
+
     core = config.get("core") or {}
     core_bool_keys = {
         "bootstrap_scheduling",
@@ -6478,7 +6500,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--bootstrap-wk-scheduling",
         action=argparse.BooleanOptionalAction,
         default=cfg.get("bootstrap_wk_scheduling", False),
-        help="Patch core card ivl/due/type from WK assignments (one-time migration).",
+        help=(
+            "Patch apkg card ivl/due/type and supplementary suspend from WK assignments "
+            "(one-time migration; off by default so re-imports do not overwrite Anki FSRS)."
+        ),
+    )
+    parser.add_argument(
+        "--fetch-wk-review-statistics",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.get("fetch_wk_review_statistics", False),
+        help=(
+            "Download WaniKani review_statistics for leech scoring. Off by default; "
+            "auto-enabled only for legacy leech/confusable decks."
+        ),
     )
     parser.add_argument(
         "--core-suspend-unstarted",
@@ -6766,6 +6800,10 @@ def main() -> None:
         refresh=args.refresh_cache,
     )
     wanted_preview = wanted_decks(args)
+    need_review_stats = (
+        args.fetch_wk_review_statistics
+        or decks_need_wk_review_statistics(wanted_preview)
+    )
     use_full_assignments = (
         args.no_wk_progress_filter
         or args.bootstrap_wk_scheduling
@@ -6782,16 +6820,24 @@ def main() -> None:
         refresh=args.refresh_cache,
     )
     assignment_index = assignment_by_subject_id(assignments)
-    review_subject_ids = [
-        assignment["data"]["subject_id"]
-        for assignment in assignments
-        if assignment["data"].get("subject_type") in {"kanji", "vocabulary"}
-    ]
-    reviews = get_cached_review_statistics(
-        review_subject_ids,
-        params_key=assignment_key,
-        refresh=args.refresh_cache,
-    )
+    reviews: List[dict] = []
+    if need_review_stats:
+        review_subject_ids = [
+            assignment["data"]["subject_id"]
+            for assignment in assignments
+            if assignment["data"].get("subject_type") in {"kanji", "vocabulary"}
+        ]
+        reviews = get_cached_review_statistics(
+            review_subject_ids,
+            params_key=assignment_key,
+            refresh=args.refresh_cache,
+        )
+    else:
+        print(
+            "Skipping WaniKani review_statistics fetch "
+            "(use --fetch-wk-review-statistics for legacy leech decks).",
+            file=sys.stderr,
+        )
     studies = get_cached_collection("study_materials", refresh=args.refresh_cache)
     subject_index = index_subjects_by_id(subjects)
     indexes = {
@@ -7434,6 +7480,7 @@ def main() -> None:
             built_decks,
             bundle_path,
             media_files=bundled_media_files or None,
+            patch_apkg_scheduling=bool(args.bootstrap_wk_scheduling),
         )
     settings_path = write_filtered_deck_suggestions(
         output_dir,

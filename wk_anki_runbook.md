@@ -9,7 +9,7 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 **Done — migration-ready.** WK reviews live in Anki + FSRS via:
 
 - **Core SRS decks** — WaniKani Core · Radicals / Kanji / Vocabulary
-- **One-time WK schedule bootstrap** — `core.bootstrap_scheduling` in `wk_deck_config.json`
+- **One-time WK schedule bootstrap** — opt in with `core.bootstrap_scheduling: true` (off by default so re-imports never overwrite Anki FSRS)
 - **`wk_unlock` add-on** — radical → kanji → vocab unlock + supplementary unsuspend
 - **`no_wk_progress_filter`** — import full supplementary catalog; gate with `wk-locked` in Anki
 - **Filtered core decks** — `WK::Core Radicals/Kanji/Vocabulary`
@@ -136,7 +136,7 @@ This replaces the old “Phase 2 migration” — it **is implemented**; these a
    python wk_decks.py --from-config
    ```
 
-   Equivalent flags: `--no-wk-progress-filter --bootstrap-wk-scheduling` with `core` in `generate_decks`.
+   Equivalent flags for first migration: `--no-wk-progress-filter --bootstrap-wk-scheduling` with `core` in `generate_decks`. Set `"core.bootstrap_scheduling": true` in config for that one run only.
 
    First run with `core.reading_audio: true` can take a long time (kanji TTS + WK vocab downloads). Progress bar on stderr; re-run fills failed clips.
 
@@ -238,7 +238,8 @@ Edit **`wk_deck_config.json`**, then `python wk_decks.py --from-config`.
 |-----|---------------|--------|
 | `generate_decks` | includes `core`, … | Decks in `wk_all.apkg` |
 | `no_wk_progress_filter` | `true` | Full supplementary import + Anki gating |
-| `core.bootstrap_scheduling` | `true` | One-time WK interval import |
+| `fetch_wk_review_statistics` | `false` | Skip WK review_statistics API (leech decks only) |
+| `core.bootstrap_scheduling` | `false` | **Off by default.** Set `true` once for WK interval import |
 | `core.reading_audio` | `true` | Vocab WK audio + kanji TTS |
 | `grammar.max_tae_kim_section` | `3` | Tae Kim chapter cap |
 | `grammar.max_tae_kim_lesson` | slug | Tae Kim subsection cap — see `tae_kim_lessons.json` |
@@ -377,7 +378,7 @@ Practical improvements that do not require new features. Prefer these before add
 
 | Action | Why |
 |--------|-----|
-| Set `"core.bootstrap_scheduling": false` | Bootstrap patches WK `ivl`/`due` once. Re-importing with it on can fight FSRS. |
+| Set `"core.bootstrap_scheduling": false` | Default in config. Bootstrap patches WK `ivl`/`due` once; only enable for first migration. |
 | Do **not** weekly re-import | Only when templates, audio, config, or new WK levels in cache change. Unlock state is **wk_unlock**, not import. |
 
 ### Adaptive new cards (`wk_adaptive_new`)

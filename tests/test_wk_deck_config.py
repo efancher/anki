@@ -18,6 +18,7 @@ from grammar_decks import (
 )
 from wk_decks import (
     DEFAULT_GENERATE_DECKS,
+    decks_need_wk_review_statistics,
     load_wk_deck_config,
     parse_args,
     parser_defaults_from_config,
@@ -85,6 +86,15 @@ class WkDeckConfigTests(unittest.TestCase):
         self.assertEqual(defaults["reading_voice"], "Kyoko")
         self.assertFalse(defaults["refresh_reading_audio"])
 
+    def test_parser_defaults_from_config_fetch_wk_review_statistics(self) -> None:
+        defaults = parser_defaults_from_config({"fetch_wk_review_statistics": True})
+        self.assertTrue(defaults["fetch_wk_review_statistics"])
+
+    def test_decks_need_wk_review_statistics_only_for_legacy_decks(self) -> None:
+        self.assertFalse(decks_need_wk_review_statistics({"core", "grammar"}))
+        self.assertTrue(decks_need_wk_review_statistics({"leeches"}))
+        self.assertTrue(decks_need_wk_review_statistics({"all"} | {"leeches"}))
+
     def test_load_wk_deck_config_missing_file_returns_empty(self) -> None:
         missing = Path(tempfile.gettempdir()) / "wk_deck_config_missing_test.json"
         self.assertFalse(missing.is_file())
@@ -141,6 +151,8 @@ class WkDeckConfigTests(unittest.TestCase):
         self.assertEqual(args.grammar_max_jlpt, GRAMMAR_DEFAULT_MAX_JLPT)
         self.assertEqual(args.grammar_max_examples, GRAMMAR_DEFAULT_EXAMPLES_PER_POINT)
         self.assertFalse(args.only_started)
+        self.assertFalse(args.bootstrap_wk_scheduling)
+        self.assertFalse(args.fetch_wk_review_statistics)
 
     def test_wanted_decks_uses_generate_decks_from_config(self) -> None:
         args = parse_args([])

@@ -347,7 +347,7 @@ def build_core_radical_deck(
 
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_radicals.apkg"
-    write_apkg(deck, out)
+    write_apkg(deck, out, patch_apkg_scheduling=bootstrap_scheduling)
     return out, deck
 
 
@@ -463,7 +463,12 @@ def build_core_kanji_deck(
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_kanji.apkg"
-    write_apkg(deck, out, media_files=getattr(deck, "wk_media_files", None))
+    write_apkg(
+        deck,
+        out,
+        media_files=getattr(deck, "wk_media_files", None),
+        patch_apkg_scheduling=bootstrap_scheduling,
+    )
     return out, deck
 
 
@@ -510,5 +515,10 @@ def build_core_vocab_deck(
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_vocabulary.apkg"
-    write_apkg(deck, out, media_files=getattr(deck, "wk_media_files", None))
+    write_apkg(
+        deck,
+        out,
+        media_files=getattr(deck, "wk_media_files", None),
+        patch_apkg_scheduling=bootstrap_scheduling,
+    )
     return out, deck
