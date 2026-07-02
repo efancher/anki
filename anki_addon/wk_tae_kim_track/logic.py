@@ -152,7 +152,6 @@ def current_lesson_filtered_searches(
     lesson_slug: str,
     *,
     grammar_deck: str = "Japanese Grammar Context",
-    exercises_deck: str = "Japanese Grammar Exercises",
     due_or_new: str = "(is:due OR is:new)",
     not_suspended: str = "-is:suspended",
 ) -> Dict[str, str]:
@@ -160,10 +159,6 @@ def current_lesson_filtered_searches(
     return {
         "WK::Grammar · Current Tae Kim lesson": (
             f'deck:"{grammar_deck}" tag:{lesson_tag} {due_or_new} {not_suspended}'
-        ),
-        "WK::Grammar Exercises · Current Tae Kim lesson": (
-            f'deck:"{exercises_deck}" tag:tae-kim-exercise tag:{lesson_tag} '
-            f"{due_or_new} {not_suspended}"
         ),
     }
 

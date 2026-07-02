@@ -40,10 +40,13 @@ EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::N5 · Prereq Radicals",
     "WK::Vocab Context",
     "WK::Dictation",
+    "WK::Conjugations · Verbs",
+    "WK::Conjugations · Adjectives",
+    "WK::Conjugations · Reverse",
+    "WK::Conjugations · Verb Types",
+    "WK::Conjugations · Adjective Types",
     "WK::Grammar",
     "WK::Grammar · Current Tae Kim lesson",
-    "WK::Grammar Exercises",
-    "WK::Grammar Exercises · Current Tae Kim lesson",
     "WK::Phonetic Families",
 )
 

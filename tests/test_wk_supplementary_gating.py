@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from wk_decks import (
+    CORE_FILTERED_DECK_CARD_LIMIT,
     FILTERED_DECK_DEFINITIONS,
     FILTERED_DECK_SEARCH_DUE_OR_NEW,
     FILTERED_DECK_SEARCH_NOT_MATURE,
@@ -22,7 +23,6 @@ from wk_decks import (
     daily_filtered_deck_search,
     effective_filtered_deck_definitions,
     grammar_context_current_lesson_filtered_deck,
-    grammar_exercise_current_lesson_filtered_deck,
     prereq_filtered_deck_search,
     passes_progress_filter,
     supplementary_import_tags,
@@ -186,19 +186,31 @@ class WkSupplementaryGatingTests(unittest.TestCase):
 
     def test_current_tae_kim_lesson_filtered_decks_follow_config_cap(self) -> None:
         context = grammar_context_current_lesson_filtered_deck("introduction-to-particles")
-        exercises = grammar_exercise_current_lesson_filtered_deck("introduction-to-particles")
         self.assertIsNotNone(context)
-        self.assertIsNotNone(exercises)
         self.assertIn("tag:tk-lesson-basic-introduction-to-particles", context["search"])
         self.assertIn("Japanese Grammar Context", context["search"])
-        self.assertIn("tag:tk-lesson-basic-introduction-to-particles", exercises["search"])
-        self.assertIn("tag:tae-kim-exercise", exercises["search"])
-        self.assertIn("Japanese Grammar Exercises", exercises["search"])
         names = [d["name"] for d in effective_filtered_deck_definitions(
             max_tae_kim_lesson="introduction-to-particles",
         )]
         self.assertIn("WK::Grammar · Current Tae Kim lesson", names)
-        self.assertIn("WK::Grammar Exercises · Current Tae Kim lesson", names)
+        self.assertNotIn("WK::Grammar Exercises · Current Tae Kim lesson", names)
+
+    def test_conjugation_filtered_decks_use_batch_limit(self) -> None:
+        conjugation_names = {
+            "WK::Conjugations · Verbs",
+            "WK::Conjugations · Adjectives",
+            "WK::Conjugations · Reverse",
+            "WK::Conjugations · Verb Types",
+            "WK::Conjugations · Adjective Types",
+        }
+        by_name = {spec["name"]: spec for spec in FILTERED_DECK_DEFINITIONS}
+        for name in conjugation_names:
+            self.assertIn(name, by_name)
+            self.assertEqual(by_name[name]["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
+            self.assertIn(
+                FILTERED_DECK_SEARCH_DUE_OR_NEW,
+                by_name[name]["search"],
+            )
 
 
 if __name__ == "__main__":

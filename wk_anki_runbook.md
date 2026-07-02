@@ -174,26 +174,35 @@ Type **reading (kana)** on the front; meaning, reading audio, and mnemonics on t
 
 ### Supplementary decks
 
-Vocab cloze, dictation, conjugations, phonetic families, verb types, etc. Import with `tag:wk-locked`; **wk_unlock** unsuspends when linked **WkSubjectId** is mature in core (interval **≥ 7 days**, ≈ WK **Guru I**). **Grammar / Tae Kim exercises are not wk-locked** — see [Grammar gated by kanji](#grammar-gated-by-kanji-planned).
+Vocab cloze, dictation, conjugations, phonetic families, verb types, etc. Import with `tag:wk-locked`; **wk_unlock** unsuspends when linked **WkSubjectId** is mature in core (interval **≥ 7 days**, ≈ WK **Guru I**). **Grammar context** is not `wk-locked` — see [Grammar gated by kanji](#grammar-gated-by-kanji-planned).
 
 Open **desktop Anki periodically** if you study on mobile, so unlock passes sync.
 
 ### Grammar / Tae Kim
 
-Read on guidetojapanese.org; review in grammar decks. Cap exercise deck scope in [§5 Configuration](#5-configuration). **Grammar role tags** (`tk-grammar-vocab`, `tk-grammar-prereq`) are applied at **runtime** by **wk_tae_kim_track** — not on each re-import. After your first regenerate with the track map, copy `out/wk_tae_kim_track_config.json` into your profile (the add-on does this on first sync), then use **Tools → WK Sync Tae Kim Track** or **WK Bump Tae Kim Lesson** when you finish a subsection (updates **WK::Grammar · Current Tae Kim lesson** and **WK::Grammar Exercises · Current Tae Kim lesson** automatically).
+Read on guidetojapanese.org; review in **Japanese Grammar Context** when useful. **Grammar role tags** (`tk-grammar-vocab`, `tk-grammar-prereq`) are applied at **runtime** by **wk_tae_kim_track** — not on each re-import. After your first regenerate with the track map, copy `out/wk_tae_kim_track_config.json` into your profile (the add-on does this on first sync), then use **Tools → WK Sync Tae Kim Track** or **WK Bump Tae Kim Lesson** when you finish a subsection (updates **WK::Grammar · Current Tae Kim lesson** automatically).
 
 | Home deck | Filtered queue | Content |
 |-----------|----------------|---------|
 | **Japanese Grammar Context** | **WK::Grammar**, **WK::Grammar · Current Tae Kim lesson** | Hanabira / pattern clozes |
-| **Japanese Grammar Exercises** | **WK::Grammar Exercises**, **WK::Grammar Exercises · Current Tae Kim lesson** | Tae Kim site practice (`copula_ex.html`, etc.) |
-| **WaniKani Core *** | **WK::Tae Kim · Grammar Vocab / Prereq *** | WK kanji/vocab tagged for Tae Kim (not exercise cards) |
+| **WaniKani Core *** | **WK::Tae Kim · Grammar Vocab / Prereq *** | WK kanji/vocab tagged for Tae Kim |
+
+**Conjugation drills** use separate home decks with matching filtered queues (batch size 5, rebuild between rounds):
+
+| Home deck | Filtered queue |
+|-----------|----------------|
+| **WaniKani Verb Conjugation Practice** | **WK::Conjugations · Verbs** |
+| **WaniKani Adjective Conjugation Practice** | **WK::Conjugations · Adjectives** |
+| **WaniKani Verb Conjugation Reverse** | **WK::Conjugations · Reverse** |
+| **WaniKani Verb Type Practice** | **WK::Conjugations · Verb Types** |
+| **WaniKani Adjective Type Practice** | **WK::Conjugations · Adjective Types** |
 
 ### Suggested daily order
 
 1. **WK::Core** filtered decks until empty (Radicals → Kanji → Vocabulary).
-2. **Tae Kim WK track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5** equivalents) — these are **core** cards, not grammar exercises.
-3. **WK::Grammar Exercises** (or **· Current Tae Kim lesson**) while doing Tae Kim practice pages.
-4. **One** other supplementary filtered deck if you have energy (dictation → vocab context → conjugations).
+2. **Tae Kim WK track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5** equivalents) — these are **core** cards.
+3. **WK::Conjugations ·** filtered decks (verbs → adjectives → reverse/types as you like).
+4. **One** other supplementary filtered deck if you have energy (dictation → vocab context).
 5. **WK::Grammar** (Context deck) for Hanabira pattern review when useful.
 
 Grammar is **not** gated by core kanji maturity today (see [§12](#12-tips--tuning)); use Tae Kim lesson caps and `max_unknown_kanji` instead.
@@ -253,7 +262,7 @@ Example lesson slugs: `expressing-state-of-being`, `introduction-to-particles`, 
 | Deck | Gating |
 |------|--------|
 | Vocab Context, Dictation, Conjugations, Verb Types, Phonetic Families, … | `WkSubjectId` + `wk-locked` |
-| Grammar / Tae Kim exercises | JLPT + Tae Kim caps only |
+| Grammar Context | JLPT + Tae Kim caps only |
 | Current and Next Radicals | *(removed from default — use core radicals; `--deck radicals` still builds)* |
 
 Optional individual decks: leeches, verb pairs, confusables, etc. — `python wk_decks.py --deck leeches`
@@ -275,10 +284,9 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::N5 · Prereq Radicals** | Radicals still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
 | **WK::Vocab Context** | Production cloze |
 | **WK::Dictation** | Hear → type reading |
+| **WK::Conjugations · Verbs / Adjectives / Reverse / Verb Types / Adjective Types** | Conjugation drills (5-card batches) |
 | **WK::Grammar** | Hanabira pattern clozes (**Japanese Grammar Context**) |
 | **WK::Grammar · Current Tae Kim lesson** | Context cards for current reading lesson (from config cap) |
-| **WK::Grammar Exercises** | Tae Kim practice type-in (**Japanese Grammar Exercises**, up to lesson cap) |
-| **WK::Grammar Exercises · Current Tae Kim lesson** | Practice cards for current reading lesson only |
 | **WK::Phonetic Families** | Phonetic on'yomi drills |
 
 All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only — no review-ahead), and **Relative overdueness** ordering. **Prereq** decks also use `-tag:wk-mature` so Guru I+ items (interval ≥ 7d on all card types, tagged by **wk_unlock**) drop out once they satisfy the chain.
@@ -291,7 +299,7 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 
 **Vocab cloze:** production in WK sentences; type full kanji when needed.
 
-**Conjugation:** type-in forms; `--verify-conjugations-only` for rule checks.
+**Conjugation:** type-in forms via **WK::Conjugations ·** filtered decks (5 at a time, rebuild for more); `--verify-conjugations-only` for rule checks.
 
 **Phonetic families:** Keisei DB in `.wk_cache/keisei/`.
 
@@ -473,7 +481,6 @@ Dedicated leech decks are optional (legacy). Anki’s **Browse → `tag:leech`**
 |------|---------------------|
 | Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading |
 | **Grammar gated by kanji** (runtime, not built) | Grammar feels too hard before core kanji mature — [below](#grammar-gated-by-kanji-planned) |
-| Conjugation filtered decks | You want **WK::Conjugations** in the filtered-deck workflow |
 | YouTube immersion deck | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) |
 
 ### Grammar gated by kanji (planned)

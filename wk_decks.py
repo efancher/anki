@@ -125,7 +125,6 @@ DEFAULT_GENERATE_DECKS = (
     "vocab-cloze",
     "dictation",
     "grammar",
-    "tae-kim-exercises",
 )
 
 # Keisei phonetic-semantic DB (GPL-3.0, mwil/wanikani-userscripts).
@@ -466,20 +465,52 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
+        "name": "WK::Conjugations · Verbs",
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Verb Conjugation Practice"',
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Conjugations · Adjectives",
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Adjective Conjugation Practice"',
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Conjugations · Reverse",
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Verb Conjugation Reverse"',
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Conjugations · Verb Types",
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Verb Type Practice"',
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Conjugations · Adjective Types",
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Adjective Type Practice"',
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
         "name": "WK::Grammar",
         "search": daily_filtered_deck_search(
             'deck:"Japanese Grammar Context" '
             "(tag:tk-lesson-basic-expressing-state-of-being OR "
             "tag:tk-lesson-basic-introduction-to-particles OR "
             "tag:tk-lesson-basic-adjectives)",
-        ),
-        "limit": 25,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Grammar Exercises",
-        "search": daily_filtered_deck_search(
-            'deck:"Japanese Grammar Exercises" tag:tae-kim-exercise',
         ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
@@ -5720,35 +5751,15 @@ def grammar_context_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Opt
     }
 
 
-def grammar_exercise_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Optional[dict]:
-    """Filtered deck for Tae Kim practice exercises on the current reading lesson only."""
-    lesson_tag = _tae_kim_current_lesson_tag(max_tae_kim_lesson)
-    if lesson_tag is None:
-        return None
-    return {
-        "name": "WK::Grammar Exercises · Current Tae Kim lesson",
-        "search": daily_filtered_deck_search(
-            f'deck:"{DECK_NAMES["tae-kim-exercises"]}" '
-            f"tag:tae-kim-exercise tag:{lesson_tag}",
-        ),
-        "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    }
-
-
 def effective_filtered_deck_definitions(
     *,
     max_tae_kim_lesson: Optional[str] = None,
 ) -> List[dict]:
     decks = list(FILTERED_DECK_DEFINITIONS)
     if max_tae_kim_lesson:
-        for builder in (
-            grammar_context_current_lesson_filtered_deck,
-            grammar_exercise_current_lesson_filtered_deck,
-        ):
-            current = builder(max_tae_kim_lesson)
-            if current is not None:
-                decks.append(current)
+        current = grammar_context_current_lesson_filtered_deck(max_tae_kim_lesson)
+        if current is not None:
+            decks.append(current)
     return decks
 
 

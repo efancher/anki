@@ -6,11 +6,12 @@
     "phonetic-families",
     "conjugations-verbs",
     "conjugations-adjectives",
+    "conjugations-reverse",
     "verb-types",
+    "adjective-types",
     "vocab-cloze",
     "dictation",
-    "grammar",
-    "tae-kim-exercises"
+    "grammar"
   ],
   "output_dir": "out",
   "only_started": false,
@@ -20,7 +21,7 @@
   "grammar": {
     "max_jlpt": "N5",
     "max_tae_kim_section": 3,
-    "max_tae_kim_lesson": "introduction-to-particles",
+    "max_tae_kim_lesson": "adjectives",
     "max_examples": 5,
     "max_unknown_kanji": 5,
     "no_wk_filter": false,
