@@ -284,6 +284,7 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::N5 · Prereq Radicals** | Radicals still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
 | **WK::Vocab Context** | Production cloze |
 | **WK::Dictation** | Hear → type reading |
+| **WK::Rendaku** | Compound reading with 連濁 on the second kanji |
 | **WK::Conjugations · Verbs / Adjectives / Reverse / Verb Types / Adjective Types** | Conjugation drills (5-card batches) |
 | **WK::Grammar** | Hanabira pattern clozes (**Japanese Grammar Context**) |
 | **WK::Grammar · Current Tae Kim lesson** | Context cards for current reading lesson (from config cap) |
@@ -304,6 +305,8 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 **Phonetic families:** Keisei DB in `.wk_cache/keisei/`.
 
 **Dictation:** WK native audio on front (intentional).
+
+**Rendaku:** Two-kanji WK compounds where the second morpheme voices (e.g. やま + かわ → やま**が**わ). Card shows morpheme hint → type full reading. Filtered deck **WK::Rendaku**. Default min SRS Master+ (`--rendaku-min-srs 7`).
 
 ---
 

@@ -13,6 +13,7 @@ Decks (default --deck all):
   - grammar: JLPT grammar cloze from Hanabira open data (see grammar_decks.py)
   - tae-kim-exercises: Tae Kim book practice exercises (see tae_kim_exercise_decks.py)
   - dictation: native WK pronunciation audio → type the reading in kana (see dictation_decks.py)
+  - rendaku: two-kanji compounds where the second morpheme voices (連濁) (see rendaku_decks.py)
   - all: all of the above
 
 Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
@@ -66,7 +67,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.27.0"
+VERSION = "2.28.0"
 BUILD_DATE = "2026-06-28"
 
 import warnings
@@ -124,6 +125,7 @@ DEFAULT_GENERATE_DECKS = (
     "verb-types",
     "vocab-cloze",
     "dictation",
+    "rendaku",
     "grammar",
 )
 
@@ -220,6 +222,7 @@ DECK_IDS = {
     "core-radical": 2059400128,
     "core-kanji": 2059400129,
     "core-vocabulary": 2059400130,
+    "rendaku": 2059400131,
 }
 
 MODEL_IDS = {
@@ -237,6 +240,7 @@ MODEL_IDS = {
     "dictation": 1865429024,
     "core_radical": 1865429025,
     "core_item": 1865429026,
+    "rendaku": 1865429027,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -257,6 +261,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "dictation": "v3",
     "core_radical": "v2",
     "core_item": "v5",
+    "rendaku": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -278,6 +283,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "dictation": 12,
     "core_radical": 13,
     "core_item": 14,
+    "rendaku": 15,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -300,6 +306,7 @@ NOTE_TYPE_NAMES = {
     "dictation": "WK Update-Safe Dictation",
     "core_radical": "WK Core Radical",
     "core_item": "WK Core Item",
+    "rendaku": "WK Update-Safe Rendaku",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -342,6 +349,7 @@ RUN_HISTORY_COLUMNS = [
     "adjective_type_cards",
     "vocab_cloze",
     "dictation_items",
+    "rendaku_items",
     "grammar_cards",
     "tae_kim_exercise_cards",
     "pitch_entries",
@@ -465,6 +473,12 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
+        "name": "WK::Rendaku",
+        "search": daily_filtered_deck_search('deck:"WaniKani Rendaku" tag:rendaku'),
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
         "name": "WK::Conjugations · Verbs",
         "search": daily_filtered_deck_search(
             'deck:"WaniKani Verb Conjugation Practice"',
@@ -541,6 +555,7 @@ DECK_NAMES = {
     "adjective-types": "WaniKani Adjective Type Practice",
     "vocab-cloze": "WaniKani Vocabulary Context",
     "dictation": "WaniKani Dictation",
+    "rendaku": "WaniKani Rendaku",
     "grammar": "Japanese Grammar Context",
     "tae-kim-exercises": "Japanese Grammar Exercises",
     "core-radical": "WaniKani Core · Radicals",
@@ -5568,6 +5583,7 @@ def deck_names_for_run(
     grammar_card_count: int,
     tae_kim_exercise_card_count: int = 0,
     dictation_item_count: int = 0,
+    rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
 ) -> List[str]:
     names: List[str] = []
@@ -5599,6 +5615,8 @@ def deck_names_for_run(
         names.append(DECK_NAMES["tae-kim-exercises"])
     if "dictation" in wanted and dictation_item_count:
         names.append(DECK_NAMES["dictation"])
+    if "rendaku" in wanted and rendaku_item_count:
+        names.append(DECK_NAMES["rendaku"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -5629,6 +5647,7 @@ def build_run_history_row(
     grammar_card_count: int,
     tae_kim_exercise_card_count: int = 0,
     dictation_item_count: int = 0,
+    rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
     bundled_deck_names: Sequence[str],
     bundled_in_wk_all: bool,
@@ -5667,6 +5686,7 @@ def build_run_history_row(
         "grammar_cards": grammar_card_count,
         "tae_kim_exercise_cards": tae_kim_exercise_card_count,
         "dictation_items": dictation_item_count,
+        "rendaku_items": rendaku_item_count,
         "pitch_entries": len(pitch_index),
         "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
         "bundled_in_wk_all": int(bundled_in_wk_all),
@@ -6011,6 +6031,7 @@ def print_preview_report(
     grammar_cards: Sequence[Any],
     tae_kim_exercise_cards: Sequence[Any],
     dictation_items: Sequence[Any],
+    rendaku_items: Sequence[Any],
     radical_items: Sequence[dict],
     preview_levels: RadicalPreviewLevels,
     pitch_index: Dict[Tuple[str, str], dict],
@@ -6157,6 +6178,14 @@ def print_preview_report(
                 for item in dictation_items
             ],
         )
+    if "rendaku" in wanted:
+        preview_deck_section(
+            DECK_NAMES["rendaku"],
+            [
+                f"{item.expression} · {item.morpheme_hint} → {item.reading} ({item.rendaku_note})"
+                for item in rendaku_items
+            ],
+        )
     if "radicals" in wanted:
         selected = [
             r for r in radical_items
@@ -6207,6 +6236,8 @@ def print_preview_report(
             f"Dictation filter: min_srs={args.dictation_min_srs}, voice={args.dictation_voice} "
             f"(WaniKani native pronunciation)"
         )
+    if "rendaku" in wanted:
+        print(f"Rendaku filter: min_srs={args.rendaku_min_srs} (Master+ when 7)")
     if args.sentence_audio:
         print(f"Vocab sentence audio: on (voice={args.sentence_audio_voice})")
     else:
@@ -6333,6 +6364,10 @@ def parser_defaults_from_config(config: dict) -> dict:
         if config_key in dictation:
             defaults[dest] = dictation[config_key]
 
+    rendaku = config.get("rendaku") or {}
+    if "min_srs" in rendaku:
+        defaults["rendaku_min_srs"] = rendaku["min_srs"]
+
     core = config.get("core") or {}
     core_bool_keys = {
         "bootstrap_scheduling",
@@ -6366,6 +6401,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         JLPT_LEVELS,
     )
     from dictation_decks import DEFAULT_DICTATION_VOICE, DICTATION_DEFAULT_MIN_SRS
+    from rendaku_decks import RENDAKU_DEFAULT_MIN_SRS
     from tae_kim_mapping import load_tae_kim_sections
 
     config_path = resolve_config_path_from_argv(argv)
@@ -6397,7 +6433,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "conjugations-verbs",
         "conjugations-adjectives",
         "conjugations-reverse",
-        "verb-types", "adjective-types", "vocab-cloze", "dictation", "grammar",
+        "verb-types", "adjective-types", "vocab-cloze", "dictation", "rendaku", "grammar",
         "tae-kim-exercises", "core", "all",
     ], default=cfg.get("deck", "all"))
     parser.add_argument("--refresh-cache", action="store_true", default=cfg.get("refresh_cache", False))
@@ -6473,6 +6509,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=int,
         default=cfg.get("dictation_min_srs", DICTATION_DEFAULT_MIN_SRS),
         help="Minimum WK SRS stage for dictation cards (7 = Master+, 5 = Guru+).",
+    )
+    parser.add_argument(
+        "--rendaku-min-srs",
+        type=int,
+        default=cfg.get("rendaku_min_srs", RENDAKU_DEFAULT_MIN_SRS),
+        help="Minimum WK SRS stage for rendaku cards (7 = Master+, 5 = Guru+).",
     )
     parser.add_argument(
         "--dictation-voice",
@@ -6918,6 +6960,17 @@ def main() -> None:
             min_srs=supplementary_min_srs(args, args.dictation_min_srs),
             voice_actor=args.dictation_voice,
         )
+    rendaku_items = []
+    if "rendaku" in wanted:
+        from rendaku_decks import collect_rendaku_items
+
+        rendaku_items = collect_rendaku_items(
+            vocab_items,
+            kanji_items,
+            indexes["assignments"],
+            min_srs=supplementary_min_srs(args, args.rendaku_min_srs),
+            max_level=args.max_level,
+        )
     core_priority_index: Dict[int, object] = {}
     if "core-radical" in wanted or "core-kanji" in wanted or "core-vocabulary" in wanted:
         from tae_kim_exercise_decks import collect_tae_kim_vocabulary_by_reading_lesson
@@ -7015,6 +7068,8 @@ def main() -> None:
             f"Dictation: {len(dictation_items)} "
             f"(min SRS {args.dictation_min_srs}, voice={args.dictation_voice})"
         )
+    if rendaku_items:
+        print(f"Rendaku: {len(rendaku_items)} (min SRS {args.rendaku_min_srs})")
     if core_radical_items:
         print(f"Core radicals: {len(core_radical_items)} (full catalog ≤ level {args.max_level})")
     if core_kanji_items:
@@ -7043,6 +7098,7 @@ def main() -> None:
             grammar_card_count=len(grammar_cards),
             tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
             dictation_item_count=len(dictation_items),
+            rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,
         )
         history_path = append_run_history(
@@ -7071,6 +7127,7 @@ def main() -> None:
                 grammar_card_count=len(grammar_cards),
                 tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
                 dictation_item_count=len(dictation_items),
+                rendaku_item_count=len(rendaku_items),
                 pitch_index=pitch_index,
                 bundled_deck_names=would_bundle,
                 bundled_in_wk_all=bool(would_bundle and not args.no_bundle),
@@ -7095,6 +7152,7 @@ def main() -> None:
             grammar_cards=grammar_cards,
             tae_kim_exercise_cards=tae_kim_exercise_cards,
             dictation_items=dictation_items,
+            rendaku_items=rendaku_items,
             radical_items=radical_items,
             preview_levels=preview_levels,
             pitch_index=pitch_index,
@@ -7307,6 +7365,17 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
         bundled_media_files.extend(media)
+    if "rendaku" in wanted and rendaku_items:
+        from rendaku_decks import build_rendaku_deck
+
+        path, deck = build_rendaku_deck(
+            rendaku_items,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
+        created.append(path)
+        built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
         maybe = build_pitch_leeches_deck(
             leeches,
@@ -7349,6 +7418,7 @@ def main() -> None:
                 grammar_card_count=len(grammar_cards),
                 tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
                 dictation_item_count=len(dictation_items),
+                rendaku_item_count=len(rendaku_items),
                 pitch_index=pitch_index,
                 bundled_deck_names=[],
                 bundled_in_wk_all=False,
@@ -7404,6 +7474,7 @@ def main() -> None:
             grammar_card_count=len(grammar_cards),
             tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
             dictation_item_count=len(dictation_items),
+            rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,
             bundled_deck_names=[deck.name for deck in built_decks],
             bundled_in_wk_all=bool(bundle_path),
