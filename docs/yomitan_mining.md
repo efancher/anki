@@ -93,7 +93,7 @@ To find duplicate **sentences** among mined notes: **Tools → WK Mining Duplica
 2. **Tools → WK Run Unlock Pass** — unsuspends when linked core vocab reaches Guru I (same as other supplementary decks).
 3. Study via **WK::Mining · Ready** or the home deck.
 
-The add-on also runs a light link pass when new mining cards are added (Anki GUI path; AnkiConnect may still need a manual link pass).
+The add-on links notes on add via `note_will_be_added` (Yomitan/AnkiConnect) and `add_cards_did_add_note` (Add dialog). Run **Tools → WK Link Mining Notes** if a card was added before the add-on was installed.
 
 ## Cloze vs term cards
 

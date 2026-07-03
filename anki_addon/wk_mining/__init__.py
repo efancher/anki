@@ -11,8 +11,9 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from anki import hooks as anki_hooks
 from aqt import gui_hooks, mw
-from aqt.qt import QAction
+from aqt.qt import QAction, QTimer
 from aqt.utils import showInfo, showWarning, tooltip
 
 from .logic import (
@@ -73,6 +74,49 @@ def _lookup_path_override() -> Optional[Path]:
     return None
 
 
+def _apply_mining_link_to_note(note, *, lookup, mature_ids) -> bool:
+    fields = _note_fields(note)
+    updates, add_tags, remove_tags = link_mining_note_fields(fields, lookup, mature_ids)
+    changed = False
+    field_map = _field_map(note)
+    for name, value in updates.items():
+        ord_index = field_map.get(name)
+        if ord_index is None:
+            continue
+        if note.fields[ord_index] != value:
+            note.fields[ord_index] = value
+            changed = True
+    tag_set = set(note.tags)
+    for tag in add_tags:
+        if tag not in tag_set:
+            note.add_tag(tag)
+            changed = True
+    for tag in remove_tags:
+        if tag in tag_set:
+            note.remove_tag(tag)
+            changed = True
+    if MINING_TAG not in tag_set:
+        note.add_tag(MINING_TAG)
+        changed = True
+    return changed
+
+
+def _suspend_or_restore_mining_cards(note) -> None:
+    for card_id in note.card_ids():
+        card = mw.col.get_card(card_id)
+        if WK_LOCKED_TAG in note.tags and card.queue != ANKI_QUEUE_SUSPENDED:
+            card.queue = ANKI_QUEUE_SUSPENDED
+            card.type = 0
+            card.ivl = 0
+            card.due = 0
+            card.flush()
+        elif WK_LOCKED_TAG not in note.tags and card.queue == ANKI_QUEUE_SUSPENDED:
+            card.queue = 0
+            card.type = 0
+            card.due = 0
+            card.flush()
+
+
 def link_mining_notes(*, silent: bool = False) -> None:
     if mw.col is None:
         showWarning("Open a collection first.")
@@ -93,49 +137,21 @@ def link_mining_notes(*, silent: bool = False) -> None:
 
     for note_id in note_ids:
         note = mw.col.get_note(note_id)
-        fields = _note_fields(note)
-        updates, add_tags, remove_tags = link_mining_note_fields(fields, lookup, mature_ids)
-        changed = False
         field_map = _field_map(note)
-        for name, value in updates.items():
-            ord_index = field_map.get(name)
-            if ord_index is None:
-                continue
-            if note.fields[ord_index] != value:
-                note.fields[ord_index] = value
-                changed = True
+        wk_ord = field_map.get("WkSubjectId")
+        before_id = (note.fields[wk_ord] or "").strip() if wk_ord is not None else ""
+        had_locked = WK_LOCKED_TAG in note.tags
+        if _apply_mining_link_to_note(note, lookup=lookup, mature_ids=mature_ids):
+            after_id = (note.fields[wk_ord] or "").strip() if wk_ord is not None else ""
+            if after_id and after_id != before_id:
                 linked += 1
-        tag_set = set(note.tags)
-        for tag in add_tags:
-            if tag not in tag_set:
-                note.add_tag(tag)
-                changed = True
-                if tag == WK_LOCKED_TAG:
-                    locked += 1
-        for tag in remove_tags:
-            if tag in tag_set:
-                note.remove_tag(tag)
-                changed = True
-                if tag == WK_LOCKED_TAG:
-                    unlocked += 1
-        if MINING_TAG not in tag_set:
-            note.add_tag(MINING_TAG)
-            changed = True
-        if changed:
             mw.col.update_note(note)
-            for card_id in note.card_ids():
-                card = mw.col.get_card(card_id)
-                if WK_LOCKED_TAG in note.tags and card.queue != ANKI_QUEUE_SUSPENDED:
-                    card.queue = ANKI_QUEUE_SUSPENDED
-                    card.type = 0
-                    card.ivl = 0
-                    card.due = 0
-                    card.flush()
-                elif WK_LOCKED_TAG not in note.tags and card.queue == ANKI_QUEUE_SUSPENDED:
-                    card.queue = 0
-                    card.type = 0
-                    card.due = 0
-                    card.flush()
+        has_locked = WK_LOCKED_TAG in note.tags
+        if has_locked and not had_locked:
+            locked += 1
+        elif not has_locked and had_locked:
+            unlocked += 1
+        _suspend_or_restore_mining_cards(note)
 
     mw.col.save()
     message = (
@@ -167,15 +183,27 @@ def mining_duplicate_report() -> None:
     showInfo("\n".join(lines))
 
 
-def on_cards_added(cards) -> None:
-    note_ids = {int(card.nid) for card in cards}
-    mining_ids = []
-    for note_id in note_ids:
-        note = mw.col.get_note(note_id)
-        if note.note_type()["name"] == MINING_NOTE_TYPE:
-            mining_ids.append(note_id)
-    if mining_ids:
-        link_mining_notes(silent=True)
+def _schedule_link_pass() -> None:
+    QTimer.singleShot(0, lambda: link_mining_notes(silent=True))
+
+
+def on_note_will_be_added(note, _deck_id) -> None:
+    """AnkiConnect / Yomitan path — runs before the note is saved."""
+    if mw.col is None or note.note_type()["name"] != MINING_NOTE_TYPE:
+        return
+    lookup = load_vocab_lookup(_lookup_path_override())
+    if not lookup:
+        return
+    mature_ids = _core_mature_subject_ids()
+    _apply_mining_link_to_note(note, lookup=lookup, mature_ids=mature_ids)
+    _schedule_link_pass()
+
+
+def on_add_cards_did_add_note(note) -> None:
+    """Add Cards dialog path — cards exist after this hook."""
+    if note.note_type()["name"] != MINING_NOTE_TYPE:
+        return
+    _schedule_link_pass()
 
 
 def setup_menu() -> None:
@@ -188,5 +216,11 @@ def setup_menu() -> None:
     mw.form.menuTools.addAction(action_dupes)
 
 
-gui_hooks.add_cards.append(on_cards_added)
-setup_menu()
+def register_hooks() -> None:
+    anki_hooks.note_will_be_added.append(on_note_will_be_added)
+    if hasattr(gui_hooks, "add_cards_did_add_note"):
+        gui_hooks.add_cards_did_add_note.append(on_add_cards_did_add_note)
+
+
+register_hooks()
+gui_hooks.main_window_did_init.append(setup_menu)
