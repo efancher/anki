@@ -67,8 +67,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.30.0"
-BUILD_DATE = "2026-06-28"
+VERSION = "2.31.0"
+BUILD_DATE = "2026-07-03"
 
 import warnings
 
@@ -126,6 +126,7 @@ DEFAULT_GENERATE_DECKS = (
     "vocab-cloze",
     "dictation",
     "rendaku",
+    "mining",
     "grammar",
 )
 
@@ -231,6 +232,7 @@ DECK_IDS = {
     "core-kanji": 2059400129,
     "core-vocabulary": 2059400130,
     "rendaku": 2059400131,
+    "mining": 2059400132,
 }
 
 MODEL_IDS = {
@@ -249,6 +251,7 @@ MODEL_IDS = {
     "core_radical": 1865429025,
     "core_item": 1865429026,
     "rendaku": 1865429027,
+    "mining": 1865429028,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -270,6 +273,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
+    "mining": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -294,6 +298,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "core_radical": 13,
     "core_item": 14,
     "rendaku": 15,
+    "mining": 16,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -317,6 +322,7 @@ NOTE_TYPE_NAMES = {
     "core_radical": "WK Core Radical",
     "core_item": "WK Core Item",
     "rendaku": "WK Update-Safe Rendaku",
+    "mining": "WK Update-Safe Yomitan Mining",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -497,6 +503,14 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
+        "name": "WK::Mining · Ready",
+        "search": daily_filtered_deck_search(
+            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:wk-locked'
+        ),
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
         "name": "WK::Conjugations · Verbs",
         "search": daily_filtered_deck_search(
             'deck:"WaniKani Verb Conjugation Practice"',
@@ -574,6 +588,7 @@ DECK_NAMES = {
     "vocab-cloze": "WaniKani Vocabulary Context",
     "dictation": "WaniKani Dictation",
     "rendaku": "WaniKani Rendaku",
+    "mining": "Immersion · Yomitan Mining",
     "grammar": "Japanese Grammar Context",
     "tae-kim-exercises": "Japanese Grammar Exercises",
     "core-radical": "WaniKani Core · Radicals",
@@ -5830,6 +5845,8 @@ def deck_names_for_run(
         names.append(DECK_NAMES["dictation"])
     if "rendaku" in wanted and rendaku_item_count:
         names.append(DECK_NAMES["rendaku"])
+    if "mining" in wanted:
+        names.append(DECK_NAMES["mining"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -6649,7 +6666,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "conjugations-verbs",
         "conjugations-adjectives",
         "conjugations-reverse",
-        "verb-types", "adjective-types", "vocab-cloze", "dictation", "rendaku", "grammar",
+        "verb-types", "adjective-types", "vocab-cloze", "dictation", "rendaku", "mining", "grammar",
         "tae-kim-exercises", "core", "all",
     ], default=cfg.get("deck", "all"))
     parser.add_argument("--refresh-cache", action="store_true", default=cfg.get("refresh_cache", False))
@@ -7261,6 +7278,16 @@ def main() -> None:
             f"config template: {track_config_path}"
         )
     print(f"Eligible vocab: {len(vocab_items)}")
+    if vocab_items:
+        from mining_logic import build_vocab_lookup
+
+        lookup_entries = build_vocab_lookup(vocab_items)
+        lookup_path = output_dir / "wk_vocab_lookup.json"
+        lookup_path.write_text(
+            json.dumps({"entries": lookup_entries}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"Vocab lookup (Yomitan mining): {lookup_path} ({len(lookup_entries)} surface forms)")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
     print(f"Radical preview levels: current={preview_levels.current}, next={preview_levels.next}, locked_next={preview_levels.locked_next}")
@@ -7310,6 +7337,8 @@ def main() -> None:
         )
     if rendaku_items:
         print(f"Rendaku: {len(rendaku_items)} (min SRS {args.rendaku_min_srs})")
+    if "mining" in wanted:
+        print("Yomitan mining: note type + empty deck (see docs/yomitan_mining.md)")
     if core_radical_items:
         print(f"Core radicals: {len(core_radical_items)} (full catalog ≤ level {args.max_level})")
     if core_kanji_items:
@@ -7623,6 +7652,12 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
         bundled_media_files.extend(media)
+    if "mining" in wanted:
+        from mining_decks import build_mining_deck
+
+        path, deck = build_mining_deck(output_dir)
+        created.append(path)
+        built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
         maybe = build_pitch_leeches_deck(
             leeches,

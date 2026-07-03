@@ -487,6 +487,18 @@ Dedicated leech decks are optional (legacy). Anki’s **Browse → `tag:leech`**
 | Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading |
 | **Grammar gated by kanji** (runtime, not built) | Grammar feels too hard before core kanji mature — [below](#grammar-gated-by-kanji-planned) |
 | YouTube immersion deck | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) |
+| **Yomitan sentence mining** | [docs/yomitan_mining.md](docs/yomitan_mining.md) — live mining via AnkiConnect |
+
+### Yomitan mining (reading → clozes)
+
+Mine sentences while reading; cards land in **Immersion · Yomitan Mining** and respect **wk_unlock** when linked to WK vocab.
+
+1. Regenerate (`mining` is in default `generate_decks`) → import `wk_all.apkg`.
+2. `./scripts/sync_anki_addons.sh` → restart Anki (includes **wk_mining**).
+3. Configure Yomitan → Anki field map (see [docs/yomitan_mining.md](docs/yomitan_mining.md)).
+4. After mining: **Tools → WK Link Mining Notes**; study via **WK::Mining · Ready**.
+
+**Duplicates:** first field must be `{expression}|{sentence}`; enable Yomitan “Prevent adding”. Mined sentences are separate from WK Vocabulary Context clozes.
 
 ### Grammar gated by kanji (planned)
 

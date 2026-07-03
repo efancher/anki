@@ -206,3 +206,30 @@ Runs automatically on collection load when `auto_run_on_load` is true (default).
 ```
 
 Track map path: set `WK_TAE_KIM_TRACK_MAP` or place `wk_tae_kim_track_map.json` in `out/` (default after regenerate).
+
+---
+
+# WK Mining (Yomitan integration)
+
+Links mined notes to **WkSubjectId**, applies **wk-locked** until core vocab matures, and reports duplicate sentences.
+
+## Install once
+
+Copy the `wk_mining` folder into Anki's add-ons folder (same path as above),
+then restart Anki.
+
+## After regenerate
+
+1. `python wk_decks.py --from-config` writes `out/wk_vocab_lookup.json`.
+2. Import `out/wk_all.apkg` (includes empty **Immersion · Yomitan Mining** deck + note type).
+3. Configure Yomitan: [docs/yomitan_mining.md](../docs/yomitan_mining.md).
+
+## Tools
+
+- **WK Link Mining Notes** — match expressions to WK ids; suspend until mature.
+- **WK Mining Duplicate Report** — same normalized sentence mined twice.
+
+Optional: `WK_VOCAB_LOOKUP=/path/to/wk_vocab_lookup.json`
+
+Full setup: [docs/yomitan_mining.md](../docs/yomitan_mining.md)
+

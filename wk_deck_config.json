@@ -11,7 +11,8 @@
     "adjective-types",
     "vocab-cloze",
     "dictation",
-    "grammar"
+    "grammar",
+    "mining"
   ],
   "output_dir": "out",
   "only_started": false,
