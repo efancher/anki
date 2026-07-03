@@ -1,11 +1,15 @@
 """
 mining_decks.py
 
-Empty Yomitan mining deck + note type for live sentence/term mining via AnkiConnect.
+Yomitan mining deck + note type for live sentence/term mining via AnkiConnect.
+
+Includes one suspended placeholder card so Anki imports the deck and note type
+(zero-card decks are skipped on import).
 """
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 from typing import Tuple
 
@@ -17,9 +21,11 @@ from wk_decks import (
     MODEL_TEMPLATE_VERSIONS,
     NOTE_TYPE_NAMES,
     WkModel,
+    stable_guid,
     versioned_css,
     write_apkg,
 )
+from wk_scheduling import patch_apkg_suspend_notes_with_tag
 
 MINING_DECK_ID = 2059400132
 MINING_MODEL_ID = 1865429028
@@ -28,6 +34,11 @@ MINING_NOTE_TYPE_NAME = NOTE_TYPE_NAMES["mining"]
 MINING_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["mining"]
 MINING_MODEL_TEMPLATE_KEY = "mining"
 MINING_TAG = "yomitan-mining"
+MINING_SETUP_TAG = "mining-setup"
+MINING_SETUP_KIND = "mining-setup"
+MINING_SETUP_DUPLICATE_KEY = "wk-yomitan-mining-setup"
+# Anki built-in TTS — reads Sentence field (whole phrase); uses system ja_JP voice.
+MINING_SENTENCE_TTS = "{{tts ja_JP:Sentence}}"
 
 
 def make_mining_model() -> WkModel:
@@ -75,6 +86,9 @@ def make_mining_model() -> WkModel:
                 <div class="meaning answer">{{Glossary}}</div>
                 {{#Sentence}}
                 <div class="context">
+                  <div class="sentence-tts">"""
+                + MINING_SENTENCE_TTS
+                + """</div>
                   <div class="jp">{{Sentence}}</div>
                   {{#SentenceFurigana}}<div class="reading">{{SentenceFurigana}}</div>{{/SentenceFurigana}}
                 </div>
@@ -94,16 +108,51 @@ def make_mining_model() -> WkModel:
 .cloze-blank { color: #9ecfff; letter-spacing: 0.08em; }
 .type-answer { margin-top: 12px; }
 .source { font-size: 13px; color: #aaa; margin-top: 8px; word-break: break-all; }
+.sentence-tts { margin: 8px 0; }
 """,
             MINING_MODEL_TEMPLATE_KEY,
         ),
     )
 
 
+def _mining_setup_note(model: WkModel) -> genanki.Note:
+    guid = stable_guid(MINING_SETUP_KIND, 1)
+    meta = f"placeholder · template {MINING_TEMPLATE_VERSION} · delete after first Yomitan mine"
+    glossary = (
+        "Placeholder so Anki imports this deck and note type. "
+        "Mine a word from Yomitan, then delete this suspended card in Browse."
+    )
+    return genanki.Note(
+        model=model,
+        fields=[
+            MINING_SETUP_DUPLICATE_KEY,
+            "（セットアップ）",
+            "",
+            html.escape(glossary),
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            html.escape(meta),
+        ],
+        tags=[MINING_TAG, MINING_SETUP_TAG],
+        guid=guid,
+    )
+
+
 def build_mining_deck(output_dir: Path) -> Tuple[Path, genanki.Deck]:
-    """Export an empty mining deck so Yomitan can target the note type after import."""
+    """Export mining deck with a suspended setup card (Anki skips zero-card decks)."""
     deck = genanki.Deck(MINING_DECK_ID, MINING_DECK_NAME)
-    deck.add_model(make_mining_model())
+    model = make_mining_model()
+    deck.add_model(model)
+    deck.add_note(_mining_setup_note(model))
     out = output_dir / "wk_mining.apkg"
     write_apkg(deck, out)
+    patch_apkg_suspend_notes_with_tag(out, MINING_SETUP_TAG)
     return out, deck

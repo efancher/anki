@@ -67,7 +67,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.31.0"
+VERSION = "2.31.2"
 BUILD_DATE = "2026-07-03"
 
 import warnings
@@ -273,7 +273,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v1",
+    "mining": "v2",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -505,7 +505,7 @@ FILTERED_DECK_DEFINITIONS = [
     {
         "name": "WK::Mining · Ready",
         "search": daily_filtered_deck_search(
-            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:wk-locked'
+            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:wk-locked -tag:mining-setup'
         ),
         "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
@@ -7718,6 +7718,11 @@ def main() -> None:
             media_files=bundled_media_files or None,
             patch_apkg_scheduling=bool(args.bootstrap_wk_scheduling),
         )
+        if "mining" in wanted and bundle_path is not None:
+            from mining_decks import MINING_SETUP_TAG
+            from wk_scheduling import patch_apkg_suspend_notes_with_tag
+
+            patch_apkg_suspend_notes_with_tag(bundle_path, MINING_SETUP_TAG)
     settings_path = write_filtered_deck_suggestions(
         output_dir,
         max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
