@@ -51,7 +51,8 @@ PRIORITY_FILTERED_DECK_NAMES = frozenset(
         "WK::Tae Kim · Grammar Vocab",
         "WK::Tae Kim · Grammar Prereq Kanji",
         "WK::Tae Kim · Grammar Prereq Radicals",
-        "WK::N5 · Kanji & Vocab",
+        "WK::N5 · Kanji",
+        "WK::N5 · Vocabulary",
         "WK::N5 · Prereq Kanji",
         "WK::N5 · Prereq Radicals",
     }

@@ -28,6 +28,7 @@ from wk_decks import (
     meta_html,
     primary_meanings,
     primary_readings,
+    kanji_index_by_characters,
     radical_description_html,
     radical_display,
     radical_subjects,
@@ -287,6 +288,7 @@ def build_core_radical_deck(
     suspend_unstarted: bool = True,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
+    kanji_items: Sequence[dict] = (),
 ) -> Tuple[Path, genanki.Deck]:
     from wk_decks import radical_display_html
 
@@ -295,6 +297,7 @@ def build_core_radical_deck(
     media_names, media_paths = ensure_radical_media_files(radicals)
     deck.wk_media_files = media_paths
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
+    kanji_by_characters = kanji_index_by_characters(kanji_items)
 
     for radical in sorted(
         radicals,
@@ -319,7 +322,7 @@ def build_core_radical_deck(
                 str(level),
                 str(radical["id"]),
                 "",
-                radical_description_html(radical),
+                radical_description_html(radical, kanji_by_characters),
             ],
             tags=[
                 "wanikani",

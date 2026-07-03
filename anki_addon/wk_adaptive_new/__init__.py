@@ -379,6 +379,8 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
         f"New budget: {budget}",
         *lines,
     ]
+    if mw is not None:
+        mw.reset()
     if not quiet:
         tooltip(f"WK adaptive new: budget {budget} (reviews {review_load})", period=6000)
     return budget, summary_lines

@@ -26,6 +26,9 @@ from wk_decks import (
     WK_FSRS_PRESET_NAME,
     WK_SRS_STAGE_MASTER,
     collect_conjugation_drills,
+    make_conjugation_model,
+    make_conjugation_reverse_model,
+    make_word_class_model,
     mock_vocab_for_conjugation,
     patch_apkg_deck_options,
     write_apkg,
@@ -115,6 +118,35 @@ class ConjugationMinSrsTest(unittest.TestCase):
         self.assertEqual(verb_drills, [])
         self.assertGreater(len(na_drills), 0)
         self.assertTrue(all(d.word_class == "na_adjective" for d in na_drills))
+
+
+class ConjugationAudioTemplateTests(unittest.TestCase):
+    def test_conjugation_model_places_prompt_audio_on_front_and_answer_on_back(self) -> None:
+        model = make_conjugation_model()
+        field_names = [field["name"] for field in model.fields]
+        self.assertIn("PromptAudio", field_names)
+        self.assertIn("AnswerAudio", field_names)
+        qfmt = model.templates[0]["qfmt"]
+        afmt = model.templates[0]["afmt"]
+        self.assertIn("PromptAudio", qfmt)
+        self.assertNotIn("AnswerAudio", qfmt)
+        self.assertIn("AnswerAudio", afmt)
+
+    def test_conjugation_reverse_model_places_conjugated_audio_on_front(self) -> None:
+        model = make_conjugation_reverse_model()
+        qfmt = model.templates[0]["qfmt"]
+        afmt = model.templates[0]["afmt"]
+        self.assertIn("PromptAudio", qfmt)
+        self.assertIn("AnswerAudio", afmt)
+        self.assertNotIn("AnswerAudio", qfmt)
+
+    def test_word_class_model_places_reading_audio_on_front_and_back(self) -> None:
+        model = make_word_class_model()
+        qfmt = model.templates[0]["qfmt"]
+        afmt = model.templates[0]["afmt"]
+        self.assertIn("PromptAudio", qfmt)
+        self.assertIn("AnswerAudio", afmt)
+        self.assertNotIn("AnswerAudio", qfmt)
 
 
 class ApkgDeckOptionsPatchTest(unittest.TestCase):

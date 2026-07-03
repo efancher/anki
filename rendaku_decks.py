@@ -16,13 +16,17 @@ from wk_decks import (
     CACHE_DIR,
     COMMON_CSS,
     DECK_NAMES,
+    DEFAULT_SENTENCE_AUDIO_VOICE,
+    DRILL_READING_AUDIO_CSS,
     MODEL_TEMPLATE_VERSIONS,
     NOTE_TYPE_NAMES,
+    WK_SHARED_MEDIA_SUBDIR,
     WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME,
     WkModel,
     first_reading,
     load_srs_stage_interval_days,
     primary_meanings,
+    require_edge_tts,
     srs_stage,
     stable_guid,
     supplementary_import_tags,
@@ -222,6 +226,7 @@ def make_rendaku_model() -> WkModel:
             {"name": "MorphemeHint"},
             {"name": "TypeReading"},
             {"name": "RendakuNote"},
+            {"name": "AnswerAudio"},
             {"name": "Meta"},
         ],
         templates=[
@@ -239,6 +244,7 @@ def make_rendaku_model() -> WkModel:
                 {{FrontSide}}
                 <hr>
                 <div class="reading answer">{{TypeReading}}</div>
+                {{#AnswerAudio}}<div class="reading-audio">{{AnswerAudio}}</div>{{/AnswerAudio}}
                 <div class="rendaku-note">{{RendakuNote}}</div>
                 <div class="meta">{{Meta}}</div>
                 """,
@@ -246,6 +252,7 @@ def make_rendaku_model() -> WkModel:
         ],
         css=versioned_css(
             COMMON_CSS
+            + DRILL_READING_AUDIO_CSS
             + """
 .jp { font-size: 42px; margin: 12px 0; }
 .meaning { font-size: 18px; color: #bbb; margin-bottom: 8px; }
@@ -270,13 +277,22 @@ def build_rendaku_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map=None,
-) -> Tuple[Path, genanki.Deck]:
+    reading_audio: bool = True,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+) -> Tuple[Path, genanki.Deck, List[str]]:
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+
     deck = genanki.Deck(RENDAKU_DECK_ID, RENDAKU_DECK_NAME)
     model = make_rendaku_model()
     template_label = RENDAKU_TEMPLATE_VERSION
     stage_interval_map = interval_map or load_srs_stage_interval_days(
         CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
     )
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
+    media_files: List[str] = []
+    if reading_audio:
+        require_edge_tts()
+        print(f"Rendaku reading audio (voice={reading_audio_voice})...")
 
     for item in items:
         vocab = item.vocab
@@ -284,6 +300,16 @@ def build_rendaku_deck(
         srs = srs_stage(vocab, assignment_index)
         guid = stable_guid("rendaku", vocab["id"])
         meta = f"WK L{level} · SRS {srs} · rendaku · template {template_label}"
+        answer_audio = ""
+        if reading_audio and item.reading:
+            answer_audio, answer_paths = prepare_kana_reading_audio_field(
+                item.reading,
+                media_dir,
+                vocab=vocab,
+                wk_voice=DEFAULT_WK_READING_VOICE,
+                tts_voice=reading_audio_voice,
+            )
+            media_files.extend(answer_paths)
         note_tags = [
             "wanikani",
             "rendaku",
@@ -303,6 +329,7 @@ def build_rendaku_deck(
                 html.escape(item.morpheme_hint),
                 html.escape(item.reading),
                 html.escape(item.rendaku_note),
+                answer_audio,
                 html.escape(meta),
             ],
             tags=note_tags,
@@ -311,5 +338,5 @@ def build_rendaku_deck(
         deck.add_note(note)
 
     out = output_dir / "wk_rendaku.apkg"
-    write_apkg(deck, out)
-    return out, deck
+    write_apkg(deck, out, media_files=media_files or None)
+    return out, deck, media_files

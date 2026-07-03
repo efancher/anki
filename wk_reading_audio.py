@@ -22,6 +22,7 @@ from wk_decks import (
     ensure_sentence_audio_file,
     first_reading,
     primary_readings,
+    tts_audio_basename,
 )
 
 PRONUNCIATION_AUDIO_CACHE_DIR = CACHE_DIR / "pronunciation_audio"
@@ -163,20 +164,34 @@ def reading_audio_basename(
 ) -> str:
     kind = subject.get("object") or "subject"
     slug = voice_actor_slug(voice_actor)
-    if kind == "kanji" and reading:
+    if reading:
         rslug = reading_filename_slug(reading)
-        return f"wk_reading_kanji_{subject['id']}_{rslug}_{slug}.{ext}"
+        if kind == "kanji":
+            return f"wk_reading_kanji_{subject['id']}_{rslug}_{slug}.{ext}"
+        if kind == "vocabulary":
+            return f"wk_reading_vocabulary_{subject['id']}_{rslug}_{slug}.{ext}"
     return f"wk_reading_{kind}_{subject['id']}_{slug}.{ext}"
 
 
-def pronunciation_audio_cache_path(vocab_id: int, voice_actor: str, ext: str) -> Path:
+def pronunciation_audio_cache_path(
+    vocab_id: int,
+    voice_actor: str,
+    ext: str,
+    *,
+    reading: Optional[str] = None,
+) -> Path:
     slug = voice_actor_slug(voice_actor)
+    if reading:
+        rslug = reading_filename_slug(reading)
+        return PRONUNCIATION_AUDIO_CACHE_DIR / f"wk_dictation_{vocab_id}_{rslug}_{slug}.{ext}"
     return PRONUNCIATION_AUDIO_CACHE_DIR / f"wk_dictation_{vocab_id}_{slug}.{ext}"
 
 
-def dictation_audio_basename(vocab: dict, voice_actor: str, ext: str) -> str:
-    """Same packaged filename as core vocab reading audio (one file per vocab/voice)."""
-    return reading_audio_basename(vocab, voice_actor, ext)
+def pronunciation_from_audio_entry(entry: dict) -> Optional[str]:
+    pronunciation = (entry.get("metadata") or {}).get("pronunciation")
+    if pronunciation and str(pronunciation).strip():
+        return str(pronunciation).strip()
+    return None
 
 
 def select_pronunciation_audio(
@@ -184,23 +199,62 @@ def select_pronunciation_audio(
     *,
     voice_actor: str = DEFAULT_WK_READING_VOICE,
     prefer_mpeg: bool = True,
+    reading: Optional[str] = None,
 ) -> Optional[dict]:
     """Pick one pronunciation_audios entry for a vocabulary subject."""
     audios = vocab.get("data", {}).get("pronunciation_audios") or []
     if not audios:
         return None
-    matches = [
-        entry
-        for entry in audios
-        if str((entry.get("metadata") or {}).get("voice_actor_name") or "") == voice_actor
-    ]
-    pool = matches or list(audios)
+
+    target_readings: List[str] = []
+    if reading:
+        target_readings = [reading]
+    else:
+        target_readings = primary_readings(vocab)
+
+    def voice_matches(entry: dict) -> bool:
+        return str((entry.get("metadata") or {}).get("voice_actor_name") or "") == voice_actor
+
+    def reading_matches(entry: dict) -> bool:
+        if not target_readings:
+            return True
+        pron = pronunciation_from_audio_entry(entry)
+        return pron in target_readings if pron else False
+
+    def sort_key(entry: dict) -> Tuple[int, int]:
+        content_type = str(entry.get("content_type") or "").lower()
+        mpeg_rank = 0 if prefer_mpeg and "mpeg" in content_type else 1
+        pron = pronunciation_from_audio_entry(entry) or ""
+        try:
+            reading_rank = target_readings.index(pron)
+        except ValueError:
+            reading_rank = len(target_readings)
+        return mpeg_rank, reading_rank
+
+    candidates = [entry for entry in audios if voice_matches(entry) and reading_matches(entry)]
+    if candidates:
+        return min(candidates, key=sort_key)
+
+    voice_pool = [entry for entry in audios if voice_matches(entry)]
+    if voice_pool:
+        if prefer_mpeg:
+            for entry in voice_pool:
+                if "mpeg" in str(entry.get("content_type") or "").lower():
+                    return entry
+        return voice_pool[0]
+
     if prefer_mpeg:
-        for entry in pool:
-            content_type = str(entry.get("content_type") or "")
-            if "mpeg" in content_type.lower():
+        for entry in audios:
+            if "mpeg" in str(entry.get("content_type") or "").lower():
                 return entry
-    return pool[0] if pool else None
+    return audios[0]
+
+
+def dictation_audio_basename(vocab: dict, voice_actor: str, ext: str) -> str:
+    """Same packaged filename as core vocab reading audio (one file per vocab/voice/reading)."""
+    entry = select_pronunciation_audio(vocab, voice_actor=voice_actor)
+    reading = pronunciation_from_audio_entry(entry) if entry else None
+    return reading_audio_basename(vocab, voice_actor, ext, reading=reading)
 
 
 def pronunciation_audio_request_headers() -> dict:
@@ -216,16 +270,23 @@ def ensure_pronunciation_audio_file(
     voice_actor: str = DEFAULT_WK_READING_VOICE,
     dest_path: Path,
     refresh: bool = False,
+    reading: Optional[str] = None,
 ) -> Tuple[bool, bool]:
     """Download WK native vocabulary audio. Returns (success, was_cached)."""
-    entry = select_pronunciation_audio(vocab, voice_actor=voice_actor)
+    entry = select_pronunciation_audio(vocab, voice_actor=voice_actor, reading=reading)
     if entry is None:
         return False, False
     url = str(entry.get("url") or "").strip()
     if not url:
         return False, False
     ext = _audio_extension(str(entry.get("content_type") or ""), url)
-    cache_path = pronunciation_audio_cache_path(vocab["id"], voice_actor, ext)
+    pronunciation = pronunciation_from_audio_entry(entry)
+    cache_path = pronunciation_audio_cache_path(
+        vocab["id"],
+        voice_actor,
+        ext,
+        reading=pronunciation,
+    )
     try:
         was_cached = cache_path.is_file() and cache_path.stat().st_size > 0 and not refresh
         if not was_cached:
@@ -312,11 +373,17 @@ def prepare_reading_audio_field(
 
     if obj == "vocabulary":
         entry = select_pronunciation_audio(subject, voice_actor=wk_voice)
+        pronunciation = pronunciation_from_audio_entry(entry) if entry else None
         ext = _audio_extension(
             str((entry or {}).get("content_type") or ""),
             str((entry or {}).get("url") or ""),
         )
-        basename = reading_audio_basename(subject, wk_voice, ext)
+        basename = reading_audio_basename(
+            subject,
+            wk_voice,
+            ext,
+            reading=pronunciation,
+        )
         dest = media_dir / basename
         ok, _was_cached = ensure_pronunciation_audio_file(
             subject,
@@ -345,3 +412,53 @@ def prepare_reading_audio_field(
         sound_tags.append(f"[sound:{basename}]")
         media_paths.append(str(dest.resolve()))
     return "".join(sound_tags), media_paths
+
+
+def prepare_kana_reading_audio_field(
+    reading: str,
+    media_dir: Path,
+    *,
+    vocab: Optional[dict] = None,
+    wk_voice: str = DEFAULT_WK_READING_VOICE,
+    tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    refresh: bool = False,
+) -> Tuple[str, List[str]]:
+    """
+    Audio for a single kana reading on drill cards.
+    Uses WK native vocabulary audio when available; otherwise edge-tts.
+    """
+    plain = (reading or "").strip()
+    if not plain:
+        return "", []
+
+    if vocab is not None and vocab.get("object") == "vocabulary":
+        entry = select_pronunciation_audio(vocab, voice_actor=wk_voice, reading=plain)
+        if entry is not None:
+            ext = _audio_extension(
+                str(entry.get("content_type") or ""),
+                str(entry.get("url") or ""),
+            )
+            pronunciation = pronunciation_from_audio_entry(entry) or plain
+            basename = reading_audio_basename(
+                vocab,
+                wk_voice,
+                ext,
+                reading=pronunciation,
+            )
+            dest = media_dir / basename
+            ok, _was_cached = ensure_pronunciation_audio_file(
+                vocab,
+                voice_actor=wk_voice,
+                dest_path=dest,
+                refresh=refresh,
+                reading=plain,
+            )
+            if ok:
+                return f"[sound:{basename}]", [str(dest.resolve())]
+
+    basename = tts_audio_basename(plain, tts_voice)
+    dest = media_dir / basename
+    ok, _was_cached = ensure_sentence_audio_file(plain, tts_voice, dest, refresh=refresh)
+    if not ok:
+        return "", []
+    return f"[sound:{basename}]", [str(dest.resolve())]

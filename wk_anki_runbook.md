@@ -200,7 +200,7 @@ Read on guidetojapanese.org; review in **Japanese Grammar Context** when useful.
 ### Suggested daily order
 
 1. **WK::Core** filtered decks until empty (Radicals → Kanji → Vocabulary).
-2. **Tae Kim WK track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5** equivalents) — these are **core** cards.
+2. **Tae Kim WK track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5 Prereq** → **N5 Kanji** → **N5 Vocabulary**) — these are **core** cards.
 3. **WK::Conjugations ·** filtered decks (verbs → adjectives → reverse/types as you like).
 4. **One** other supplementary filtered deck if you have energy (dictation → vocab context).
 5. **WK::Grammar** (Context deck) for Hanabira pattern review when useful.
@@ -280,7 +280,8 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::Tae Kim · Grammar Vocab** | Kanji/vocab in Tae Kim lesson text (`tag:tk-grammar-vocab`) |
 | **WK::Tae Kim · Grammar Prereq Kanji** | Kanji still needed for grammar vocab (`tk-grammar-prereq`, not yet `wk-mature`) |
 | **WK::Tae Kim · Grammar Prereq Radicals** | Radicals still needed for grammar chain (`tk-grammar-prereq`, not yet `wk-mature`) |
-| **WK::N5 · Kanji & Vocab** | WK levels 1–10 band (`tag:jlpt-n5-vocab`) |
+| **WK::N5 · Kanji** | N5-band kanji (`tag:jlpt-n5-vocab tag:kanji`, 5-card batches) |
+| **WK::N5 · Vocabulary** | N5-band vocabulary (`tag:jlpt-n5-vocab tag:vocabulary`, 5-card batches) |
 | **WK::N5 · Prereq Kanji** | Kanji still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
 | **WK::N5 · Prereq Radicals** | Radicals still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
 | **WK::Vocab Context** | Production cloze |

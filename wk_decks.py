@@ -67,7 +67,7 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.28.0"
+VERSION = "2.30.0"
 BUILD_DATE = "2026-06-28"
 
 import warnings
@@ -95,7 +95,7 @@ import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, DefaultDict, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
 import genanki
 import requests
@@ -172,6 +172,9 @@ SENTENCE_AUDIO_CACHE_DIR = CACHE_DIR / "sentence_audio"
 DEFAULT_SENTENCE_AUDIO_VOICE = "ja-JP-NanamiNeural"
 VOCAB_CLOZE_MEDIA_SUBDIR = "media/vocab_cloze"
 WK_SHARED_MEDIA_SUBDIR = "media/shared"
+DRILL_READING_AUDIO_CSS = """
+.reading-audio { margin: 10px auto 6px; }
+"""
 SECONDS_PER_DAY = 86400
 REVIEW_STATS_BATCH_SIZE = 100
 READING_KEYWORD_MIN_USES = 5
@@ -258,15 +261,15 @@ MODEL_TEMPLATE_VERSIONS = {
     "reading_keyword": "v3",
     "kanji_radical": "v2",
     "phonetic_drill": "v5",
-    "conjugation": "v4",
-    "word_class": "v2",
+    "conjugation": "v6",
+    "word_class": "v4",
     "vocab_cloze": "v7",
-    "conjugation_reverse": "v4",
+    "conjugation_reverse": "v6",
     "grammar_cloze": "v4",
     "dictation": "v3",
     "core_radical": "v2",
     "core_item": "v5",
-    "rendaku": "v1",
+    "rendaku": "v3",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -442,11 +445,19 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::N5 · Kanji & Vocab",
+        "name": "WK::N5 · Kanji",
         "search": daily_filtered_deck_search(
-            "tag:wk-core tag:jlpt-n5-vocab",
+            "tag:wk-core tag:jlpt-n5-vocab tag:kanji",
         ),
-        "limit": 25,
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::N5 · Vocabulary",
+        "search": daily_filtered_deck_search(
+            "tag:wk-core tag:jlpt-n5-vocab tag:vocabulary",
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
@@ -1529,6 +1540,9 @@ WK_MNEMONIC_SEMANTIC_CLASS = {
     "vocabulary": "wk-mnemonic-vocabulary",
     "reading": "wk-mnemonic-reading",
 }
+
+# WK marks radicals that share a glyph with a kanji in meaning_mnemonic copy.
+RADICAL_SAME_AS_KANJI_RE = re.compile(r"same\s+as\s+the\s+kanji", re.IGNORECASE)
 
 
 def _wk_mnemonic_fragment(text: str) -> str:
@@ -3772,6 +3786,8 @@ def make_conjugation_model() -> WkModel:
             {"name": "ConjExpression"},
             {"name": "TypeConjExpression"},
             {"name": "ConjReading"},
+            {"name": "PromptAudio"},
+            {"name": "AnswerAudio"},
             {"name": "Meta"},
         ],
         templates=[
@@ -3781,6 +3797,7 @@ def make_conjugation_model() -> WkModel:
                 <div class="prompt">{{Prompt}}</div>
                 <div class="jp">{{DictExpression}}</div>
                 <div class="reading">{{DictReading}}</div>
+                {{#PromptAudio}}<div class="reading-audio">{{PromptAudio}}</div>{{/PromptAudio}}
                 <div class="meaning">{{Meaning}}</div>
                 <div class="type-answer">{{type:TypeConjExpression}}</div>
                 """,
@@ -3789,12 +3806,14 @@ def make_conjugation_model() -> WkModel:
                 <hr>
                 <div class="jp answer">{{ConjExpression}}</div>
                 <div class="reading answer">{{ConjReading}}</div>
+                {{#AnswerAudio}}<div class="reading-audio">{{AnswerAudio}}</div>{{/AnswerAudio}}
                 <div class="meta">{{Meta}}</div>
                 """,
             },
         ],
         css=versioned_css(
             COMMON_CSS
+            + DRILL_READING_AUDIO_CSS
             + """
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .answer { margin-top: 8px; }
@@ -3820,6 +3839,8 @@ def make_conjugation_reverse_model() -> WkModel:
             {"name": "Meaning"},
             {"name": "ConjExpression"},
             {"name": "ConjReading"},
+            {"name": "PromptAudio"},
+            {"name": "AnswerAudio"},
             {"name": "Meta"},
         ],
         templates=[
@@ -3828,6 +3849,7 @@ def make_conjugation_reverse_model() -> WkModel:
                 "qfmt": """
                 <div class="prompt">What is the dictionary form?</div>
                 <div class="jp">{{ConjExpression}}</div>
+                {{#PromptAudio}}<div class="reading-audio">{{PromptAudio}}</div>{{/PromptAudio}}
                 <div class="type-answer">{{type:TypeDictExpression}}</div>
                 """,
                 "afmt": """
@@ -3836,6 +3858,7 @@ def make_conjugation_reverse_model() -> WkModel:
                 <div class="meta form-label">{{Prompt}}</div>
                 <div class="jp answer">{{DictExpression}}</div>
                 <div class="reading answer">{{DictReading}}</div>
+                {{#AnswerAudio}}<div class="reading-audio">{{AnswerAudio}}</div>{{/AnswerAudio}}
                 <div class="meaning">{{Meaning}}</div>
                 <div class="meta">{{Meta}}</div>
                 """,
@@ -3843,6 +3866,7 @@ def make_conjugation_reverse_model() -> WkModel:
         ],
         css=versioned_css(
             COMMON_CSS
+            + DRILL_READING_AUDIO_CSS
             + """
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .answer { margin-top: 8px; }
@@ -3868,6 +3892,8 @@ def make_word_class_model() -> WkModel:
             {"name": "Meaning"},
             {"name": "ClassAnswer"},
             {"name": "ClassHint"},
+            {"name": "PromptAudio"},
+            {"name": "AnswerAudio"},
             {"name": "Meta"},
         ],
         templates=[
@@ -3877,6 +3903,7 @@ def make_word_class_model() -> WkModel:
                 <div class="prompt">{{Prompt}}</div>
                 <div class="jp">{{Expression}}</div>
                 <div class="reading">{{Reading}}</div>
+                {{#PromptAudio}}<div class="reading-audio">{{PromptAudio}}</div>{{/PromptAudio}}
                 <div class="meaning">{{Meaning}}</div>
                 """,
                 "afmt": """
@@ -3884,12 +3911,14 @@ def make_word_class_model() -> WkModel:
                 <hr>
                 <div class="class-answer">{{ClassAnswer}}</div>
                 <div class="class-hint">{{ClassHint}}</div>
+                {{#AnswerAudio}}<div class="reading-audio">{{AnswerAudio}}</div>{{/AnswerAudio}}
                 <div class="meta">{{Meta}}</div>
                 """,
             },
         ],
         css=versioned_css(
             COMMON_CSS
+            + DRILL_READING_AUDIO_CSS
             + """
 .class-answer { font-size: 32px; margin: 12px 0; color: #e8e8e8; font-weight: 600; }
 .class-hint {
@@ -4235,8 +4264,47 @@ def radical_display_html(radical: dict, media_names: Optional[Dict[int, str]] = 
     return f"<span class='radical-text'>{html.escape(slug)}</span>"
 
 
-def radical_description_html(radical: dict) -> str:
-    return wk_mnemonic_html(radical["data"].get("meaning_mnemonic"))
+def radical_is_same_as_kanji(radical: dict) -> bool:
+    """True when WK's radical mnemonic says this glyph is the same as its kanji."""
+    mnemonic = (radical.get("data") or {}).get("meaning_mnemonic") or ""
+    return bool(RADICAL_SAME_AS_KANJI_RE.search(mnemonic))
+
+
+def kanji_index_by_characters(kanji_items: Sequence[dict]) -> Dict[str, dict]:
+    index: Dict[str, dict] = {}
+    for subject in kanji_items:
+        if subject.get("object") != "kanji":
+            continue
+        characters = (subject.get("data") or {}).get("characters")
+        if characters and characters not in index:
+            index[str(characters)] = subject
+    return index
+
+
+def radical_meaning_mnemonic_raw(
+    radical: dict,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
+) -> Optional[str]:
+    """Meaning mnemonic text for a radical; borrows kanji meaning story when WK says same-as-kanji."""
+    if kanji_by_characters and radical_is_same_as_kanji(radical):
+        characters = (radical.get("data") or {}).get("characters")
+        if characters:
+            kanji = kanji_by_characters.get(str(characters))
+            if kanji is not None:
+                kanji_mnemonic = (kanji.get("data") or {}).get("meaning_mnemonic")
+                if kanji_mnemonic and str(kanji_mnemonic).strip():
+                    return str(kanji_mnemonic).strip()
+    mnemonic = (radical.get("data") or {}).get("meaning_mnemonic")
+    if not mnemonic or not str(mnemonic).strip():
+        return None
+    return str(mnemonic).strip()
+
+
+def radical_description_html(
+    radical: dict,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
+) -> str:
+    return wk_mnemonic_html(radical_meaning_mnemonic_raw(radical, kanji_by_characters))
 
 
 def radical_index_by_id(subjects: Sequence[dict]) -> Dict[int, dict]:
@@ -4770,6 +4838,7 @@ def build_radical_deck(
     model = make_radical_model()
     media_names, media_paths = ensure_radical_media_files(selected)
     deck.wk_media_files = media_paths
+    kanji_by_characters = kanji_index_by_characters(kanji_items)
 
     for radical in sorted(selected, key=lambda r: (r["data"].get("level", 999), radical_display(r))):
         data = radical["data"]
@@ -4807,7 +4876,7 @@ def build_radical_deck(
                 html.escape(status),
                 kanji_html,
                 "",
-                radical_description_html(radical),
+                radical_description_html(radical, kanji_by_characters),
             ],
             tags=[
                 "wanikani",
@@ -5197,13 +5266,22 @@ def build_conjugation_deck(
     *,
     tag_kind: str,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+    reading_audio: bool = True,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+) -> Tuple[Path, genanki.Deck, List[str]]:
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+
     deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_conjugation_model()
     template_label = MODEL_TEMPLATE_VERSIONS["conjugation"]
     stage_interval_map = interval_map or load_srs_stage_interval_days(
         CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
     )
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
+    media_files: List[str] = []
+    if reading_audio:
+        require_edge_tts()
+        print(f"Conjugation reading audio (voice={reading_audio_voice})...")
     outfile = (
         "wk_conjugations_verbs.apkg"
         if deck_key == "conjugations-verbs"
@@ -5216,6 +5294,23 @@ def build_conjugation_deck(
         meaning = "; ".join(primary_meanings(vocab))
         class_label = conjugation_class_label(drill.word_class)
         meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
+        prompt_audio = ""
+        answer_audio = ""
+        if reading_audio:
+            prompt_audio, prompt_paths = prepare_kana_reading_audio_field(
+                drill.dict_reading,
+                media_dir,
+                vocab=vocab,
+                wk_voice=DEFAULT_WK_READING_VOICE,
+                tts_voice=reading_audio_voice,
+            )
+            answer_audio, answer_paths = prepare_kana_reading_audio_field(
+                drill.conj_reading,
+                media_dir,
+                tts_voice=reading_audio_voice,
+            )
+            media_files.extend(prompt_paths)
+            media_files.extend(answer_paths)
         note_tags = [
             "wanikani",
             tag_kind,
@@ -5237,6 +5332,8 @@ def build_conjugation_deck(
                 html.escape(drill.conj_expr),
                 html.escape(drill.conj_expr),
                 html.escape(drill.conj_reading),
+                prompt_audio,
+                answer_audio,
                 html.escape(meta),
             ],
             tags=note_tags,
@@ -5244,8 +5341,8 @@ def build_conjugation_deck(
         )
         deck.add_note(note)
     out = output_dir / outfile
-    write_apkg(deck, out)
-    return out, deck
+    write_apkg(deck, out, media_files=media_files or None)
+    return out, deck, media_files
 
 
 def build_conjugation_verb_deck(
@@ -5254,7 +5351,7 @@ def build_conjugation_verb_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_conjugation_deck(
         "conjugations-verbs",
         drills,
@@ -5271,7 +5368,7 @@ def build_conjugation_adjective_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_conjugation_deck(
         "conjugations-adjectives",
         drills,
@@ -5288,13 +5385,22 @@ def build_conjugation_reverse_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+    reading_audio: bool = True,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+) -> Tuple[Path, genanki.Deck, List[str]]:
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+
     deck = genanki.Deck(DECK_IDS["conjugations-reverse"], DECK_NAMES["conjugations-reverse"])
     model = make_conjugation_reverse_model()
     template_label = MODEL_TEMPLATE_VERSIONS["conjugation_reverse"]
     stage_interval_map = interval_map or load_srs_stage_interval_days(
         CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
     )
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
+    media_files: List[str] = []
+    if reading_audio:
+        require_edge_tts()
+        print(f"Conjugation reverse reading audio (voice={reading_audio_voice})...")
     for drill in drills:
         vocab = drill.vocab
         level = vocab["data"].get("level", "?")
@@ -5302,6 +5408,23 @@ def build_conjugation_reverse_deck(
         meaning = "; ".join(primary_meanings(vocab))
         class_label = conjugation_class_label(drill.word_class)
         meta = f"WK L{level} · {class_label} · template {template_label} · {drill.form_key}"
+        prompt_audio = ""
+        answer_audio = ""
+        if reading_audio:
+            prompt_audio, prompt_paths = prepare_kana_reading_audio_field(
+                drill.conj_reading,
+                media_dir,
+                tts_voice=reading_audio_voice,
+            )
+            answer_audio, answer_paths = prepare_kana_reading_audio_field(
+                drill.dict_reading,
+                media_dir,
+                vocab=vocab,
+                wk_voice=DEFAULT_WK_READING_VOICE,
+                tts_voice=reading_audio_voice,
+            )
+            media_files.extend(prompt_paths)
+            media_files.extend(answer_paths)
         note_tags = [
             "wanikani",
             "conjugation-reverse",
@@ -5322,6 +5445,8 @@ def build_conjugation_reverse_deck(
                 html.escape(meaning),
                 html.escape(drill.conj_expr),
                 html.escape(drill.conj_reading),
+                prompt_audio,
+                answer_audio,
                 html.escape(meta),
             ],
             tags=note_tags,
@@ -5329,8 +5454,8 @@ def build_conjugation_reverse_deck(
         )
         deck.add_note(note)
     out = output_dir / "wk_conjugations_reverse.apkg"
-    write_apkg(deck, out)
-    return out, deck
+    write_apkg(deck, out, media_files=media_files or None)
+    return out, deck, media_files
 
 
 def build_word_class_deck(
@@ -5341,13 +5466,22 @@ def build_word_class_deck(
     *,
     drill_kind: str,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+    reading_audio: bool = True,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+) -> Tuple[Path, genanki.Deck, List[str]]:
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+
     deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_word_class_model()
     template_label = MODEL_TEMPLATE_VERSIONS["word_class"]
     stage_interval_map = interval_map or load_srs_stage_interval_days(
         CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
     )
+    media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
+    media_files: List[str] = []
+    if reading_audio:
+        require_edge_tts()
+        print(f"Word-class reading audio (voice={reading_audio_voice})...")
     guid_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
     tag_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
     prompt = (
@@ -5378,6 +5512,18 @@ def build_word_class_deck(
         meaning = "; ".join(primary_meanings(vocab))
         guid = stable_guid(guid_kind, vocab["id"])
         meta = f"WK L{level} · template {template_label} · {class_key}"
+        prompt_audio = ""
+        answer_audio = ""
+        if reading_audio and reading:
+            prompt_audio, prompt_paths = prepare_kana_reading_audio_field(
+                reading,
+                media_dir,
+                vocab=vocab,
+                wk_voice=DEFAULT_WK_READING_VOICE,
+                tts_voice=reading_audio_voice,
+            )
+            answer_audio = prompt_audio
+            media_files.extend(prompt_paths)
         note_tags = [
             "wanikani",
             tag_kind,
@@ -5396,6 +5542,8 @@ def build_word_class_deck(
                 html.escape(meaning),
                 html.escape(class_answer),
                 html.escape(class_hint),
+                prompt_audio,
+                answer_audio,
                 html.escape(meta),
             ],
             tags=note_tags,
@@ -5404,8 +5552,8 @@ def build_word_class_deck(
         deck.add_note(note)
 
     out = output_dir / outfile
-    write_apkg(deck, out)
-    return out, deck
+    write_apkg(deck, out, media_files=media_files or None)
+    return out, deck, media_files
 
 
 def build_verb_type_deck(
@@ -5414,7 +5562,7 @@ def build_verb_type_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_word_class_deck(
         "verb-types",
         vocab_items,
@@ -5431,7 +5579,7 @@ def build_adjective_type_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
-) -> Tuple[Path, genanki.Deck]:
+) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_word_class_deck(
         "adjective-types",
         vocab_items,
@@ -7229,6 +7377,7 @@ def main() -> None:
                 suspend_unstarted=suspend_unstarted,
                 priority_index=core_priority_index,
                 include_grammar_role_tags=False,
+                kanji_items=core_kanji_items,
             )
             created.append(path)
             built_decks.append(deck)
@@ -7313,7 +7462,7 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
     if "conjugations-verbs" in wanted and conjugation_verb_drills:
-        path, deck = build_conjugation_verb_deck(
+        path, deck, media = build_conjugation_verb_deck(
             conjugation_verb_drills,
             output_dir,
             indexes["assignments"],
@@ -7321,8 +7470,9 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "conjugations-adjectives" in wanted and conjugation_adjective_drills:
-        path, deck = build_conjugation_adjective_deck(
+        path, deck, media = build_conjugation_adjective_deck(
             conjugation_adjective_drills,
             output_dir,
             indexes["assignments"],
@@ -7330,8 +7480,9 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "conjugations-reverse" in wanted and conjugation_reverse_drills:
-        path, deck = build_conjugation_reverse_deck(
+        path, deck, media = build_conjugation_reverse_deck(
             conjugation_reverse_drills,
             output_dir,
             indexes["assignments"],
@@ -7339,8 +7490,9 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "verb-types" in wanted and verb_type_items:
-        path, deck = build_verb_type_deck(
+        path, deck, media = build_verb_type_deck(
             verb_type_items,
             output_dir,
             indexes["assignments"],
@@ -7348,8 +7500,9 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "adjective-types" in wanted and adjective_type_items:
-        path, deck = build_adjective_type_deck(
+        path, deck, media = build_adjective_type_deck(
             adjective_type_items,
             output_dir,
             indexes["assignments"],
@@ -7357,6 +7510,7 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "vocab-cloze" in wanted and vocab_cloze_items:
         path, deck, media = build_vocab_cloze_deck(
             vocab_cloze_items,
@@ -7414,7 +7568,7 @@ def main() -> None:
     if "rendaku" in wanted and rendaku_items:
         from rendaku_decks import build_rendaku_deck
 
-        path, deck = build_rendaku_deck(
+        path, deck, media = build_rendaku_deck(
             rendaku_items,
             output_dir,
             indexes["assignments"],
@@ -7422,6 +7576,7 @@ def main() -> None:
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "pitch-leeches" in wanted and leeches:
         maybe = build_pitch_leeches_deck(
             leeches,

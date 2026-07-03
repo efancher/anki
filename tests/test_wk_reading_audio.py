@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -74,10 +75,38 @@ class WkReadingAudioTests(unittest.TestCase):
         from wk_reading_audio import prepare_reading_audio_field
 
         media_dir = REPO_ROOT / "out" / "test_reading_media"
+        vocab = mock_vocab()
         with mock.patch("wk_reading_audio.ensure_pronunciation_audio_file", return_value=(True, True)):
-            field, paths = prepare_reading_audio_field(mock_vocab(), media_dir)
-        self.assertEqual(field, "[sound:wk_reading_vocabulary_42_kyoko.mp3]")
+            field, paths = prepare_reading_audio_field(vocab, media_dir)
+        expected = reading_audio_basename(vocab, "Kyoko", "mp3", reading="がくせい")
+        self.assertEqual(field, f"[sound:{expected}]")
         self.assertEqual(len(paths), 1)
+
+    def test_select_pronunciation_audio_matches_primary_reading(self) -> None:
+        vocab = {
+            "id": 2760,
+            "object": "vocabulary",
+            "data": {
+                "characters": "毎年",
+                "readings": [{"reading": "まいとし", "primary": True}],
+                "pronunciation_audios": [
+                    {
+                        "url": "https://example.com/mainen.mp3",
+                        "content_type": "audio/mpeg",
+                        "metadata": {"voice_actor_name": "Kyoko", "pronunciation": "まいねん"},
+                    },
+                    {
+                        "url": "https://example.com/maitoshi.mp3",
+                        "content_type": "audio/mpeg",
+                        "metadata": {"voice_actor_name": "Kyoko", "pronunciation": "まいとし"},
+                    },
+                ],
+            },
+        }
+        entry = select_pronunciation_audio(vocab, voice_actor="Kyoko")
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(entry["metadata"]["pronunciation"], "まいとし")
 
     def test_prepare_reading_audio_field_kanji_single_reading(self) -> None:
         from wk_reading_audio import prepare_reading_audio_field
@@ -128,6 +157,14 @@ class WkReadingAudioTests(unittest.TestCase):
         output = stream.getvalue()
         self.assertIn("Reading audio:", output)
         self.assertIn("2 with audio", output)
+
+    def test_prepare_kana_reading_audio_field_empty_reading(self) -> None:
+        from wk_reading_audio import prepare_kana_reading_audio_field
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            field, paths = prepare_kana_reading_audio_field("", Path(tmpdir))
+        self.assertEqual(field, "")
+        self.assertEqual(paths, [])
 
 
 if __name__ == "__main__":

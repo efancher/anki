@@ -14,6 +14,7 @@ from rendaku_decks import (
     RendakuItem,
     analyze_two_kanji_rendaku,
     collect_rendaku_items,
+    make_rendaku_model,
     rendaku_note_text,
     voice_rendaku,
 )
@@ -112,6 +113,13 @@ class RendakuDeckTests(unittest.TestCase):
         )
         self.assertEqual(len(items), 1)
         self.assertIsInstance(items[0], RendakuItem)
+
+    def test_rendaku_model_places_answer_audio_on_back_only(self) -> None:
+        model = make_rendaku_model()
+        qfmt = model.templates[0]["qfmt"]
+        afmt = model.templates[0]["afmt"]
+        self.assertNotIn("AnswerAudio", qfmt)
+        self.assertIn("AnswerAudio", afmt)
 
 
 if __name__ == "__main__":

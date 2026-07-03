@@ -212,6 +212,15 @@ class WkSupplementaryGatingTests(unittest.TestCase):
                 by_name[name]["search"],
             )
 
+    def test_n5_filtered_decks_split_kanji_and_vocab(self) -> None:
+        by_name = {spec["name"]: spec for spec in FILTERED_DECK_DEFINITIONS}
+        kanji = by_name["WK::N5 · Kanji"]
+        vocab = by_name["WK::N5 · Vocabulary"]
+        self.assertEqual(kanji["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
+        self.assertEqual(vocab["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
+        self.assertIn("tag:jlpt-n5-vocab tag:kanji", kanji["search"])
+        self.assertIn("tag:jlpt-n5-vocab tag:vocabulary", vocab["search"])
+
 
 if __name__ == "__main__":
     unittest.main()
