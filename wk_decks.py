@@ -275,6 +275,8 @@ ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
 # Floor for model.mod in .apkg — must exceed past genanki imports that used time.time().
 TEMPLATE_MOD_GENERATION_BASE = 1781000000
+# Floor for notes.mod in .apkg — must exceed bundled wk_all imports that reused model epoch + 1.
+NOTE_CONTENT_MOD_FLOOR = 1921500000
 MODEL_TEMPLATE_MOD_SLOT = {
     "item": 0,
     "pair": 1,
@@ -1284,6 +1286,11 @@ def package_write_timestamp(models: Iterable[genanki.Model]) -> float:
     return max(epochs) + 1.0
 
 
+def export_note_mod_timestamp(models: Iterable[genanki.Model]) -> int:
+    """Note mod for .apkg export; high enough that Anki accepts field updates on re-import."""
+    return int(max(package_write_timestamp(models), NOTE_CONTENT_MOD_FLOOR))
+
+
 def attach_deck_media(package: genanki.Package, decks: Sequence[genanki.Deck]) -> None:
     media_paths: List[str] = []
     seen: Set[str] = set()
@@ -1331,6 +1338,7 @@ def write_bundled_apkg(
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(all_models))
     patch_apkg_deck_options(path)
+    patch_apkg_note_mods(path, export_note_mod_timestamp(all_models))
     if patch_apkg_scheduling:
         maybe_patch_apkg_wk_scheduling(path, decks)
         patch_apkg_supplementary_suspend(path)
@@ -1446,6 +1454,43 @@ def patch_apkg_deck_options(apkg_path: Path) -> None:
         Path(tmp_db_path).unlink(missing_ok=True)
 
 
+def patch_apkg_note_mods(apkg_path: Path, mod: int) -> None:
+    """Set all notes.mod in an .apkg so Anki accepts field updates on re-import."""
+    apkg_path = Path(apkg_path)
+    if not apkg_path.exists():
+        return
+
+    with zipfile.ZipFile(apkg_path, "r") as archive:
+        if "collection.anki2" not in archive.namelist():
+            return
+        db_bytes = archive.read("collection.anki2")
+        other_entries = {
+            name: archive.read(name)
+            for name in archive.namelist()
+            if name != "collection.anki2"
+        }
+
+    with tempfile.NamedTemporaryFile(suffix=".anki2", delete=False) as tmp_db:
+        tmp_db.write(db_bytes)
+        tmp_db_path = tmp_db.name
+
+    try:
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute("UPDATE notes SET mod = ?", (mod,))
+        conn.commit()
+        conn.close()
+
+        patched_bytes = Path(tmp_db_path).read_bytes()
+        tmp_apkg = apkg_path.with_suffix(".note_mod.apkg")
+        with zipfile.ZipFile(tmp_apkg, "w", compression=zipfile.ZIP_DEFLATED) as outzip:
+            outzip.writestr("collection.anki2", patched_bytes)
+            for name, payload in other_entries.items():
+                outzip.writestr(name, payload)
+        tmp_apkg.replace(apkg_path)
+    finally:
+        Path(tmp_db_path).unlink(missing_ok=True)
+
+
 def collect_deck_schedule_specs(decks: Sequence[genanki.Deck]) -> Dict[str, object]:
     merged: Dict[str, object] = {}
     for deck in decks:
@@ -1475,6 +1520,7 @@ def write_apkg(
     merge_package_media_files(package, media_files)
     package.write_to_file(str(path), timestamp=package_write_timestamp(models))
     patch_apkg_deck_options(path)
+    patch_apkg_note_mods(path, export_note_mod_timestamp(models))
     if patch_apkg_scheduling:
         maybe_patch_apkg_wk_scheduling(path, [deck])
         patch_apkg_supplementary_suspend(path)
