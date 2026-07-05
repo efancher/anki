@@ -14,10 +14,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tae_kim_mapping import (
-    map_grammar_point_to_tae_kim_section,
-    tae_kim_section_within_cap,
-)
 from grammar_decks import (
     GrammarCardItem,
     blank_grammar_in_sentence,
@@ -26,39 +22,21 @@ from grammar_decks import (
     blank_state_of_being_predicate,
     build_grammar_deck,
     collect_grammar_cards,
-    collect_wk_grammar_supplement_cards,
     grammar_audio_basename,
     grammar_blank_tokens,
     grammar_form_hint,
     grammar_point_id,
     hanabira_grammar_cache_path,
     jlpt_within_cap,
-    load_cached_wk_vocab_items,
     make_grammar_model,
     prepare_grammar_sentence_for_tts,
     production_hint_from_english,
     sentence_unknown_kanji,
 )
-from tae_kim_mapping import TaeKimLesson, TaeKimSection
 
 
-SAMPLE_SECTION = TaeKimSection(
-    num=3,
-    slug="basic-grammar",
-    name="Basic Grammar",
-    guide_url="https://guidetojapanese.org/learn/grammar/basic",
-)
-SAMPLE_LESSON = TaeKimLesson(
-    chapter_slug="basic",
-    chapter_name="Basic Grammar",
-    num=1,
-    slug="expressing-state-of-being",
-    name="Expressing State-of-Being",
-    has_cards=True,
-    section_num=3,
-)
 SAMPLE_GRAMMAR_CARD = GrammarCardItem(
-    point_id="tk-fixture-state-being-casual-positive",
+    point_id="sample-n5-state-being",
     jlpt="N5",
     order=1,
     title="だ — casual state-of-being",
@@ -69,8 +47,6 @@ SAMPLE_GRAMMAR_CARD = GrammarCardItem(
     sentence_en="I am a student.",
     type_expression="学生だ",
     hint="am a student",
-    tae_kim_section=SAMPLE_SECTION,
-    tae_kim_lesson=SAMPLE_LESSON,
 )
 
 SAMPLE_POINT = {
@@ -129,54 +105,6 @@ class GrammarDeckTests(unittest.TestCase):
         second = grammar_point_id(SAMPLE_POINT, 0)
         self.assertEqual(first, second)
 
-    def test_tae_kim_section_mapping_keredomo(self) -> None:
-        section = map_grammar_point_to_tae_kim_section(SAMPLE_POINT)
-        self.assertEqual(section.num, 3)
-        self.assertEqual(section.slug, "basic-grammar")
-
-    def test_tae_kim_section_cap(self) -> None:
-        self.assertTrue(tae_kim_section_within_cap(3, 3))
-        self.assertFalse(tae_kim_section_within_cap(4, 3))
-        self.assertTrue(tae_kim_section_within_cap(4, 6))
-
-    def test_collect_respects_tae_kim_section_cap(self) -> None:
-        cache_path = hanabira_grammar_cache_path("N5")
-        if not cache_path.is_file():
-            self.skipTest("Hanabira cache not present; run wk_decks.py --deck grammar once")
-        basic_only = collect_grammar_cards(
-            max_jlpt="N5",
-            max_tae_kim_section=3,
-            max_examples_per_point=1,
-            max_unknown_kanji=99,
-            known_kanji=set(),
-            refresh=False,
-        )
-        through_essential = collect_grammar_cards(
-            max_jlpt="N5",
-            max_tae_kim_section=4,
-            max_examples_per_point=1,
-            max_unknown_kanji=99,
-            known_kanji=set(),
-            refresh=False,
-        )
-        self.assertGreater(len(through_essential), len(basic_only))
-        self.assertTrue(all(card.tae_kim_section.num == 3 for card in basic_only))
-
-    def test_state_of_being_lesson_includes_supplements(self) -> None:
-        cards = collect_grammar_cards(
-            max_jlpt="N5",
-            max_tae_kim_lesson="expressing-state-of-being",
-            max_examples_per_point=1,
-            max_unknown_kanji=99,
-            known_kanji=set(),
-            refresh=False,
-        )
-        self.assertGreater(len(cards), 0)
-        self.assertTrue(
-            all(card.tae_kim_lesson.slug == "expressing-state-of-being" for card in cards)
-        )
-        self.assertTrue(any(card.point_id.startswith("tk-fixture-") for card in cards))
-
     def test_blank_regex_in_sentence(self) -> None:
         import re
 
@@ -227,43 +155,6 @@ class GrammarDeckTests(unittest.TestCase):
         )
         self.assertEqual(grammar_form_hint("A。けれども、～B。 (A. Keredomo, ~B.)"), "")
 
-    def test_fixture_cards_use_full_predicate(self) -> None:
-        cards = collect_grammar_cards(
-            max_jlpt="N5",
-            max_tae_kim_lesson="expressing-state-of-being",
-            max_examples_per_point=1,
-            max_unknown_kanji=99,
-            known_kanji=set(),
-            wk_supplements=False,
-            refresh=False,
-        )
-        fixture = next(c for c in cards if c.point_id == "tk-fixture-state-being-casual-positive")
-        self.assertEqual(fixture.cloze_sentence, "私は＿＿＿。")
-        self.assertEqual(fixture.type_expression, "学生だ")
-        self.assertEqual(fixture.hint, "am a student")
-        self.assertNotIn("Attach", fixture.hint)
-
-    def test_wk_state_of_being_supplements_use_cache(self) -> None:
-        vocab_items = load_cached_wk_vocab_items()
-        if not vocab_items:
-            self.skipTest("WaniKani subject cache not present")
-        wk_cards = collect_wk_grammar_supplement_cards(
-            vocab_items,
-            max_jlpt="N5",
-            max_tae_kim_section=6,
-            lesson_cap=("basic", 1),
-            known_kanji=set(),
-            max_unknown_kanji=99,
-            max_examples_per_point=2,
-            existing_sentences=set(),
-        )
-        self.assertGreater(len(wk_cards), 8)
-        self.assertTrue(all(card.point_id.startswith("wk-grammar-") for card in wk_cards))
-        sample = wk_cards[0]
-        self.assertIn("＿", sample.cloze_sentence)
-        self.assertNotEqual(sample.type_expression, "です")
-        self.assertNotIn("Attach", sample.hint)
-
     def test_predicate_skips_comma_after_topic(self) -> None:
         import re
 
@@ -292,20 +183,6 @@ class GrammarDeckTests(unittest.TestCase):
         self.assertEqual(chunk, "レベル一です")
         self.assertEqual(hint, "It's level one")
 
-    def test_state_of_being_includes_wk_when_cache_present(self) -> None:
-        if not load_cached_wk_vocab_items():
-            self.skipTest("WaniKani subject cache not present")
-        cards = collect_grammar_cards(
-            max_jlpt="N5",
-            max_tae_kim_lesson="expressing-state-of-being",
-            max_examples_per_point=2,
-            max_unknown_kanji=99,
-            known_kanji=set(),
-            refresh=False,
-        )
-        self.assertGreater(len(cards), 8)
-        self.assertTrue(any(card.point_id.startswith("wk-grammar-") for card in cards))
-
     def test_prepare_grammar_sentence_for_tts(self) -> None:
         self.assertEqual(
             prepare_grammar_sentence_for_tts("  私は学生だ。 "),
@@ -327,8 +204,8 @@ class GrammarDeckTests(unittest.TestCase):
         self.assertTrue(first.endswith(".mp3"))
 
     def test_grammar_audio_basename_is_stable(self) -> None:
-        first = grammar_audio_basename("tk-fixture-state-being-casual-positive")
-        second = grammar_audio_basename("tk-fixture-state-being-casual-positive")
+        first = grammar_audio_basename("sample-n5-state-being")
+        second = grammar_audio_basename("sample-n5-state-being")
         self.assertEqual(first, second)
         self.assertTrue(first.startswith("wk_grammar_"))
         self.assertTrue(first.endswith(".mp3"))

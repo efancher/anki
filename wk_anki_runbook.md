@@ -16,7 +16,7 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 
 Follow [§2 First import](#2-first-import-migration) below. Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md).
 
-**Not done yet:** grammar gated by core kanji maturity; YouTube immersion ([planned doc](docs/wk_immersion_youtube_design.md)).
+**Not done yet:** grammar gated by core kanji maturity; YouTube immersion ([planned doc](docs/wk_immersion_youtube_design.md)); VOICEVOX synthesis for immersion ([planned doc](docs/wk_voicevox_tts_design.md)).
 
 ---
 
@@ -28,7 +28,7 @@ Follow [§2 First import](#2-first-import-migration) below. Architecture and tra
 | Studying day to day | [§3 Daily study](#3-daily-study) |
 | Regenerating after config or code changes | [§4 Regenerate & re-import](#4-regenerate--re-import) |
 | Tuning FSRS, unlocks, and study habits | [§12 Tips & tuning](#12-tips--tuning) |
-| Changing Tae Kim / grammar scope | [§5 Configuration](#5-configuration) |
+| Changing grammar scope | [§5 Configuration](#5-configuration) |
 | Looking up a specific deck | [§6 Deck catalog](#6-deck-catalog) |
 | Something broke on import | [§10 Troubleshooting](#10-troubleshooting) |
 
@@ -52,7 +52,7 @@ Also need **ffmpeg** on `PATH` for reading audio and dictation (macOS: `brew ins
 
 ### Anki add-ons (desktop, required)
 
-Six add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
+Five add-ons in `anki_addon/` are **not** in the `.apkg` and **not** on AnkiWeb. On macOS, **`python wk_decks.py --from-config` syncs them automatically** after each generate (`sync_anki_addons: true` in `wk_deck_config.json`). **Restart Anki** after sync so code changes load.
 
 **Manual install or one-time setup** (any platform):
 
@@ -74,9 +74,8 @@ Disable auto-sync: `"sync_anki_addons": false` in config, or pass `--no-sync-add
 | `wk_unlock` | **WK Run Unlock Pass** |
 | `wk_adaptive_new` | **WK Adjust New Limits** |
 | `wk_health_check` | **WK Health Check** |
-| `wk_tae_kim_track` | **WK Sync Tae Kim Track**, **WK Bump Tae Kim Lesson** |
 
-**Optional (dev):** symlink the six folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
+**Optional (dev):** symlink the five folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
 
 ### Second machine (work desktop, etc.)
 
@@ -106,7 +105,7 @@ AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered dec
    .\scripts\sync_anki_addons.sh
    ```
 
-3. **Verify** the **Tools → WK …** menu items appear after restart (including **WK Sync Tae Kim Track**).
+3. **Verify** the **Tools → WK …** menu items appear after restart.
 
 After that, use normal Anki sync. Unlock passes and adaptive new limits **run only on machines where the add-ons are installed** — run **WK Run Unlock Pass** / **WK Adjust New Limits** on any desktop before syncing if you want those effects everywhere without opening the other machine.
 
@@ -178,14 +177,14 @@ Vocab cloze, dictation, conjugations, phonetic families, verb types, etc. Import
 
 Open **desktop Anki periodically** if you study on mobile, so unlock passes sync.
 
-### Grammar / Tae Kim
+### Grammar
 
-Read on guidetojapanese.org; review in **Japanese Grammar Context** when useful. **Grammar role tags** (`tk-grammar-vocab`, `tk-grammar-prereq`) are applied at **runtime** by **wk_tae_kim_track** — not on each re-import. After your first regenerate with the track map, copy `out/wk_tae_kim_track_config.json` into your profile (the add-on does this on first sync), then use **Tools → WK Sync Tae Kim Track** or **WK Bump Tae Kim Lesson** when you finish a subsection (updates **WK::Grammar · Current Tae Kim lesson** automatically).
+Review in **Japanese Grammar Context** when useful — Hanabira pattern clozes filtered by JLPT cap at generate time.
 
 | Home deck | Filtered queue | Content |
 |-----------|----------------|---------|
-| **Japanese Grammar Context** | **WK::Grammar**, **WK::Grammar · Current Tae Kim lesson** | Hanabira / pattern clozes |
-| **WaniKani Core *** | **WK::Tae Kim · Grammar Vocab / Prereq *** | WK kanji/vocab tagged for Tae Kim |
+| **Japanese Grammar Context** | **WK::Grammar** | Hanabira / pattern clozes |
+| **WaniKani Core *** | **WK::N5 · *** | N5-band kanji/vocab and prereqs |
 
 **Conjugation drills** use separate home decks with matching filtered queues (batch size 5, rebuild between rounds):
 
@@ -200,12 +199,12 @@ Read on guidetojapanese.org; review in **Japanese Grammar Context** when useful.
 ### Suggested daily order
 
 1. **WK::Core** filtered decks until empty (Radicals → Kanji → Vocabulary).
-2. **Tae Kim WK track:** **Grammar Prereq Radicals** → **Grammar Prereq Kanji** → **Grammar Vocab** (or **N5 Prereq** → **N5 Kanji** → **N5 Vocabulary**) — these are **core** cards.
+2. **N5 track (optional):** **N5 Prereq Radicals** → **N5 Prereq Kanji** → **N5 Kanji** → **N5 Vocabulary** — these are **core** cards.
 3. **WK::Conjugations ·** filtered decks (verbs → adjectives → reverse/types as you like).
 4. **One** other supplementary filtered deck if you have energy (dictation → vocab context).
-5. **WK::Grammar** (Context deck) for Hanabira pattern review when useful.
+5. **WK::Grammar** for Hanabira pattern review when useful.
 
-Grammar is **not** gated by core kanji maturity today (see [§12](#12-tips--tuning)); use Tae Kim lesson caps and `max_unknown_kanji` instead.
+Grammar is **not** gated by core kanji maturity today (see [§12](#12-tips--tuning)); use `grammar.max_jlpt` and `max_unknown_kanji` at generate time instead.
 
 ## 4. Regenerate & re-import
 
@@ -221,8 +220,7 @@ Then in Anki:
 1. Import `out/wk_all.apkg` → update note types / merge notes.
 2. **Tools → WK Apply Deck Options** (if new decks appeared).
 3. **Tools → WK Setup Filtered Decks**.
-4. **Tools → WK Sync Tae Kim Track** (first time after track-map regenerate; also runs on collection load).
-5. **Tools → WK Run Unlock Pass** (optional; also on collection load).
+4. **Tools → WK Run Unlock Pass** (optional; also on collection load).
 
 **Do not re-import to refresh unlock state** — that is **wk_unlock**’s job.
 
@@ -241,10 +239,8 @@ Edit **`wk_deck_config.json`**, then `python wk_decks.py --from-config`.
 | `fetch_wk_review_statistics` | `false` | Skip WK review_statistics API (leech decks only) |
 | `core.bootstrap_scheduling` | `false` | **Off by default.** Set `true` once for WK interval import |
 | `core.reading_audio` | `true` | Vocab WK audio + kanji TTS |
-| `grammar.max_tae_kim_section` | `3` | Tae Kim chapter cap |
-| `grammar.max_tae_kim_lesson` | slug | Tae Kim subsection cap — see `tae_kim_lessons.json` |
-
-Example lesson slugs: `expressing-state-of-being`, `introduction-to-particles`, `adjectives` → tags like `tag:tk-lesson-basic-introduction-to-particles`.
+| `grammar.max_jlpt` | `N5` | Include Hanabira points through this JLPT level |
+| `grammar.max_unknown_kanji` | `5` | Skip example sentences with too many unknown WK kanji |
 
 ---
 
@@ -263,7 +259,7 @@ Example lesson slugs: `expressing-state-of-being`, `introduction-to-particles`, 
 | Deck | Gating |
 |------|--------|
 | Vocab Context, Dictation, Conjugations, Verb Types, Phonetic Families, … | `WkSubjectId` + `wk-locked` |
-| Grammar Context | JLPT + Tae Kim caps only |
+| Grammar Context | JLPT cap only at generate time |
 | Current and Next Radicals | *(removed from default — use core radicals; `--deck radicals` still builds)* |
 
 Optional individual decks: leeches, verb pairs, confusables, etc. — `python wk_decks.py --deck leeches`
@@ -277,9 +273,6 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | Name | Purpose |
 |------|---------|
 | **WK::Core Radicals / Kanji / Vocabulary** | Daily core review |
-| **WK::Tae Kim · Grammar Vocab** | Kanji/vocab in Tae Kim lesson text (`tag:tk-grammar-vocab`) |
-| **WK::Tae Kim · Grammar Prereq Kanji** | Kanji still needed for grammar vocab (`tk-grammar-prereq`, not yet `wk-mature`) |
-| **WK::Tae Kim · Grammar Prereq Radicals** | Radicals still needed for grammar chain (`tk-grammar-prereq`, not yet `wk-mature`) |
 | **WK::N5 · Kanji** | N5-band kanji (`tag:jlpt-n5-vocab tag:kanji`, 5-card batches) |
 | **WK::N5 · Vocabulary** | N5-band vocabulary (`tag:jlpt-n5-vocab tag:vocabulary`, 5-card batches) |
 | **WK::N5 · Prereq Kanji** | Kanji still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
@@ -289,8 +282,8 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::Rendaku** | Compound reading with 連濁 on the second kanji |
 | **WK::Conjugations · Verbs / Adjectives / Reverse / Verb Types / Adjective Types** | Conjugation drills (5-card batches) |
 | **WK::Grammar** | Hanabira pattern clozes (**Japanese Grammar Context**) |
-| **WK::Grammar · Current Tae Kim lesson** | Context cards for current reading lesson (from config cap) |
 | **WK::Phonetic Families** | Phonetic on'yomi drills |
+| **WK::Immersion · Yomitan** | Yomitan-mined word → sentence cards (open, no WK gating) |
 
 All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only — no review-ahead), and **Relative overdueness** ordering. **Prereq** decks also use `-tag:wk-mature` so Guru I+ items (interval ≥ 7d on all card types, tagged by **wk_unlock**) drop out once they satisfy the chain.
 
@@ -298,7 +291,7 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 
 ## 8. Topic guides
 
-**Grammar:** `python wk_decks.py --deck grammar` — Hanabira + Tae Kim ordering; browse by `tag:tk-lesson-basic-…`.
+**Grammar:** `python wk_decks.py --deck grammar` — Hanabira clozes ordered by JLPT; browse by `tag:jlpt-n5`, etc.
 
 **Vocab cloze:** production in WK sentences; type full kanji when needed.
 
@@ -309,6 +302,8 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 **Dictation:** WK native audio on front (intentional).
 
 **Rendaku:** Two-kanji WK compounds where the second morpheme voices (e.g. やま + かわ → やま**が**わ). Card shows morpheme hint → type full reading. Filtered deck **WK::Rendaku**. Default min SRS Master+ (`--rendaku-min-srs 7`).
+
+**Yomitan immersion:** Open deck for live mining — word + kana on front, sentence + audio + pitch on back. No WK gating. One-time: `python wk_decks.py --deck mining`, import `out/wk_mining.apkg`, configure Yomitan → AnkiConnect (map **Furigana**, **Reading**, pitch fields — see doc). Add personal glosses in **UserNotes** (Browse or **E** while reviewing). Full setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
 
 ---
 
@@ -347,8 +342,8 @@ You finished core for the day, then imported and ran **WK Setup Filtered Decks**
 
 | Cause | What happened |
 |-------|----------------|
-| **More filtered decks** | Each `WK::…` deck shows its own queue (up to its limit). Six Tae Kim/N5 decks can each list ~20 cards — often the **same** physical cards you already saw in `WK::Core *`, not six times more work. |
-| **New tags on re-import** | `jlpt-n5-*` tags route cards into new filtered searches they did not match before. `tk-grammar-*` tags change via **wk_tae_kim_track**, not import. |
+| **More filtered decks** | Each `WK::…` deck shows its own queue (up to its limit). N5 prereq decks can each list ~20 cards — often the **same** physical cards you already saw in `WK::Core *`, not six times more work. |
+| **New tags on re-import** | `jlpt-n5-*` tags route cards into new filtered searches they did not match before. |
 | **Unlock pass** | **wk_unlock** on load unsuspends eligible `wk-locked` cards → they become **New**. |
 | **Bootstrap re-import** | If `"core.bootstrap_scheduling": true` in config, re-import can re-apply WK intervals and fight FSRS. Set it **`false`** after your one-time migration. |
 | **Reschedule in filtered decks** | Must be **on** for daily WK filtered decks. If off, Good/Easy show **(end)** and FSRS does not update — see below. |
@@ -357,7 +352,7 @@ You finished core for the day, then imported and ran **WK Setup Filtered Decks**
 **What to do**
 
 1. Set `"core.bootstrap_scheduling": false` in `wk_deck_config.json` before routine re-imports.
-2. For today: study **one** track only — e.g. finish `WK::Core *` **or** the Tae Kim/N5 prereq chain, not both in parallel.
+2. For today: study **one** track only — e.g. finish `WK::Core *` **or** the N5 prereq chain, not both in parallel.
 3. Check unique workload in Browse: `tag:wk-core is:due` and `tag:wk-core is:new` — that is the real due set, not the sum of every filtered deck badge.
 4. If **Good / Easy show (end)**: filtered deck has **Reschedule cards based on my answers** disabled. Regenerate, run **WK Setup Filtered Decks**, or per deck: gear icon → Options → enable reschedule. Without it, filtered-deck reviews do not stick.
 
@@ -406,12 +401,10 @@ Example: with defaults, **0 due reviews** → up to **15** new (radicals first);
 
 Study core via **WK::Core \*** filtered decks as usual; Anki’s per-deck **new/day** limits enforce the allocation.
 
-**JLPT + Tae Kim priority:** regenerate writes `out/wk_study_priority.json` and `out/wk_tae_kim_track_map.json`. **Tae Kim links use the “Vocabulary used in this section” list on each practice page** (part1 of guidetojapanese `*_ex.html` pages through your section cap — not production-exercise context sentences or Hanabira grammar examples). Core notes get JLPT split tags at import; **Tae Kim grammar role tags are runtime-only**:
+**JLPT priority:** regenerate writes `out/wk_study_priority.json`. Core notes get JLPT split tags at import:
 
 | Tag | Meaning | Applied |
 |-----|---------|---------|
-| `tk-grammar-vocab` | Kanji/vocab in Tae Kim section vocabulary lists | **wk_tae_kim_track** (profile `wk_tae_kim_track.json`) |
-| `tk-grammar-prereq` | Radicals/kanji needed for those | **wk_tae_kim_track** |
 | `jlpt-n5-vocab` | Kanji/vocab at WK levels 1–10 (N5 band) | import |
 | `jlpt-n5-prereq` | Radicals/kanji needed for N5 items | import |
 
@@ -485,20 +478,10 @@ Dedicated leech decks are optional (legacy). Anki’s **Browse → `tag:leech`**
 | Idea | When it’s worth it |
 |------|---------------------|
 | Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading |
-| **Grammar gated by kanji** (runtime, not built) | Grammar feels too hard before core kanji mature — [below](#grammar-gated-by-kanji-planned) |
-| YouTube immersion deck | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) |
-| **Yomitan sentence mining** | [docs/yomitan_mining.md](docs/yomitan_mining.md) — live mining via AnkiConnect |
-
-### Yomitan mining (reading → clozes)
-
-Mine sentences while reading; cards land in **Immersion · Yomitan Mining** and respect **wk_unlock** when linked to WK vocab.
-
-1. Regenerate (`mining` is in default `generate_decks`) → import `wk_all.apkg`.
-2. `./scripts/sync_anki_addons.sh` → restart Anki (includes **wk_mining**).
-3. Configure Yomitan → Anki field map (see [docs/yomitan_mining.md](docs/yomitan_mining.md)).
-4. After mining: **Tools → WK Link Mining Notes**; study via **WK::Mining · Ready**.
-
-**Duplicates:** first field must be `{expression}|{sentence}`; enable Yomitan “Prevent adding”. Mined sentences are separate from WK Vocabulary Context clozes.
+| **Yomitan immersion deck** | [docs/yomitan_mining.md](docs/yomitan_mining.md) — word on front, sentence on back; optional **UserNotes** |
+| **VOICEVOX TTS (immersion)** | [docs/wk_voicevox_tts_design.md](docs/wk_voicevox_tts_design.md) — **VoicevoxAudio** reserved; synthesis planned |
+| YouTube immersion deck | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) (deferred) |
+| **Video sentence mining (Migaku, etc.)** | Separate deck/note type; can coexist with Yomitan reading mining |
 
 ### Grammar gated by kanji (planned)
 
@@ -506,7 +489,7 @@ Mine sentences while reading; cards land in **Immersion · Yomitan Mining** and 
 
 | Filter | Where | What it does |
 |--------|-------|--------------|
-| `grammar.max_jlpt`, `max_tae_kim_section`, `max_tae_kim_lesson` | `wk_deck_config.json` | Caps which grammar points are generated at all |
+| `grammar.max_jlpt` | `wk_deck_config.json` | Caps which grammar points are generated at all |
 | `grammar.max_unknown_kanji` (default 5) | Generator | Skips example sentences with too many kanji **not** in WK’s kanji+vocab character set |
 | `grammar.no_wk_filter` | Config | If `true`, ignores WK kanji set when counting unknown kanji |
 
@@ -516,9 +499,9 @@ That WK kanji set is **everything in your WK cache up to `max_level`**, not what
 
 1. Import grammar notes with `tag:wk-locked` (and optionally a field listing required kanji or **WkSubjectId**s).
 2. **wk_unlock** (or similar) unsuspends a grammar card only when every kanji in the sentence is **mature in core** (same ≥ 7-day Guru I rule by default).
-3. New grammar drips in as your kanji knowledge grows — aligned with reading Tae Kim, not just with “WK has published this level.”
+3. New grammar drips in as your kanji knowledge grows — aligned with what you can read in core, not just with “WK has published this level.”
 
-**Until that exists:** rely on **Tae Kim lesson caps** (`grammar.max_tae_kim_lesson`), **`max_unknown_kanji`**, and studying grammar when it matches what you are reading. Lower `max_unknown_kanji` (e.g. 3) for stricter sentences at generate time; it still won’t track live Anki maturity.
+**Until that exists:** rely on **`grammar.max_jlpt`**, **`max_unknown_kanji`**, and studying grammar when it matches what you are reading. Lower `max_unknown_kanji` (e.g. 3) for stricter sentences at generate time; it still won’t track live Anki maturity.
 
 **Why it’s deferred:** grammar notes don’t carry **WkSubjectId** today, and sentences mix many kanji — the addon needs a “required kanji” list per note and a maturity check against core decks. Supplementary gating by single **WkSubjectId** was the simpler first step.
 

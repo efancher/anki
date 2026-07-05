@@ -17,7 +17,6 @@ if str(REPO_ROOT) not in sys.path:
 
 import genanki
 
-from tae_kim_mapping import conjugation_cap_for_tae_kim
 from wk_decks import (
     ADJECTIVE_CONJUGATION_WORD_CLASSES,
     CONJUGATION_DEFAULT_MIN_SRS,
@@ -86,39 +85,6 @@ class ConjugationMinSrsTest(unittest.TestCase):
         )
         self.assertTrue(all(d.word_class in VERB_CONJUGATION_WORD_CLASSES for d in verb_drills))
         self.assertTrue(all(d.word_class in ADJECTIVE_CONJUGATION_WORD_CLASSES for d in adj_drills))
-
-    def test_tae_kim_cap_excludes_verbs_at_state_of_being(self) -> None:
-        verb = mock_vocab_for_conjugation("食べる", "たべる", ["ichidan verb"], vocab_id=1)
-        na_adj = mock_vocab_for_conjugation("元気", "げんき", ["な adjective"], vocab_id=2)
-        assignment_index = {
-            1: {"data": {"subject_id": 1, "srs_stage": WK_SRS_STAGE_MASTER}},
-            2: {"data": {"subject_id": 2, "srs_stage": WK_SRS_STAGE_MASTER}},
-        }
-        args = argparse.Namespace(max_cards=100)
-        cap = conjugation_cap_for_tae_kim(
-            max_tae_kim_lesson="expressing-state-of-being",
-            max_tae_kim_section=3,
-        )
-        verb_drills = collect_conjugation_drills(
-            [verb, na_adj],
-            assignment_index,
-            args,
-            min_srs=0,
-            word_classes=VERB_CONJUGATION_WORD_CLASSES,
-            tae_kim_cap=cap,
-        )
-        na_drills = collect_conjugation_drills(
-            [verb, na_adj],
-            assignment_index,
-            args,
-            min_srs=0,
-            word_classes=ADJECTIVE_CONJUGATION_WORD_CLASSES,
-            tae_kim_cap=cap,
-        )
-        self.assertEqual(verb_drills, [])
-        self.assertGreater(len(na_drills), 0)
-        self.assertTrue(all(d.word_class == "na_adjective" for d in na_drills))
-
 
 class ConjugationAudioTemplateTests(unittest.TestCase):
     def test_conjugation_model_places_prompt_audio_on_front_and_answer_on_back(self) -> None:

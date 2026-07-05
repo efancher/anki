@@ -1,5 +1,5 @@
 {
-  "_comment": "WK deck generator defaults. Keys use snake_case and mirror wk_decks.py CLI flags. Edit this file, then run: python wk_decks.py --from-config. Explicit CLI flags override config. Conjugation forms follow grammar.max_tae_kim_lesson when set.",
+  "_comment": "WK deck generator defaults. Keys use snake_case and mirror wk_decks.py CLI flags. Edit this file, then run: python wk_decks.py --from-config. Explicit CLI flags override config.",
   "deck": "all",
   "generate_decks": [
     "core",
@@ -21,8 +21,6 @@
   "sync_anki_addons": true,
   "grammar": {
     "max_jlpt": "N5",
-    "max_tae_kim_section": 3,
-    "max_tae_kim_lesson": "past-tense",
     "max_examples": 5,
     "max_unknown_kanji": 5,
     "no_wk_filter": false,

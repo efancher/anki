@@ -1,138 +1,25 @@
 {
-  "note": "Regression fixtures for Tae Kim / N5 filtered-deck priority tags. Each case uses WK-shaped subject stubs.",
-  "default_lesson_order": 30003,
-  "particle_homograph_cases": [
+  "note": "Regression fixtures for N5 filtered-deck priority tags.",
+  "cases": [
     {
-      "id": "ha-leaf",
-      "description": "葉 (は) must not match the topic particle は",
-      "kanji": {"id": 750, "characters": "葉", "level": 10},
-      "vocabulary": {
-        "id": 7629,
-        "characters": "葉",
-        "reading": "は",
-        "level": 10,
-        "component_subject_ids": [750]
-      },
-      "sentences": [
-        "私は大学生だ。",
-        "これは何？",
-        "図書館はどこ？"
-      ],
-      "production_answers": ["は", "は", "は"],
-      "exclude_from_decks": [
-        "WK::Tae Kim · Grammar Vocab",
-        "WK::Tae Kim · Grammar Prereq Kanji"
-      ]
+      "name": "n5 kanji direct",
+      "note_tags": ["wk-core", "jlpt-n5-vocab", "kanji"],
+      "include_in_decks": ["WK::N5 · Kanji"]
     },
     {
-      "id": "ni-two",
-      "description": "二 (に) must not match the particle に",
-      "vocabulary": {
-        "id": 2473,
-        "characters": "二",
-        "reading": "に",
-        "level": 1,
-        "component_subject_ids": []
-      },
-      "sentences": ["学校に行く。", "図書館に行く。"],
-      "production_answers": ["に", "に"],
-      "exclude_from_decks": ["WK::Tae Kim · Grammar Vocab"]
+      "name": "n5 vocab direct",
+      "note_tags": ["wk-core", "jlpt-n5-vocab", "vocabulary"],
+      "include_in_decks": ["WK::N5 · Vocabulary"]
     },
     {
-      "id": "to-door",
-      "description": "戸 (と) must not match the particle と",
-      "vocabulary": {
-        "id": 8734,
-        "characters": "戸",
-        "reading": "と",
-        "level": 12,
-        "component_subject_ids": []
-      },
-      "sentences": ["友達と話す。", "ジムと行く。"],
-      "production_answers": ["と", "と"],
-      "exclude_from_decks": ["WK::Tae Kim · Grammar Vocab"]
+      "name": "n5 prereq radical",
+      "note_tags": ["wk-core", "jlpt-n5-prereq", "radical"],
+      "include_in_decks": ["WK::N5 · Prereq Radicals"]
     },
     {
-      "id": "mo-algae",
-      "description": "藻 (も) must not match the particle も",
-      "vocabulary": {
-        "id": 8646,
-        "characters": "藻",
-        "reading": "も",
-        "level": 48,
-        "component_subject_ids": []
-      },
-      "sentences": ["今日も雨だ。", "昨日も雨だった。"],
-      "production_answers": ["も", "も"],
-      "exclude_from_decks": ["WK::Tae Kim · Grammar Vocab"]
-    },
-    {
-      "id": "he-fart",
-      "description": "屁 (へ) must not match the particle へ",
-      "vocabulary": {
-        "id": 9004,
-        "characters": "屁",
-        "reading": "へ",
-        "level": 55,
-        "component_subject_ids": []
-      },
-      "sentences": ["学校へ行く。", "図書館へ行く。"],
-      "production_answers": ["へ", "へ"],
-      "exclude_from_decks": ["WK::Tae Kim · Grammar Vocab"]
+      "name": "n5 prereq kanji",
+      "note_tags": ["wk-core", "jlpt-n5-prereq", "kanji"],
+      "include_in_decks": ["WK::N5 · Prereq Kanji"]
     }
-  ],
-  "compound_kanji_cases": [
-    {
-      "id": "se-in-background",
-      "description": "背 must not match inside 背景",
-      "kanji": {"id": 1, "characters": "背", "level": 8},
-      "sentences": ["背景がきれい。"],
-      "production_answers": ["背景がきれい。"],
-      "exclude_from_decks": [
-        "WK::Tae Kim · Grammar Vocab",
-        "WK::Tae Kim · Grammar Prereq Kanji"
-      ]
-    }
-  ],
-  "context_vs_production_cases": [
-    {
-      "id": "soko-tei",
-      "description": "底 (そこ) must not match そこ in exercise context when the answer is は",
-      "kanji": {"id": 1020, "characters": "底", "level": 17},
-      "vocabulary": {
-        "id": 3991,
-        "characters": "底",
-        "reading": "そこ",
-        "level": 17,
-        "component_subject_ids": [1020]
-      },
-      "context_sentence": "アリス） そこ は 図書館じゃない？",
-      "production_answer": "は",
-      "exclude_from_decks": [
-        "WK::Tae Kim · Grammar Vocab",
-        "WK::Tae Kim · Grammar Prereq Kanji"
-      ]
-    },
-    {
-      "id": "context-daigaku",
-      "description": "大学生 must not match from particle-exercise context when the answer is は",
-      "vocabulary": {
-        "id": 3436,
-        "characters": "大学生",
-        "reading": "だいがくせい",
-        "level": 5,
-        "component_subject_ids": []
-      },
-      "context_sentence": "ジムは大学生だ。でも、私 は 大学生じゃない。",
-      "production_answer": "は",
-      "exclude_from_decks": ["WK::Tae Kim · Grammar Vocab"]
-    }
-  ],
-  "lesson_cap": {
-    "max_tae_kim_lesson": "introduction-to-particles",
-    "late_kanji_not_in_exercises": [
-      {"id": 750, "characters": "葉", "level": 10},
-      {"id": 1020, "characters": "底", "level": 17}
-    ]
-  }
+  ]
 }

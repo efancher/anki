@@ -136,7 +136,7 @@ Radicals: meaning-only (`WK Core Radical` v2), no reading audio. Kanji audio: ed
 | conjugations-reverse | `WkSubjectId` | That vocab mature in core |
 | phonetic families | `WkSubjectId` | Linked kanji mature in core |
 | verb/adjective types | `WkSubjectId` | That vocab mature in core |
-| grammar | — | **Not gated** — import caps only (`max_jlpt`, `max_tae_kim_lesson`, etc.) |
+| grammar | — | **Not gated** — import caps only (`max_jlpt`, etc.) |
 | tae-kim-exercises | — | **Not gated** — lesson cap at import only |
 
 ---
@@ -366,6 +366,8 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 18 | Filtered decks for core SRS | **Done** | `WK::Core Radicals/Kanji/Vocabulary` in `FILTERED_DECK_DEFINITIONS` |
 | 19 | `WK::Core::` deck hierarchy | **Not started** | Flat names (O1) |
 | 20 | YouTube immersion mining | **Planned** | [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — after core stable |
+| 21 | Yomitan immersion (open deck) | **Done** | [yomitan_mining.md](yomitan_mining.md) — template v5+ |
+| 22 | VOICEVOX TTS for immersion | **Planned** | [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md) — fields reserved; synthesis deferred |
 
 ---
 
@@ -381,6 +383,9 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | `wk_decks.py` | CLI, models, supplementary gating, filtered deck defs |
 | `wk_deck_config.json` | Default `generate_decks`, core, reading audio |
 | `dictation_decks.py` | Dictation deck (imports audio helpers from `wk_reading_audio`) |
+| `mining_decks.py` | Yomitan immersion note type (open deck, no WK gating) |
+| `docs/yomitan_mining.md` | Yomitan → AnkiConnect setup |
+| `docs/wk_voicevox_tts_design.md` | **Planned** VOICEVOX synthesis for immersion cards |
 | `anki_addon/wk_unlock/` | Unlock + mature tags (core + supplementary) |
 | `anki_addon/wk_filtered_decks/` | Daily filtered decks |
 | `anki_addon/wk_deck_options/` | WK FSRS preset |
@@ -411,6 +416,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | O6 | Root radicals (empty `PrerequisiteIds`) auto-unlock? | **Done** — `prerequisites_met()` returns True when empty |
 | O7 | Filtered decks for core daily review? | **Done** — `WK::Core Radicals/Kanji/Vocabulary` |
 | O8 | YouTube immersion sentence mining? | **Planned** — [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md); YouTube-only v1 |
+| O9 | VOICEVOX TTS + Kanjium pitch on immersion cards? | **Planned** — [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md); **VoicevoxAudio** field reserved (v5) |
 
 ---
 
@@ -445,5 +451,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 
 - [wk_anki_runbook.md](../wk_anki_runbook.md) — current weekly import workflow
 - [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — **planned** YouTube sentence mining (deferred)
+- [yomitan_mining.md](yomitan_mining.md) — Yomitan immersion deck (open, no gating)
+- [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md) — **planned** VOICEVOX TTS for immersion cards
 - [anki_addon/README.md](../anki_addon/README.md) — filtered decks + FSRS preset addons
 - `.cursor/rules/wk-anki-template-versions.mdc` — bump templates when changing note types

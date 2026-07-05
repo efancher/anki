@@ -32,9 +32,6 @@ EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::Core Radicals",
     "WK::Core Kanji",
     "WK::Core Vocabulary",
-    "WK::Tae Kim · Grammar Vocab",
-    "WK::Tae Kim · Grammar Prereq Kanji",
-    "WK::Tae Kim · Grammar Prereq Radicals",
     "WK::N5 · Kanji",
     "WK::N5 · Vocabulary",
     "WK::N5 · Prereq Kanji",
@@ -47,7 +44,6 @@ EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::Conjugations · Verb Types",
     "WK::Conjugations · Adjective Types",
     "WK::Grammar",
-    "WK::Grammar · Current Tae Kim lesson",
     "WK::Phonetic Families",
 )
 

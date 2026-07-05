@@ -22,7 +22,6 @@ from wk_decks import (
     all_vocab_subjects,
     daily_filtered_deck_search,
     effective_filtered_deck_definitions,
-    grammar_context_current_lesson_filtered_deck,
     prereq_filtered_deck_search,
     passes_progress_filter,
     supplementary_import_tags,
@@ -140,8 +139,6 @@ class WkSupplementaryGatingTests(unittest.TestCase):
 
     def test_filtered_deck_searches_scope_daily_workload(self) -> None:
         prereq_names = {
-            "WK::Tae Kim · Grammar Prereq Kanji",
-            "WK::Tae Kim · Grammar Prereq Radicals",
             "WK::N5 · Prereq Kanji",
             "WK::N5 · Prereq Radicals",
         }
@@ -168,13 +165,11 @@ class WkSupplementaryGatingTests(unittest.TestCase):
                     spec["search"],
                     msg=f"Unexpected wk-mature exclusion in {spec['name']}",
                 )
-        for spec in effective_filtered_deck_definitions(
-            max_tae_kim_lesson="introduction-to-particles",
-        ):
+        for spec in effective_filtered_deck_definitions():
             self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, spec["search"])
 
     def test_prereq_filtered_deck_search_helper(self) -> None:
-        search = prereq_filtered_deck_search("tag:wk-core tag:tk-grammar-prereq tag:kanji")
+        search = prereq_filtered_deck_search("tag:wk-core tag:jlpt-n5-prereq tag:kanji")
         self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, search)
         self.assertIn(FILTERED_DECK_SEARCH_NOT_MATURE, search)
         self.assertIn("-is:suspended", search)
@@ -183,17 +178,6 @@ class WkSupplementaryGatingTests(unittest.TestCase):
         search = daily_filtered_deck_search('deck:"WaniKani Core · Kanji"')
         self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, search)
         self.assertNotIn(FILTERED_DECK_SEARCH_NOT_MATURE, search)
-
-    def test_current_tae_kim_lesson_filtered_decks_follow_config_cap(self) -> None:
-        context = grammar_context_current_lesson_filtered_deck("introduction-to-particles")
-        self.assertIsNotNone(context)
-        self.assertIn("tag:tk-lesson-basic-introduction-to-particles", context["search"])
-        self.assertIn("Japanese Grammar Context", context["search"])
-        names = [d["name"] for d in effective_filtered_deck_definitions(
-            max_tae_kim_lesson="introduction-to-particles",
-        )]
-        self.assertIn("WK::Grammar · Current Tae Kim lesson", names)
-        self.assertNotIn("WK::Grammar Exercises · Current Tae Kim lesson", names)
 
     def test_conjugation_filtered_decks_use_batch_limit(self) -> None:
         conjugation_names = {

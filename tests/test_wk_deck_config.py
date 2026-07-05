@@ -35,8 +35,6 @@ class WkDeckConfigTests(unittest.TestCase):
                 "only_started": True,
                 "grammar": {
                     "max_jlpt": "N5",
-                    "max_tae_kim_section": 3,
-                    "max_tae_kim_lesson": "expressing-state-of-being",
                     "max_examples": 5,
                     "max_unknown_kanji": 2,
                     "no_wk_filter": True,
@@ -48,8 +46,6 @@ class WkDeckConfigTests(unittest.TestCase):
         self.assertEqual(defaults["deck"], "grammar")
         self.assertTrue(defaults["only_started"])
         self.assertEqual(defaults["grammar_max_jlpt"], "N5")
-        self.assertEqual(defaults["grammar_max_tae_kim_section"], 3)
-        self.assertEqual(defaults["grammar_max_tae_kim_lesson"], "expressing-state-of-being")
         self.assertEqual(defaults["grammar_max_examples"], 5)
         self.assertEqual(defaults["grammar_max_unknown_kanji"], 2)
         self.assertTrue(defaults["grammar_no_wk_filter"])

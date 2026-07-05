@@ -21,7 +21,11 @@ WK_ADDONS=(
   wk_unlock
   wk_adaptive_new
   wk_health_check
-  wk_tae_kim_track
+  wk_immersion
+)
+
+# Retired add-ons — remove if still present (old wk_mining breaks Anki 25+ mining hooks).
+DEPRECATED_ADDONS=(
   wk_mining
 )
 
@@ -29,8 +33,9 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--dry-run]
 
-  Sync anki_addon/{wk_deck_options,wk_filtered_decks,wk_unlock,wk_adaptive_new,wk_health_check,wk_tae_kim_track,wk_mining}
+  Sync anki_addon/{wk_deck_options,wk_filtered_decks,wk_unlock,wk_adaptive_new,wk_health_check,wk_immersion}
   into Anki's add-ons directory (rsync, removes stale files).
+  Removes deprecated wk_mining if present (superseded by wk_immersion).
 
   Set ANKI_ADDONS_DIR to override the destination.
 EOF
@@ -127,6 +132,19 @@ main() {
 
   for name in "${WK_ADDONS[@]}"; do
     sync_addon "${name}"
+  done
+
+  for name in "${DEPRECATED_ADDONS[@]}"; do
+    dest="${ADDONS_DIR}/${name}"
+    if [[ ! -d "${dest}" ]]; then
+      continue
+    fi
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      echo "would remove deprecated add-on: ${dest}/"
+    else
+      rm -rf "${dest}"
+      echo "removed deprecated add-on: ${name} (use wk_immersion instead)"
+    fi
   done
 
   if [[ "${DRY_RUN}" -eq 0 ]]; then

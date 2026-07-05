@@ -1,142 +1,287 @@
-# Yomitan mining with WK decks
+# Yomitan immersion mining
 
-Mine vocabulary and example sentences from reading (web, ebooks, Satori Reader, etc.) into Anki while staying inside the WK unlock / FSRS ecosystem.
+Mine vocabulary from reading (web, ebooks, Satori Reader, etc.) into Anki with **word on the front** and **full sentence + audio on the back**. Cards are **not** gated by WK progress — study them whenever you mine them.
 
 ## What you get
 
 | Piece | Role |
 |-------|------|
-| **Immersion · Yomitan Mining** deck | Home deck for mined cards (empty until you mine) |
-| **WK Update-Safe Yomitan Mining** note type | Sentence cloze + term cards; Yomitan sends here via AnkiConnect |
-| **`out/wk_vocab_lookup.json`** | Expression → WK subject id map (regenerated each run) |
-| **`wk_mining` add-on** | Links `WkSubjectId`, applies `wk-locked` until core vocab matures |
-| **WK::Mining · Ready** filtered deck | Unlocked mining cards only (install `wk_filtered_decks`) |
+| **Immersion · Yomitan Mining** deck | Home deck for mined cards |
+| **WK Yomitan Immersion** note type | Recognition card; Yomitan sends notes here via AnkiConnect |
+| **UserNotes** field | Empty at mine time; personal mnemonics (katakana bridges, etc.) |
+| **Glossary / Synonyms / Antonyms** | J–J definition + thesaurus hooks on the card back (template **v9+**; see below) |
+| **WK::Immersion · Yomitan** filtered deck | Optional daily queue (install `wk_filtered_decks`, then **Tools → WK Setup Filtered Decks**) |
 
 ## One-time setup
 
-### 1. Import the mining note type
-
-Run `python wk_decks.py --from-config` (mining is in default `generate_decks`). Import `wk_all.apkg` or **`wk_mining.apkg`** (smaller, mining only). Choose **Update** for the note type.
-
-The export includes one **suspended** setup card so Anki actually creates the deck (empty decks are skipped on import). Delete it in Browse after your first real Yomitan mine, or leave it suspended.
-
-### 2. Install add-ons
+### 1. Import the note type
 
 ```bash
-./scripts/sync_anki_addons.sh
+python wk_decks.py --deck mining
 ```
 
-Restart Anki. Confirm **Tools → WK Link Mining Notes** appears.
+Import `out/wk_mining.apkg` (or `out/wk_all.apkg` from a normal regen — **mining is included** in the default bundle). Choose **Update** when re-importing after template changes.
 
-### 3. AnkiConnect
+The export includes one **suspended** setup card so Anki creates the deck (empty decks are skipped on import). Delete it in Browse after your first real mine, or leave it suspended.
+
+### 2. AnkiConnect
 
 Install [AnkiConnect](https://ankiweb.net/shared/info/2055492159) in Anki. Keep Anki running while mining.
 
-**Test:** with Anki open, visit [http://127.0.0.1:8765](http://127.0.0.1:8765) in your browser. You should see an AnkiConnect version banner (not an error page).
+**Test:** with Anki open, visit [http://127.0.0.1:8765](http://127.0.0.1:8765) — you should see an AnkiConnect version banner.
 
-### 4. Yomitan (formerly Yomichan)
+### 3. Yomitan dictionaries (J–J + thesaurus for cards)
 
-#### Connect Yomitan to Anki (empty Deck/Model dropdowns)
+Dictionary zips for this workflow live in **`out/yomitan_dictionaries/`** (see that folder’s `README.md`). Import into Yomitan (**Settings → Dictionaries → Import**; do not unzip).
 
-If **Configure Anki flashcards** shows empty Deck and Model dropdowns, Yomitan is not connected yet. Work through this in order:
+**Minimum for word definitions on cards:**
 
-1. **Anki must be running** (with AnkiConnect installed) before you open Yomitan settings.
-2. In Yomitan **Settings**, turn on **Advanced** (toggle at the bottom-left of the settings page).
-3. In the **Anki** section, enable **Anki integration** / connect to Anki (exact label varies by version — there must be an enable/connect toggle, not just the server field).
-4. Set **AnkiConnect server address** to exactly:
-   ```
-   http://127.0.0.1:8765
-   ```
-   Leave it blank or wrong → dropdowns stay empty.
-5. **Grant permission in Anki:** on a Japanese web page, look up any word with Yomitan and click the green **+** (or try to add a card). Anki should pop up *“A website wants to access Anki through AnkiConnect”* — click **Yes**. Until you approve this once, deck/model lists often stay empty.
-6. Close **Configure Anki flashcards**, reopen it. Open the **Expression** tab (that's vocabulary/sentence mining — you can ignore **Reading** and **Kanji** for this workflow).
-7. Deck and Model dropdowns should now list your Anki decks. Pick:
+| Import | Dictionary | On card |
+|--------|------------|---------|
+| `04_…例解…zip` | 小学館例解学習国語 第十二版 | **Glossary** (意味) |
+| `05_…実用…zip` | 実用日本語表現辞典 | *(popup helper; optional on card)* |
+| `06_…対義語…zip` | 対義語辞典オンライン | **Antonyms** (対) |
+| `07_…類語例解…zip` | 使い方の分かる 類語例解辞典 | **Synonyms** (類) |
+
+Also keep **Jitendex**, **Kanjium** (pitch), and **DOJG** from your existing setup.
+
+**Reading popup order** (top → bottom): 例解 → 実用 → Jitendex → Kanjium → DOJG → JMnedict → **類語例解 → 対義語** (last so you rarely scroll to them while reading).
+
+**Thesaurus dicts must stay enabled** so Yomitan can fill **Synonyms** / **Antonyms** at mine time, even though you mostly read 例解 + Jitendex in the popup.
+
+**Yomitan → Appearance → Result display:** enable **Group term-reading pairs** (or **Group related terms**) so `{single-glossary-…}` markers work reliably.
+
+**Yomitan → Popup behavior:** enable **Allow scanning popup content** — you will look up words inside J–J definitions.
+
+### 4. Update the note type (template v9)
+
+If you already imported the mining deck, refresh the note type so **Synonyms** and **Antonyms** fields exist:
+
+```bash
+python3 wk_decks.py --deck mining
+```
+
+In Anki: **File → Import** → `out/wk_mining.apkg` → choose **Update** (not “Import as new”). Restart Anki (or mine once so **wk_immersion** can patch fields in-place).
+
+### 5. Yomitan field mapping
+
+In Yomitan **Settings → Anki** (enable Advanced if needed):
+
+1. Connect to Anki and approve the AnkiConnect permission prompt once.
+2. Open **Configure Anki flashcards** → **Expression** tab.
+3. Select:
    - **Deck:** `Immersion · Yomitan Mining`
-   - **Model:** `WK Update-Safe Yomitan Mining`
-
-If dropdowns are still empty after step 5, check AnkiConnect **Config** (Tools → Add-ons → AnkiConnect → Config) — `webCorsOriginList` should include `"http://localhost"` (default). Restart Anki after config changes.
-
-#### Field mapping (Expression tab)
-
-After deck + model are selected, map note fields:
+   - **Model:** `WK Yomitan Immersion`
 
 | Note field | Yomitan marker |
 |------------|----------------|
 | DuplicateKey | `{expression}\|{sentence}` |
 | Expression | `{expression}` |
 | Reading | `{reading}` |
-| Glossary | `{glossary-first-brief}` |
-| Sentence | `{sentence}` |
-| ClozePrefix | `{cloze-prefix}` |
-| ClozeBody | `{cloze-body}` |
-| ClozeSuffix | `{cloze-suffix}` |
-| TypeExpression | `{cloze-body}` |
-| SentenceFurigana | `{sentence-furigana-plain}` |
-| Audio | `{audio}` |
+| Furigana | `{furigana}` |
+| PitchAccents | `{pitch-accents}` |
+| PitchPositions | `{pitch-accent-positions}` |
+| PitchGraphs | `{pitch-accent-graphs}` |
+| **Glossary** | `{single-glossary-小学館例解学習国語 第十二版-no-dictionary-first-brief}` |
+| **Synonyms** | `{single-glossary-使い方の分かる 類語例解辞典-no-dictionary-brief}` |
+| **Antonyms** | `{single-glossary-対義語辞典オンライン-no-dictionary-brief}` |
+| Sentence | `{cloze-prefix}{cloze-body}{cloze-suffix}` |
+| SentenceFurigana | `{sentence-furigana}` |
+| Audio | `{audio}` *(optional word clip from dictionary)* |
 | SourceUrl | `{url}` |
 | SourceTitle | `{document-title}` |
-| WkSubjectId | *(leave empty)* |
-| Meta | `yomitan` |
 
-5. Duplicate settings (recommended):
+**Important:** use the **▼ dropdown** next to each field in Yomitan — dictionary names must match your installed revision (e.g. `rev.rgko12;2025-08-18`). The strings above are examples; pick the matching entry from the menu.
 
-| Setting | Value | Why |
-|---------|-------|-----|
-| Check for card duplicates | On | Gray out already-mined items |
-| When a duplicate is detected | **Prevent adding** | Avoid double cards |
-| Duplicate card scope | Deck root (or collection) | Match your workflow |
-| Check for duplicates across all models | On | Also blocks if same key exists in another model |
+**Do not map in Yomitan** (leave these as Anki-only fields; Yomitan may not list them, and that is fine):
 
-**Audio / media:** there is no separate “Add media to notes” toggle for normal mining (green **+** on a lookup). Map **Audio** → `{audio}` in **Configure Anki flashcards**; Yomitan attaches word audio automatically when a downloadable source exists (e.g. Jisho, JapanesePod101 — see Yomitan **Settings → Audio**). That option only appears in **Generate Anki Notes (Experimental)…**, not in everyday mining. Browser TTS playback in the popup cannot be exported to Anki.
+| Note field | Who fills it |
+|------------|----------------|
+| SentenceAudio | **wk_immersion** add-on at mine time (full-sentence TTS) |
+| VoicevoxAudio | *(reserved — future tooling)* |
+| VoicevoxSpeakerId | *(reserved)* |
+| UserNotes | You — katakana bridges, personal hooks, extra glosses |
+| Meta | Optional — add `yomitan` only if Yomitan shows an empty row for it |
 
-**Sentence TTS on card back:** template v2 adds `{{tts ja_JP:Sentence}}` — a speaker control on the answer side that reads the full **Sentence** field using your system Japanese voice (not YouTube audio). Re-import `wk_mining.apkg` or `wk_all.apkg` and choose **Update** for the note type.
+**Card-only thesaurus:** only **Synonyms** and **Antonyms** (and **Glossary**) appear on the card. Other enabled dictionaries affect the **browser popup** only unless you add more `{single-glossary-…}` mappings.
 
-## Duplicate avoidance
+**Empty sections:** many words have no thesaurus or antonym entry — **類** and **対** blocks are hidden when the field is empty.
+
+**Furigana vs plain kana:** **Furigana** uses `{furigana}` (ruby over kanji on the card). **Reading** is plain kana — shown under the word on the front and again on the back. For kana-only terms, **Reading** may match **Expression**; that is fine.
+
+**Pitch accent:** map the three pitch fields above. Yomitan fills them only when you have a **pitch accent dictionary** installed (e.g. [Kanjium](https://github.com/mifunetori/Kanjium) or NHK-style pitch in Yomitan **Settings → Dictionaries**). **PitchGraphs** is optional HTML from Yomitan; leave blank if you prefer text only (`{pitch-accents}`).
+
+**Sentence from your reading (important):** map **Sentence** to `{cloze-prefix}{cloze-body}{cloze-suffix}` — the full line from the page you scanned. Plain `{sentence}` is fine when mining directly from scanned text, but if you click **+** on a **dictionary example** (Tatoeba line under a definition), `{sentence}` is only that short example (e.g. 頭痛がします), not the paragraph you were reading. The cloze markers always reconstruct the scanned sentence.
+
+**Verify after mining:** Browse → your note → **Sentence** must be the full line from your reading. If it is a short example sentence, Yomitan did not attach page context (wrong **+** button, or no scanned sentence on that page).
+
+**Sentence kana:** **SentenceFurigana** uses `{sentence-furigana}`. wk_immersion synthesizes from **Sentence** (kanji); it uses **SentenceFurigana** only when that field contains a **longer** line than **Sentence**.
+
+**Duplicate settings (recommended):**
+
+| Setting | Value |
+|---------|-------|
+| Check for card duplicates | On |
+| When a duplicate is detected | **Prevent adding** |
+| Duplicate card scope | Deck root (or collection) |
+| Check for duplicates across all models | On |
+
+**Audio:** map **Audio** → `{audio}` when a dictionary provides a **word** clip (optional). You do **not** configure **SentenceAudio** in Yomitan — the **wk_immersion** add-on synthesizes the full sentence when you click **+** (see below).
+
+### 6. Sentence audio at mine time (wk_immersion add-on)
+
+Yomitan does not export full-sentence TTS. The **wk_immersion** add-on runs during **AnkiConnect addNote** and fills **SentenceAudio** automatically.
+
+1. Sync add-ons: `./scripts/sync_anki_addons.sh` → restart Anki.
+2. Start **VOICEVOX** and leave it open — see **[VOICEVOX setup](voicevox_setup.md)** (English guide; you do not need VOICEVOX’s Japanese UI).
+3. Mine a word with **+** as usual. After a short pause, the note should have **SentenceAudio** = `[sound:…]`.
+
+Config, voice selection, edge-tts fallback, backfill, and troubleshooting: **[docs/voicevox_setup.md](voicevox_setup.md)**.
+
+**Backfill** notes mined before this add-on: **Tools → WK Synthesize Immersion Sentence Audio**.
+
+To replace audio synthesized from a short dictionary example, re-run with `--force` after fixing **Sentence** in Yomitan:
+
+```bash
+python3 scripts/synthesize_immersion_sentence_audio.py --force
+```
+
+CLI (Anki + AnkiConnect running): `python3 scripts/synthesize_immersion_sentence_audio.py`
+
+**Playback on the card back (template v7+):**
+
+| Label | Source | Fallback |
+|-------|--------|----------|
+| **Word** | Yomitan **Audio** (`{audio}` dictionary clip) | Anki TTS on **Reading**, then **Expression** |
+| **Sentence** | **SentenceAudio** (wk_immersion / VOICEVOX) | **VoicevoxAudio** → TTS on **Sentence** |
+
+Both play buttons appear on the back — word audio near the definition, sentence audio above the context line.
+
+## Card layout (template v9)
+
+- **Front:** mined word — kanji with ruby (**Furigana**) when Yomitan provides it, otherwise **Expression**; **Reading** (kana) shown underneath.
+- **Back:** word + **Reading** + **Pitch** → **意味** (**Glossary**, J–J from 例解) → **類** / **対** when present → **WORD** / **SENTENCE** audio → full sentence → optional **Your notes** → source link.
+
+Sections **意味 / 類 / 対** only appear when Yomitan filled that field at mine time.
+
+## Quick checklist (definitions + thesaurus on cards)
+
+1. Import dictionary zips from `out/yomitan_dictionaries/` (at least **04**, **06**, **07**).
+2. Set dictionary order in Yomitan (例解 and Jitendex on top; thesaurus dicts at the bottom).
+3. Enable **Group term-reading pairs** and **Allow scanning popup content**.
+4. Run `python3 wk_decks.py --deck mining` → import `out/wk_mining.apkg` with **Update**.
+5. Map **Glossary**, **Synonyms**, **Antonyms** in Yomitan (use ▼ dropdown for exact `{single-glossary-…}` names).
+6. Mine with the green **+** on the headword; check Browse: **Glossary** / **Synonyms** / **Antonyms** populated when the dict has an entry.
+
+## Adding your own notes (mnemonics, katakana bridges)
+
+The **UserNotes** field is for personal material Yomitan does not export — katakana bridges (嬉しい → ハッピー), your own “known word” hook, grammar reminders, etc. **Glossary / Synonyms / Antonyms** are filled automatically when the dictionaries have entries.
+
+### After mining (Browse)
+
+1. **Browse** → deck `Immersion · Yomitan Mining`.
+2. Select a note → **Fields** (or double-click the note).
+3. Type into **UserNotes**. Line breaks are preserved.
+4. Save. On review, a **Your notes** block appears on the back only when the field is non-empty.
+
+Example:
+
+```
+別の言い方：〜という意味
+関連：食べる（同じ語族）
+```
+
+### While reviewing
+
+On desktop, press **E** (Edit) during review, add text to **UserNotes**, save — useful when you look something up mid-session.
+
+### Bulk edit
+
+Browse → select multiple notes → **Notes → Find and Replace** or **Bulk edit** if you use an add-on; otherwise edit individually.
+
+**Tip:** Use **UserNotes** for Cure Dolly-style hooks Yomitan cannot guess (e.g. カタ：ハッピー). Use **類** / **対** on the card for dictionary thesaurus data.
+
+## Duplicate keys
 
 Anki deduplicates on the **first field** only.
 
-- **DuplicateKey** = `{expression}|{sentence}` → same word in **different** sentences creates **different** notes (good for cloze mining).
-- Same word, same sentence → blocked (good).
-- **Term-only** mining (no sentence): key is just `{expression}` → one card per headword.
-- Do **not** put `{reading}` first — 橋はし and 箸はし would collide.
+- **DuplicateKey** = `{expression}|{sentence}` → same word in **different** sentences creates **different** notes.
+- Same word, same sentence → blocked.
+- Term-only mining (no sentence): key is just `{expression}`.
+- Do **not** put `{reading}` first — homographs would collide.
 
-### Overlap with WK Vocabulary Context
+## vs other immersion tools
 
-Generator-built **WaniKani Vocabulary Context** clozes use stable GUIDs per WK subject, not sentence text. A mined sentence for 食べる is **not** a duplicate of the WK cloze card. That is intentional: mined lines add real-world context.
+| Tool | Best for |
+|------|----------|
+| **This deck + Yomitan** | Reading, web, ebooks — word → sentence recognition |
+| **Migaku** | Video clips with timestamp audio |
+| **WK Vocabulary Context** | WK sentence clozes (generator-built, type-in production) |
 
-To find duplicate **sentences** among mined notes: **Tools → WK Mining Duplicate Report**.
+## Troubleshooting
 
-### Yomitan quirks
+### `on_note_will_be_added() takes 2 positional arguments but 3 were given`
 
-- **Slow AnkiConnect:** wait for the add icon to finish before clicking again — rapid clicks can create duplicates ([yomitan#1683](https://github.com/yomidevs/yomitan/issues/1683)).
-- If “Prevent adding” seems ignored, toggle the duplicate behavior setting off and back on ([yomitan#1816](https://github.com/yomidevs/yomitan/issues/1816)).
+An old **WK Mining** add-on (`wk_mining`) is still installed. It was replaced by **wk_immersion** and breaks Yomitan mining on Anki 25+.
 
-## After mining
+1. **Tools → Add-ons** → disable or delete **WK Mining** (`wk_mining`).
+2. Or run `./scripts/sync_anki_addons.sh` (removes deprecated `wk_mining` automatically).
+3. Restart Anki and mine again.
 
-1. **Tools → WK Link Mining Notes** — fills `WkSubjectId` from `wk_vocab_lookup.json`, tags `yomitan-mining`, suspends with `wk-locked` if core vocab is not mature.
-2. **Tools → WK Run Unlock Pass** — unsuspends when linked core vocab reaches Guru I (same as other supplementary decks).
-3. Study via **WK::Mining · Ready** or the home deck.
+### `deck was not found: Immersion · Yomitan Mining`
 
-The add-on links notes on add via `note_will_be_added` (Yomitan/AnkiConnect) and `add_cards_did_add_note` (Add dialog). Run **Tools → WK Link Mining Notes** if a card was added before the add-on was installed.
+Anki does not have that deck yet. Yomitan sends notes via AnkiConnect to a deck that must **already exist** in your profile.
 
-## Cloze vs term cards
+1. Generate the package (if you have not recently):
+   ```bash
+   python3 wk_decks.py --deck mining
+   ```
+2. In Anki: **File → Import** → select `out/wk_mining.apkg`.
+3. Confirm **Immersion · Yomitan Mining** appears in the deck list (one suspended setup card is normal).
+4. In Yomitan **Configure Anki flashcards**, deck name must match **exactly** — including the middle dot `·` (not `-` or `.`):
+   `Immersion · Yomitan Mining`
+5. Retry the green **+** in Yomitan (Anki must stay open).
 
-| Source | Sentence field | Card style |
-|--------|----------------|------------|
-| Sentence from reader | filled | Type `{cloze-body}` in context |
-| Dictionary popup only | empty | Recall reading + meaning |
+If you imported on desktop but mine on a laptop, import `wk_mining.apkg` on that profile too (or sync after import).
 
-Use `{cloze-body}` for **TypeExpression** so inflected forms in context are accepted.
+### Synonyms / Antonyms missing in Yomitan field list
 
-## Non-WK vocabulary
+Yomitan **caches** the Anki note type field list. After template **v9** adds **Synonyms** and **Antonyms**, those rows often **do not appear** until you refresh.
 
-Unknown words still mine normally; `WkSubjectId` stays empty and no `wk-locked` tag is applied. Consider a separate deck/model for non-WK mining if you want different scheduling.
+**1. Confirm the fields exist in Anki**
 
-## Regenerating
+- **Tools → Manage Note Types** → **WK Yomitan Immersion** → **Fields…**
+- You should see **Glossary**, then **Synonyms**, then **Antonyms**, then **Sentence** (in that order).
+- If **Synonyms** / **Antonyms** are missing:
+  ```bash
+  python3 wk_decks.py --deck mining
+  ```
+  **File → Import** → `out/wk_mining.apkg` → **Update** → restart Anki.
 
-Each `wk_decks.py` run refreshes `wk_vocab_lookup.json`. Re-run **WK Link Mining Notes** after regen if you add new WK vocab to core.
+**2. Refresh Yomitan’s field list**
 
-## References
+- Yomitan **Settings → Anki → Configure Anki card format…**
+- Deck: `Immersion · Yomitan Mining` (middle dot **·**, not hyphen)
+- Model: `WK Yomitan Immersion` (spelling **Immersion**)
+- Change **Model** to **Basic** (or any other type), then change it **back** to **WK Yomitan Immersion**.
+- **Synonyms** and **Antonyms** rows should appear. Map them:
 
-- [Yomitan Anki integration](https://yomitan.wiki/anki/)
-- [YouTube immersion design (future)](wk_immersion_youtube_design.md) — clip audio + subs; mining note type is compatible
+  | Field | Marker (use ▼ dropdown) |
+  |-------|-------------------------|
+  | Synonyms | `{single-glossary-使い方の分かる 類語例解辞典-no-dictionary-brief}` |
+  | Antonyms | `{single-glossary-対義語辞典オンライン-no-dictionary-brief}` |
+
+**3. If rows still missing**
+
+- Enable **Advanced** (bottom of Yomitan settings) → **Configure Anki card format** → **+** to duplicate the format and pick **WK Yomitan Immersion** again.
+- Or close and reopen the Yomitan options tab with Anki running.
+
+**4. Verify mining**
+
+Browse a newly mined note → **Fields** tab. **Synonyms** and **Antonyms** should contain HTML when the thesaurus dicts have an entry. Cards mined **before** mapping stay empty in those fields — re-mine or edit manually.
+
+**Note:** If **類** / **対** appear on the card but those Anki fields are empty, you may be seeing content inside **Glossary** only (e.g. from a broad `{glossary}` mapping). Split into the three `{single-glossary-…}` fields above.
+
+## Template updates
+
+When the generator bumps the mining template (check **Meta** on card back), re-run `python wk_decks.py --deck mining` and import with **Update** on the note type. Your **UserNotes** and mined field content are preserved; only templates/CSS change.

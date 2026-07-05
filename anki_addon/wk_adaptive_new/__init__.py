@@ -373,7 +373,7 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
         for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK, CORE_VOCABULARY_DECK):
             reordered = reposition_new_cards_by_priority(col, deck_name, priority_scores)
             if reordered:
-                lines.append(f"{deck_name}: reordered {reordered} new by JLPT/Tae Kim priority")
+                lines.append(f"{deck_name}: reordered {reordered} new by JLPT priority")
     summary_lines = [
         f"Review load ({config.review_count_scope}): {review_load}",
         f"New budget: {budget}",

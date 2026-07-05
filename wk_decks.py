@@ -11,9 +11,9 @@ Decks (default --deck all):
   - verb-types / adjective-types
   - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
   - grammar: JLPT grammar cloze from Hanabira open data (see grammar_decks.py)
-  - tae-kim-exercises: Tae Kim book practice exercises (see tae_kim_exercise_decks.py)
   - dictation: native WK pronunciation audio → type the reading in kana (see dictation_decks.py)
   - rendaku: two-kanji compounds where the second morpheme voices (連濁) (see rendaku_decks.py)
+  - mining: open Yomitan immersion deck (note type only; see docs/yomitan_mining.md)
   - all: all of the above
 
 Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
@@ -57,7 +57,6 @@ Conjugation drills (type-in, Master+ default):
 With sentence audio (edge-tts; off by default for WK vocab, on for grammar/exercises — plays on card back):
   python wk_decks.py --deck vocab-cloze --only-started --sentence-audio
   python wk_decks.py --deck grammar --no-grammar-sentence-audio  # skip grammar TTS
-  python wk_decks.py --deck tae-kim-exercises --grammar-max-tae-kim-lesson expressing-state-of-being
 
 With Yomitan pitch dictionary zip/folder:
   python wk_decks.py --deck all --only-started --yomitan-dict ~/japanese-dicts/kanjium_pitch_accents.zip
@@ -67,8 +66,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.31.2"
-BUILD_DATE = "2026-07-03"
+VERSION = "2.35.0"
+BUILD_DATE = "2026-07-04"
 
 import warnings
 
@@ -126,8 +125,8 @@ DEFAULT_GENERATE_DECKS = (
     "vocab-cloze",
     "dictation",
     "rendaku",
-    "mining",
     "grammar",
+    "mining",
 )
 
 # Legacy decks that use WaniKani review_statistics (leech scoring), not Anki ivl/due.
@@ -251,7 +250,7 @@ MODEL_IDS = {
     "core_radical": 1865429025,
     "core_item": 1865429026,
     "rendaku": 1865429027,
-    "mining": 1865429028,
+    "mining": 1865429029,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -273,7 +272,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v2",
+    "mining": "v9",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -298,7 +297,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "core_radical": 13,
     "core_item": 14,
     "rendaku": 15,
-    "mining": 16,
+    "mining": 20,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -322,7 +321,7 @@ NOTE_TYPE_NAMES = {
     "core_radical": "WK Core Radical",
     "core_item": "WK Core Item",
     "rendaku": "WK Update-Safe Rendaku",
-    "mining": "WK Update-Safe Yomitan Mining",
+    "mining": "WK Yomitan Immersion",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -367,7 +366,6 @@ RUN_HISTORY_COLUMNS = [
     "dictation_items",
     "rendaku_items",
     "grammar_cards",
-    "tae_kim_exercise_cards",
     "pitch_entries",
     "pitch_leeches",
     "bundled_in_wk_all",
@@ -429,30 +427,6 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Tae Kim · Grammar Vocab",
-        "search": daily_filtered_deck_search(
-            "tag:wk-core tag:tk-grammar-vocab",
-        ),
-        "limit": 25,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Tae Kim · Grammar Prereq Kanji",
-        "search": prereq_filtered_deck_search(
-            "tag:wk-core tag:tk-grammar-prereq tag:kanji",
-        ),
-        "limit": 25,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Tae Kim · Grammar Prereq Radicals",
-        "search": prereq_filtered_deck_search(
-            "tag:wk-core tag:tk-grammar-prereq tag:radical",
-        ),
-        "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
         "name": "WK::N5 · Kanji",
         "search": daily_filtered_deck_search(
             "tag:wk-core tag:jlpt-n5-vocab tag:kanji",
@@ -503,14 +477,6 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Mining · Ready",
-        "search": daily_filtered_deck_search(
-            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:wk-locked -tag:mining-setup'
-        ),
-        "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
         "name": "WK::Conjugations · Verbs",
         "search": daily_filtered_deck_search(
             'deck:"WaniKani Verb Conjugation Practice"',
@@ -552,12 +518,7 @@ FILTERED_DECK_DEFINITIONS = [
     },
     {
         "name": "WK::Grammar",
-        "search": daily_filtered_deck_search(
-            'deck:"Japanese Grammar Context" '
-            "(tag:tk-lesson-basic-expressing-state-of-being OR "
-            "tag:tk-lesson-basic-introduction-to-particles OR "
-            "tag:tk-lesson-basic-adjectives)",
-        ),
+        "search": daily_filtered_deck_search('deck:"Japanese Grammar Context"'),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
@@ -567,6 +528,14 @@ FILTERED_DECK_DEFINITIONS = [
             'deck:"WaniKani Phonetic Families" tag:priority-low',
         ),
         "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Immersion · Yomitan",
+        "search": daily_filtered_deck_search(
+            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:mining-setup',
+        ),
+        "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
 ]
@@ -588,12 +557,11 @@ DECK_NAMES = {
     "vocab-cloze": "WaniKani Vocabulary Context",
     "dictation": "WaniKani Dictation",
     "rendaku": "WaniKani Rendaku",
-    "mining": "Immersion · Yomitan Mining",
     "grammar": "Japanese Grammar Context",
-    "tae-kim-exercises": "Japanese Grammar Exercises",
     "core-radical": "WaniKani Core · Radicals",
     "core-kanji": "WaniKani Core · Kanji",
     "core-vocabulary": "WaniKani Core · Vocabulary",
+    "mining": "Immersion · Yomitan Mining",
 }
 
 PAIR_RULES = [
@@ -3110,7 +3078,6 @@ def collect_conjugation_drills(
     *,
     min_srs: int,
     word_classes: Optional[Set[str]] = None,
-    tae_kim_cap: Optional["TaeKimConjugationCap"] = None,
 ) -> List[ConjugationDrill]:
     drills: List[ConjugationDrill] = []
     for vocab in sorted(vocab_items, key=lambda v: (v["data"].get("level", 999), v["data"].get("characters") or "")):
@@ -3121,13 +3088,9 @@ def collect_conjugation_drills(
             continue
         if word_classes is not None and word_class not in word_classes:
             continue
-        if tae_kim_cap is not None and not tae_kim_cap.allows_word_class(word_class):
-            continue
         expr = vocab["data"].get("characters") or ""
         reading = first_reading(vocab)
         for form_key, prompt in conjugation_forms_for_class(word_class):
-            if tae_kim_cap is not None and not tae_kim_cap.allows_form(word_class, form_key):
-                continue
             result = conjugate_vocab_form(vocab, word_class, form_key)
             if not result:
                 continue
@@ -3147,20 +3110,6 @@ def collect_conjugation_drills(
                 )
             )
     return drills[: args.max_cards]
-
-
-def resolve_tae_kim_conjugation_cap(args: argparse.Namespace):
-    """When grammar lesson cap is set, limit conjugation forms to match Tae Kim progress."""
-    if getattr(args, "conjugation_no_tae_kim_cap", False):
-        return None
-    if not args.grammar_max_tae_kim_lesson:
-        return None
-    from tae_kim_mapping import conjugation_cap_for_tae_kim
-
-    return conjugation_cap_for_tae_kim(
-        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
-        max_tae_kim_section=args.grammar_max_tae_kim_section,
-    )
 
 
 CONJUGATION_FIXTURES_FILENAME = "conjugation_fixtures.json"
@@ -5809,7 +5758,6 @@ def deck_names_for_run(
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_card_count: int,
-    tae_kim_exercise_card_count: int = 0,
     dictation_item_count: int = 0,
     rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
@@ -5839,8 +5787,6 @@ def deck_names_for_run(
         names.append(DECK_NAMES["vocab-cloze"])
     if "grammar" in wanted and grammar_card_count:
         names.append(DECK_NAMES["grammar"])
-    if "tae-kim-exercises" in wanted and tae_kim_exercise_card_count:
-        names.append(DECK_NAMES["tae-kim-exercises"])
     if "dictation" in wanted and dictation_item_count:
         names.append(DECK_NAMES["dictation"])
     if "rendaku" in wanted and rendaku_item_count:
@@ -5875,7 +5821,6 @@ def build_run_history_row(
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_card_count: int,
-    tae_kim_exercise_card_count: int = 0,
     dictation_item_count: int = 0,
     rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
@@ -5914,7 +5859,6 @@ def build_run_history_row(
         "adjective_type_cards": len(adjective_type_items),
         "vocab_cloze": len(vocab_cloze_items),
         "grammar_cards": grammar_card_count,
-        "tae_kim_exercise_cards": tae_kim_exercise_card_count,
         "dictation_items": dictation_item_count,
         "rendaku_items": rendaku_item_count,
         "pitch_entries": len(pitch_index),
@@ -5937,13 +5881,11 @@ def append_run_history(output_dir: Path, row: Dict[str, Any]) -> Path:
 
 def write_filtered_deck_suggestions(
     output_dir: Path,
-    *,
-    max_tae_kim_lesson: Optional[str] = None,
 ) -> Path:
     path = output_dir / "anki_filtered_decks.txt"
     lines = ["Suggested Anki filtered decks", ""]
     for index, deck in enumerate(
-        effective_filtered_deck_definitions(max_tae_kim_lesson=max_tae_kim_lesson),
+        effective_filtered_deck_definitions(),
         start=1,
     ):
         lines.extend(
@@ -5973,70 +5915,29 @@ def write_filtered_deck_suggestions(
     return path
 
 
-def _tae_kim_current_lesson_tag(max_tae_kim_lesson: str) -> Optional[str]:
-    """Lesson tag for the reading lesson referenced by a grammar cap string."""
-    from tae_kim_mapping import tae_kim_lesson_from_cap, tae_kim_lesson_tags
-
-    lesson = tae_kim_lesson_from_cap(max_tae_kim_lesson)
-    if lesson is None or not lesson.has_cards:
-        return None
-    return next(
-        (tag for tag in tae_kim_lesson_tags(lesson) if tag.startswith("tk-lesson-")),
-        None,
-    )
+def effective_filtered_deck_definitions() -> List[dict]:
+    return list(FILTERED_DECK_DEFINITIONS)
 
 
-def grammar_context_current_lesson_filtered_deck(max_tae_kim_lesson: str) -> Optional[dict]:
-    """Filtered deck for Hanabira/context grammar on the current reading lesson only."""
-    lesson_tag = _tae_kim_current_lesson_tag(max_tae_kim_lesson)
-    if lesson_tag is None:
-        return None
-    return {
-        "name": "WK::Grammar · Current Tae Kim lesson",
-        "search": daily_filtered_deck_search(
-            f'deck:"{DECK_NAMES["grammar"]}" tag:{lesson_tag}',
-        ),
-        "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    }
-
-
-def effective_filtered_deck_definitions(
-    *,
-    max_tae_kim_lesson: Optional[str] = None,
-) -> List[dict]:
-    decks = list(FILTERED_DECK_DEFINITIONS)
-    if max_tae_kim_lesson:
-        current = grammar_context_current_lesson_filtered_deck(max_tae_kim_lesson)
-        if current is not None:
-            decks.append(current)
-    return decks
-
-
-def normalized_filtered_deck_definitions(
-    *,
-    max_tae_kim_lesson: Optional[str] = None,
-) -> List[dict]:
+def normalized_filtered_deck_definitions() -> List[dict]:
     return [
         {
             **spec,
             "reschedule": spec.get("reschedule", FILTERED_DECK_RESCHEDULE_DEFAULT),
         }
-        for spec in effective_filtered_deck_definitions(max_tae_kim_lesson=max_tae_kim_lesson)
+        for spec in effective_filtered_deck_definitions()
     ]
 
 
 def write_filtered_decks_json(
     output_dir: Path,
-    *,
-    max_tae_kim_lesson: Optional[str] = None,
 ) -> Path:
     path = output_dir / FILTERED_DECKS_JSON
     payload = {
         "generator_version": VERSION,
         "order_labels": {"relative_overdueness": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS},
         "reschedule_default": FILTERED_DECK_RESCHEDULE_DEFAULT,
-        "decks": normalized_filtered_deck_definitions(max_tae_kim_lesson=max_tae_kim_lesson),
+        "decks": normalized_filtered_deck_definitions(),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -6132,20 +6033,6 @@ If Anki reports notes could not be imported (often exactly 246 notes):
     - {NOTE_TYPE_NAMES['vocab_cloze']} (template {MODEL_TEMPLATE_VERSIONS['vocab_cloze']})
     - {NOTE_TYPE_NAMES['grammar_cloze']} (template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']})
 
-If Anki reports exactly 40 notes could not be imported:
-  That count matches the Japanese Grammar Exercises deck (Tae Kim practice pages) at
-  your current --grammar-max-tae-kim-lesson cap. Those cards share the same note type
-  as Japanese Grammar Context ({NOTE_TYPE_NAMES['grammar_cloze']}). Common causes:
-    1. Note type not updated to template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}
-       (FormHint field added in v4) — re-import and choose Always update for the note
-       type AND for existing notes.
-    2. A prior partial import left conflicting copies — in Browse, filter deck
-       "Japanese Grammar Exercises"; if empty or broken, delete that deck (notes only)
-       and re-import {BUNDLE_FILENAME}.
-    3. Duplicate note type — Tools → Manage Note Types; there should be only one
-       "{NOTE_TYPE_NAMES['grammar_cloze']}". Remove stray duplicates if you created
-       "Create new note type" on an earlier import.
-
 Grammar sentence audio (template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}):
   - Plays on the card BACK only — flip after typing the answer.
   - Choose UPDATE for {NOTE_TYPE_NAMES['grammar_cloze']} so the back template includes SentenceAudio.
@@ -6204,11 +6091,6 @@ def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
     print("  If ~246 notes fail: update Conjugation + Conjugation Reverse note types (type-in fields).")
     print(f"  Conjugation: {NOTE_TYPE_NAMES['conjugation']} · template {MODEL_TEMPLATE_VERSIONS['conjugation']}")
     print(f"  Grammar: {NOTE_TYPE_NAMES['grammar_cloze']} · template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}")
-    print(
-        "  If import says 40 notes failed: that is usually Japanese Grammar Exercises — "
-        f"update {NOTE_TYPE_NAMES['grammar_cloze']} to template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']} "
-        "and re-import (see out/anki_import_instructions.txt)."
-    )
     print("  Grammar sentence audio plays on the card BACK (flip first); update that note type on import.")
     print(f"  Full instructions: out/anki_import_instructions.txt")
     print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
@@ -6259,7 +6141,6 @@ def print_preview_report(
     adjective_type_items: Sequence[dict],
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_cards: Sequence[Any],
-    tae_kim_exercise_cards: Sequence[Any],
     dictation_items: Sequence[Any],
     rendaku_items: Sequence[Any],
     radical_items: Sequence[dict],
@@ -6392,14 +6273,6 @@ def print_preview_report(
                 for item in grammar_cards
             ],
         )
-    if "tae-kim-exercises" in wanted:
-        preview_deck_section(
-            DECK_NAMES["tae-kim-exercises"],
-            [
-                f"{item.title[:50]} · {item.cloze_sentence}"
-                for item in tae_kim_exercise_cards
-            ],
-        )
     if "dictation" in wanted:
         preview_deck_section(
             DECK_NAMES["dictation"],
@@ -6436,31 +6309,16 @@ def print_preview_report(
         f"Conjugation filter: min_srs={args.conjugation_min_srs} "
         f"(Master+ when {WK_SRS_STAGE_MASTER}, Guru+ when {WK_SRS_STAGE_GURU_1})"
     )
-    if getattr(args, "grammar_max_tae_kim_lesson", None) and not getattr(args, "conjugation_no_tae_kim_cap", False):
-        cap = resolve_tae_kim_conjugation_cap(args)
-        if cap is not None:
-            print(
-                f"Conjugation Tae Kim cap: lesson={args.grammar_max_tae_kim_lesson}, "
-                f"verb forms={sorted(cap.verb_forms) or 'none'}, "
-                f"i-adj={bool(cap.i_adjective_forms)}, na-adj={bool(cap.na_adjective_forms)}"
-            )
+    if "grammar" in wanted:
+        print(
+            f"Grammar filter: max_jlpt={args.grammar_max_jlpt}, "
+            f"examples_per_point={args.grammar_max_examples}, "
+            f"max_unknown_kanji={args.grammar_max_unknown_kanji}"
+        )
     print(
         f"Phonetic families filter: min_srs={PHONETIC_FAMILIES_MIN_SRS} "
         f"(Apprentice+; independent of --min-srs)"
     )
-    if "grammar" in wanted:
-        print(
-            f"Grammar filter: max_jlpt={args.grammar_max_jlpt}, "
-            f"max_tae_kim_section={args.grammar_max_tae_kim_section}, "
-            f"max_tae_kim_lesson={args.grammar_max_tae_kim_lesson or 'off'}, "
-            f"examples_per_point={args.grammar_max_examples}, "
-            f"max_unknown_kanji={args.grammar_max_unknown_kanji}"
-        )
-    if "tae-kim-exercises" in wanted:
-        print(
-            f"Tae Kim exercise filter: max_tae_kim_section={args.grammar_max_tae_kim_section}, "
-            f"max_tae_kim_lesson={args.grammar_max_tae_kim_lesson or 'off'}"
-        )
     if "dictation" in wanted:
         print(
             f"Dictation filter: min_srs={args.dictation_min_srs}, voice={args.dictation_voice} "
@@ -6468,6 +6326,8 @@ def print_preview_report(
         )
     if "rendaku" in wanted:
         print(f"Rendaku filter: min_srs={args.rendaku_min_srs} (Master+ when 7)")
+    if "mining" in wanted:
+        print(f"Yomitan immersion: {DECK_NAMES['mining']} (see docs/yomitan_mining.md)")
     if args.sentence_audio:
         print(f"Vocab sentence audio: on (voice={args.sentence_audio_voice})")
     else:
@@ -6569,8 +6429,6 @@ def parser_defaults_from_config(config: dict) -> dict:
     grammar = config.get("grammar") or {}
     grammar_key_map = {
         "max_jlpt": "grammar_max_jlpt",
-        "max_tae_kim_section": "grammar_max_tae_kim_section",
-        "max_tae_kim_lesson": "grammar_max_tae_kim_lesson",
         "max_examples": "grammar_max_examples",
         "max_unknown_kanji": "grammar_max_unknown_kanji",
         "no_wk_filter": "grammar_no_wk_filter",
@@ -6629,13 +6487,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     from grammar_decks import (
         GRAMMAR_DEFAULT_EXAMPLES_PER_POINT,
         GRAMMAR_DEFAULT_MAX_JLPT,
-        GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION,
         GRAMMAR_DEFAULT_MAX_UNKNOWN_KANJI,
         JLPT_LEVELS,
     )
     from dictation_decks import DEFAULT_DICTATION_VOICE, DICTATION_DEFAULT_MIN_SRS
     from rendaku_decks import RENDAKU_DEFAULT_MIN_SRS
-    from tae_kim_mapping import load_tae_kim_sections
 
     config_path = resolve_config_path_from_argv(argv)
     cfg = parser_defaults_from_config(load_wk_deck_config(config_path))
@@ -6667,7 +6523,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "conjugations-adjectives",
         "conjugations-reverse",
         "verb-types", "adjective-types", "vocab-cloze", "dictation", "rendaku", "mining", "grammar",
-        "tae-kim-exercises", "core", "all",
+        "core", "all",
     ], default=cfg.get("deck", "all"))
     parser.add_argument("--refresh-cache", action="store_true", default=cfg.get("refresh_cache", False))
     parser.add_argument("--output-dir", default=cfg.get("output_dir", str(OUTPUT_DIR)))
@@ -6744,12 +6600,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Minimum WK SRS stage for conjugation decks (7 = Master+, 5 = Guru+).",
     )
     parser.add_argument(
-        "--conjugation-no-tae-kim-cap",
-        action="store_true",
-        default=cfg.get("conjugation_no_tae_kim_cap", False),
-        help="Do not limit conjugation forms to --grammar-max-tae-kim-lesson progress.",
-    )
-    parser.add_argument(
         "--dictation-min-srs",
         type=int,
         default=cfg.get("dictation_min_srs", DICTATION_DEFAULT_MIN_SRS),
@@ -6822,26 +6672,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=cfg.get("grammar_max_jlpt", GRAMMAR_DEFAULT_MAX_JLPT),
         help="Include grammar points through this JLPT level (default: N2).",
     )
-    tae_kim_section_nums = [str(section.num) for section in load_tae_kim_sections()]
-    parser.add_argument(
-        "--grammar-max-tae-kim-section",
-        type=int,
-        choices=[int(num) for num in tae_kim_section_nums],
-        default=cfg.get("grammar_max_tae_kim_section", GRAMMAR_DEFAULT_MAX_TAE_KIM_SECTION),
-        help=(
-            "Include grammar through this Tae Kim chapter (3=Basic Grammar, "
-            "4=Essential, 5=Special, 6=Advanced; default: 6)."
-        ),
-    )
-    parser.add_argument(
-        "--grammar-max-tae-kim-lesson",
-        default=cfg.get("grammar_max_tae_kim_lesson"),
-        metavar="CHAPTER:SUBSECTION",
-        help=(
-            "Cap at a guidetojapanese.org subsection title, e.g. "
-            "basic:introduction-to-particles or introduction-to-particles."
-        ),
-    )
     parser.add_argument(
         "--grammar-max-examples",
         type=int,
@@ -6881,14 +6711,40 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> None:
+    """Build Yomitan immersion deck without WaniKani API (mining-only runs)."""
+    from mining_decks import MINING_SETUP_TAG, build_mining_deck
+
+    if args.dry_run:
+        print(f"Yomitan immersion: {DECK_NAMES['mining']} + note type {NOTE_TYPE_NAMES['mining']}")
+        print("  See docs/yomitan_mining.md for Yomitan field mapping and UserNotes.")
+        print("\nRe-run without --dry-run to write wk_mining.apkg.")
+        return
+    path, deck = build_mining_deck(output_dir)
+    bundle_path: Optional[Path] = None
+    if not args.no_bundle:
+        bundle_path = output_dir / BUNDLE_FILENAME
+        write_bundled_apkg([deck], bundle_path)
+        from wk_scheduling import patch_apkg_suspend_notes_with_tag
+
+        patch_apkg_suspend_notes_with_tag(bundle_path, MINING_SETUP_TAG)
+    print("Created:")
+    if bundle_path:
+        print(f"  {bundle_path}  ← recommended import")
+    print(f"  {path}")
+    write_filtered_deck_suggestions(output_dir)
+    write_filtered_decks_json(output_dir)
+    print("Yomitan setup: docs/yomitan_mining.md")
+    print_import_verification_help(bundle_path)
+    maybe_sync_anki_addons(args)
+
+
 def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> None:
     """Build grammar deck without WaniKani API (grammar-only runs)."""
     from grammar_decks import build_grammar_deck, collect_grammar_cards
 
     grammar_cards = collect_grammar_cards(
         max_jlpt=args.grammar_max_jlpt,
-        max_tae_kim_section=args.grammar_max_tae_kim_section,
-        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
         max_examples_per_point=args.grammar_max_examples,
         max_unknown_kanji=args.grammar_max_unknown_kanji,
         known_kanji=set(),
@@ -6896,8 +6752,7 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
     )
     print(
         f"Grammar context cloze: {len(grammar_cards)} "
-        f"(JLPT ≤ {args.grammar_max_jlpt}, Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
-        f"{args.grammar_max_examples} ex/point)"
+        f"(JLPT ≤ {args.grammar_max_jlpt}, {args.grammar_max_examples} ex/point)"
     )
     if args.dry_run:
         preview_deck_section(
@@ -6911,49 +6766,6 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
         sys.exit(1)
     path, deck, media = build_grammar_deck(
         grammar_cards,
-        output_dir,
-        sentence_audio=args.grammar_sentence_audio,
-        sentence_audio_voice=args.sentence_audio_voice,
-        refresh_sentence_audio=args.refresh_sentence_audio,
-    )
-    bundle_path: Optional[Path] = None
-    if not args.no_bundle:
-        bundle_path = output_dir / BUNDLE_FILENAME
-        write_bundled_apkg([deck], bundle_path, media_files=media or None)
-    print("Created:")
-    if bundle_path:
-        print(f"  {bundle_path}  ← recommended import")
-    print(f"  {path}")
-    print_import_verification_help(bundle_path)
-    maybe_sync_anki_addons(args)
-
-
-def run_standalone_tae_kim_exercise_deck(args: argparse.Namespace, output_dir: Path) -> None:
-    """Build Tae Kim exercise deck without WaniKani API."""
-    from tae_kim_exercise_decks import build_tae_kim_exercise_deck, collect_tae_kim_exercise_cards
-
-    exercise_cards = collect_tae_kim_exercise_cards(
-        max_tae_kim_section=args.grammar_max_tae_kim_section,
-        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
-        refresh=args.refresh_cache,
-    )
-    print(
-        f"Tae Kim exercise cloze: {len(exercise_cards)} "
-        f"(Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
-        f"lesson cap={args.grammar_max_tae_kim_lesson or 'off'})"
-    )
-    if args.dry_run:
-        preview_deck_section(
-            DECK_NAMES["tae-kim-exercises"],
-            [f"{c.title[:50]} · {c.cloze_sentence}" for c in exercise_cards],
-        )
-        print("\nRe-run without --dry-run to write decks.")
-        return
-    if not exercise_cards:
-        print("No Tae Kim exercise cards created.", file=sys.stderr)
-        sys.exit(1)
-    path, deck, media = build_tae_kim_exercise_deck(
-        exercise_cards,
         output_dir,
         sentence_audio=args.grammar_sentence_audio,
         sentence_audio_voice=args.sentence_audio_voice,
@@ -6997,8 +6809,8 @@ def main() -> None:
         run_standalone_grammar_deck(args, output_dir)
         return
 
-    if wanted_decks(args) == {"tae-kim-exercises"}:
-        run_standalone_tae_kim_exercise_deck(args, output_dir)
+    if wanted_decks(args) == {"mining"}:
+        run_standalone_mining_deck(args, output_dir)
         return
 
     user = get_cached_user(refresh=args.refresh_cache)
@@ -7131,7 +6943,6 @@ def main() -> None:
         if "kanji-radicals" in wanted
         else []
     )
-    tae_kim_conjugation_cap = resolve_tae_kim_conjugation_cap(args)
     conjugation_verb_drills = (
         collect_conjugation_drills(
             vocab_items,
@@ -7139,7 +6950,6 @@ def main() -> None:
             args,
             min_srs=supplementary_min_srs(args, args.conjugation_min_srs),
             word_classes=VERB_CONJUGATION_WORD_CLASSES,
-            tae_kim_cap=tae_kim_conjugation_cap,
         )
         if "conjugations-verbs" in wanted or "conjugations-reverse" in wanted
         else []
@@ -7151,7 +6961,6 @@ def main() -> None:
             args,
             min_srs=supplementary_min_srs(args, args.conjugation_min_srs),
             word_classes=ADJECTIVE_CONJUGATION_WORD_CLASSES,
-            tae_kim_cap=tae_kim_conjugation_cap,
         )
         if "conjugations-adjectives" in wanted
         else []
@@ -7163,7 +6972,6 @@ def main() -> None:
             args,
             min_srs=supplementary_min_srs(args, args.conjugation_min_srs),
             word_classes=VERB_CONJUGATION_WORD_CLASSES,
-            tae_kim_cap=tae_kim_conjugation_cap,
         )
         if "conjugations-reverse" in wanted
         else []
@@ -7188,23 +6996,11 @@ def main() -> None:
 
         grammar_cards = collect_grammar_cards(
             max_jlpt=args.grammar_max_jlpt,
-            max_tae_kim_section=args.grammar_max_tae_kim_section,
-            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
             max_examples_per_point=args.grammar_max_examples,
             max_unknown_kanji=args.grammar_max_unknown_kanji,
             known_kanji=set()
             if args.grammar_no_wk_filter
             else known_kanji_from_subjects(vocab_items, kanji_items),
-            vocab_items=vocab_items,
-            refresh=args.refresh_cache,
-        )
-    tae_kim_exercise_cards = []
-    if "tae-kim-exercises" in wanted:
-        from tae_kim_exercise_decks import collect_tae_kim_exercise_cards
-
-        tae_kim_exercise_cards = collect_tae_kim_exercise_cards(
-            max_tae_kim_section=args.grammar_max_tae_kim_section,
-            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
             refresh=args.refresh_cache,
         )
     dictation_items = []
@@ -7230,64 +7026,18 @@ def main() -> None:
         )
     core_priority_index: Dict[int, object] = {}
     if "core-radical" in wanted or "core-kanji" in wanted or "core-vocabulary" in wanted:
-        from tae_kim_exercise_decks import collect_tae_kim_vocabulary_by_reading_lesson
-        from tae_kim_mapping import tae_kim_reading_lesson_slugs
-        from wk_study_priority import (
-            build_core_priority_index,
-            build_tae_kim_track_map,
-            write_study_priority_json,
-            write_tae_kim_track_config_template,
-            write_tae_kim_track_map,
-        )
+        from wk_study_priority import build_core_priority_index, write_study_priority_json
 
-        vocabulary_by_lesson = collect_tae_kim_vocabulary_by_reading_lesson(
-            max_tae_kim_section=args.grammar_max_tae_kim_section,
-            refresh=args.refresh_cache,
-        )
-        tae_kim_priority_entries = [
-            entry
-            for entries in vocabulary_by_lesson.values()
-            for entry in entries
-        ]
         core_priority_index = build_core_priority_index(
             core_radical_items,
             core_kanji_items,
             core_vocab_items,
-            tae_kim_priority_entries=tae_kim_priority_entries,
         )
         priority_path = write_study_priority_json(output_dir, core_priority_index)
-        track_map = build_tae_kim_track_map(
-            core_radical_items,
-            core_kanji_items,
-            core_vocab_items,
-            vocabulary_by_lesson,
-            reading_lesson_order=tae_kim_reading_lesson_slugs(),
-        )
-        track_map_path = write_tae_kim_track_map(output_dir, track_map)
-        track_config_path = write_tae_kim_track_config_template(
-            output_dir,
-            max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
-        )
         print(
-            f"Core study priority: {priority_path} ({len(core_priority_index)} subjects, "
-            f"{len(tae_kim_priority_entries)} Tae Kim section vocabulary terms)"
-        )
-        print(
-            f"Tae Kim track map: {track_map_path} "
-            f"({len(track_map.get('reading_lessons') or [])} reading lessons); "
-            f"config template: {track_config_path}"
+            f"Core study priority: {priority_path} ({len(core_priority_index)} subjects)"
         )
     print(f"Eligible vocab: {len(vocab_items)}")
-    if vocab_items:
-        from mining_logic import build_vocab_lookup
-
-        lookup_entries = build_vocab_lookup(vocab_items)
-        lookup_path = output_dir / "wk_vocab_lookup.json"
-        lookup_path.write_text(
-            json.dumps({"entries": lookup_entries}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"Vocab lookup (Yomitan mining): {lookup_path} ({len(lookup_entries)} surface forms)")
     print(f"Eligible kanji: {len(kanji_items)}")
     print(f"Eligible radicals: {len(radical_items)}")
     print(f"Radical preview levels: current={preview_levels.current}, next={preview_levels.next}, locked_next={preview_levels.locked_next}")
@@ -7306,8 +7056,6 @@ def main() -> None:
         print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
     if conjugation_verb_drills:
         print(f"Verb conjugation drills: {len(conjugation_verb_drills)} (min SRS {args.conjugation_min_srs})")
-        if tae_kim_conjugation_cap is not None:
-            print(f"  Tae Kim cap: {args.grammar_max_tae_kim_lesson}")
     if conjugation_adjective_drills:
         print(f"Adjective conjugation drills: {len(conjugation_adjective_drills)} (min SRS {args.conjugation_min_srs})")
     if conjugation_reverse_drills:
@@ -7321,14 +7069,7 @@ def main() -> None:
     if grammar_cards:
         print(
             f"Grammar context cloze: {len(grammar_cards)} "
-            f"(JLPT ≤ {args.grammar_max_jlpt}, Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
-            f"{args.grammar_max_examples} ex/point)"
-        )
-    if tae_kim_exercise_cards:
-        print(
-            f"Tae Kim exercise cloze: {len(tae_kim_exercise_cards)} "
-            f"(Tae Kim ≤ §{args.grammar_max_tae_kim_section}, "
-            f"lesson cap={args.grammar_max_tae_kim_lesson or 'off'})"
+            f"(JLPT ≤ {args.grammar_max_jlpt}, {args.grammar_max_examples} ex/point)"
         )
     if dictation_items:
         print(
@@ -7338,7 +7079,7 @@ def main() -> None:
     if rendaku_items:
         print(f"Rendaku: {len(rendaku_items)} (min SRS {args.rendaku_min_srs})")
     if "mining" in wanted:
-        print("Yomitan mining: note type + empty deck (see docs/yomitan_mining.md)")
+        print(f"Yomitan immersion: note type + deck (see docs/yomitan_mining.md)")
     if core_radical_items:
         print(f"Core radicals: {len(core_radical_items)} (full catalog ≤ level {args.max_level})")
     if core_kanji_items:
@@ -7365,7 +7106,6 @@ def main() -> None:
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
             grammar_card_count=len(grammar_cards),
-            tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
             dictation_item_count=len(dictation_items),
             rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,
@@ -7394,7 +7134,6 @@ def main() -> None:
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
                 grammar_card_count=len(grammar_cards),
-                tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
                 dictation_item_count=len(dictation_items),
                 rendaku_item_count=len(rendaku_items),
                 pitch_index=pitch_index,
@@ -7419,7 +7158,6 @@ def main() -> None:
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
             grammar_cards=grammar_cards,
-            tae_kim_exercise_cards=tae_kim_exercise_cards,
             dictation_items=dictation_items,
             rendaku_items=rendaku_items,
             radical_items=radical_items,
@@ -7613,19 +7351,6 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
         bundled_media_files.extend(media)
-    if "tae-kim-exercises" in wanted and tae_kim_exercise_cards:
-        from tae_kim_exercise_decks import build_tae_kim_exercise_deck
-
-        path, deck, media = build_tae_kim_exercise_deck(
-            tae_kim_exercise_cards,
-            output_dir,
-            sentence_audio=args.grammar_sentence_audio,
-            sentence_audio_voice=args.sentence_audio_voice,
-            refresh_sentence_audio=args.refresh_sentence_audio,
-        )
-        created.append(path)
-        built_decks.append(deck)
-        bundled_media_files.extend(media)
     if "dictation" in wanted and dictation_items:
         from dictation_decks import build_dictation_deck
 
@@ -7653,7 +7378,7 @@ def main() -> None:
         built_decks.append(deck)
         bundled_media_files.extend(media)
     if "mining" in wanted:
-        from mining_decks import build_mining_deck
+        from mining_decks import MINING_SETUP_TAG, build_mining_deck
 
         path, deck = build_mining_deck(output_dir)
         created.append(path)
@@ -7698,7 +7423,6 @@ def main() -> None:
                 adjective_type_items=adjective_type_items,
                 vocab_cloze_items=vocab_cloze_items,
                 grammar_card_count=len(grammar_cards),
-                tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
                 dictation_item_count=len(dictation_items),
                 rendaku_item_count=len(rendaku_items),
                 pitch_index=pitch_index,
@@ -7718,19 +7442,13 @@ def main() -> None:
             media_files=bundled_media_files or None,
             patch_apkg_scheduling=bool(args.bootstrap_wk_scheduling),
         )
-        if "mining" in wanted and bundle_path is not None:
+        if "mining" in wanted:
             from mining_decks import MINING_SETUP_TAG
             from wk_scheduling import patch_apkg_suspend_notes_with_tag
 
             patch_apkg_suspend_notes_with_tag(bundle_path, MINING_SETUP_TAG)
-    settings_path = write_filtered_deck_suggestions(
-        output_dir,
-        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
-    )
-    filtered_json_path = write_filtered_decks_json(
-        output_dir,
-        max_tae_kim_lesson=args.grammar_max_tae_kim_lesson,
-    )
+    settings_path = write_filtered_deck_suggestions(output_dir)
+    filtered_json_path = write_filtered_decks_json(output_dir)
     deck_options_json_path = write_deck_options_json(
         output_dir,
         [deck.name for deck in built_decks],
@@ -7760,7 +7478,6 @@ def main() -> None:
             adjective_type_items=adjective_type_items,
             vocab_cloze_items=vocab_cloze_items,
             grammar_card_count=len(grammar_cards),
-            tae_kim_exercise_card_count=len(tae_kim_exercise_cards),
             dictation_item_count=len(dictation_items),
             rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,

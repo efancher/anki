@@ -321,6 +321,56 @@ def patch_apkg_supplementary_suspend(apkg_path: Path) -> int:
     return updated_notes
 
 
+def patch_apkg_suspend_notes_with_tag(apkg_path: Path, tag: str) -> int:
+    """Suspend cards for notes carrying tag (e.g. setup placeholder)."""
+    apkg_path = Path(apkg_path)
+    if not apkg_path.is_file() or not tag:
+        return 0
+
+    with zipfile.ZipFile(apkg_path, "r") as archive:
+        if "collection.anki2" not in archive.namelist():
+            return 0
+        db_bytes = archive.read("collection.anki2")
+        other_entries = {
+            name: archive.read(name)
+            for name in archive.namelist()
+            if name != "collection.anki2"
+        }
+
+    with tempfile.NamedTemporaryFile(suffix=".anki2", delete=False) as tmp_db:
+        tmp_db.write(db_bytes)
+        tmp_db_path = tmp_db.name
+
+    updated_notes = 0
+    try:
+        conn = sqlite3.connect(tmp_db_path)
+        tagged_nids = [
+            row[0]
+            for row in conn.execute("SELECT id, tags FROM notes").fetchall()
+            if tag in (row[1] or "").split()
+        ]
+        for nid in tagged_nids:
+            conn.execute(
+                "UPDATE cards SET queue = ?, type = ?, ivl = 0, due = 0, odue = 0, odid = 0 WHERE nid = ? AND queue != ?",
+                (ANKI_QUEUE_SUSPENDED, ANKI_CARD_TYPE_NEW, nid, ANKI_QUEUE_SUSPENDED),
+            )
+            updated_notes += 1
+        conn.commit()
+        conn.close()
+
+        patched_bytes = Path(tmp_db_path).read_bytes()
+        tmp_apkg = apkg_path.with_suffix(".tag_suspend.apkg")
+        with zipfile.ZipFile(tmp_apkg, "w", compression=zipfile.ZIP_DEFLATED) as outzip:
+            outzip.writestr("collection.anki2", patched_bytes)
+            for name, payload in other_entries.items():
+                outzip.writestr(name, payload)
+        tmp_apkg.replace(apkg_path)
+    finally:
+        Path(tmp_db_path).unlink(missing_ok=True)
+
+    return updated_notes
+
+
 def patch_apkg_wk_scheduling(
     apkg_path: Path,
     schedule_by_guid: Mapping[str, WkCardScheduleSpec],
