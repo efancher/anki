@@ -161,6 +161,40 @@ See [docs/yomitan_mining.md](../docs/yomitan_mining.md) and [docs/voicevox_setup
 
 ---
 
+# WK Deck Stats (per-deck progress)
+
+Summary table of SRS progress by deck — separate from **WK Health Check** (sanity checks).
+
+## Install once
+
+Copy `wk_deck_stats` into Anki's add-ons folder (or run `./scripts/sync_anki_addons.sh`),
+then restart Anki.
+
+## Usage
+
+**Tools → WK Deck Stats**
+
+### WaniKani core (Radicals / Kanji / Vocabulary)
+
+Note-level buckets aligned with WaniKani intervals:
+
+| Column | Meaning |
+|--------|---------|
+| **Unseen** | Unlocked, active, **reps = 0** (never reviewed) |
+| **Appr** | Reviewed at least once, max interval &lt; 7 days (apprentice) |
+| **Guru** | Interval 7–29 days |
+| **Master** | Interval ≥ 30 days |
+| **Locked** | `wk-locked` or all cards suspended |
+| **Total** | Notes in that home deck |
+
+Cards studied in **WK::** filtered queues still count toward the core home deck.
+
+### Other decks (grammar, conjugations, immersion, …)
+
+Card-level Anki counts: **New / Learn / Review / Susp / Total**.
+
+---
+
 # WK Health Check (collection sanity stats)
 
 Read-only checks you can run in desktop Anki after import, **WK Adjust New Limits**, or anytime you want confidence that scheduling was not wiped.
