@@ -1,0 +1,87 @@
+{
+  "_comment": "Curated kanji contrast groups (2–6 kanji each). Each group needs a stable \"id\" so adding kanji updates the same Anki note on re-import. Regenerate: python3 wk_decks.py --deck kanji-contrast",
+  "groups": [
+    {
+      "id": "next-vs-lack",
+      "title": "Next vs Lack",
+      "kanji": ["次", "欠"],
+      "note": "次 stacks ice (冫) on lack; 欠 is the lack shape alone."
+    },
+    {
+      "id": "dirt-look-alikes",
+      "title": "Dirt and look alikes",
+      "kanji": ["土", "士"]
+    },
+    {
+      "id": "power-sword-cut",
+      "title": "Power, sword, cut",
+      "kanji": ["力", "刀", "切"]
+    },
+    {
+      "id": "not-yet-vs-end",
+      "title": "Not yet vs end",
+      "kanji": ["未", "末", "夫", "禾"]
+    },
+    {
+      "id": "person-vs-enter",
+      "title": "Person vs enter",
+      "kanji": ["人", "入"]
+    },
+    {
+      "id": "tree-vs-book",
+      "title": "Tree vs book",
+      "kanji": ["木", "本"]
+    },
+    {
+      "id": "open-vs-related",
+      "title": "Open vs related",
+      "kanji": ["開", "関"],
+      "note": "WK: kai = open (開) vs kan = related/connected (関)."
+    },
+    {
+      "id": "sea-vs-every",
+      "title": "Sea vs every",
+      "kanji": ["海", "毎"],
+      "note": "WK: kai = sea (海) vs mai = every (毎)."
+    },
+    {
+      "id": "earth-vs-other",
+      "title": "Earth vs other",
+      "kanji": ["地", "他"],
+      "note": "土 = dirt/earth; 他 = other (person イ + earth 也)."
+    },
+    {
+      "id": "suit-meet-answer",
+      "title": "Suit, meet, answer",
+      "kanji": ["合", "会", "答"]
+    },
+    {
+      "id": "what-vs-same",
+      "title": "What vs same",
+      "kanji": ["何", "同"],
+      "note": "WK: nan = what (何) vs dou = same (同)."
+    },
+    {
+      "id": "stone-vs-right",
+      "title": "Stone vs right",
+      "kanji": ["石", "右"]
+    },
+    {
+      "id": "attach-vs-village",
+      "title": "Attach vs village",
+      "kanji": ["付", "村"],
+      "note": "付 = attach; 村 = village (mura)."
+    },
+    {
+      "id": "business-vs-beauty",
+      "title": "Business vs beauty",
+      "kanji": ["商", "美"]
+    },
+    {
+      "id": "stab-sky-sharpen",
+      "title": "Stab, sky, sharpen",
+      "kanji": ["刺", "空", "研"],
+      "note": "研 = sharpen/grind (appears in 研究 research)."
+    }
+  ]
+}

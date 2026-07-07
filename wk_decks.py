@@ -17,7 +17,7 @@ Decks (default --deck all):
   - all: all of the above
 
 Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
-  leeches, verb-pairs, confusables, reading-keywords, kanji-radicals, pitch-leeches
+  leeches, verb-pairs, confusables, kanji-contrast, reading-keywords, kanji-radicals, pitch-leeches
 
 Install:
   pip install requests genanki
@@ -232,6 +232,7 @@ DECK_IDS = {
     "core-vocabulary": 2059400130,
     "rendaku": 2059400131,
     "mining": 2059400132,
+    "kanji-contrast": 2059400133,
 }
 
 MODEL_IDS = {
@@ -251,6 +252,7 @@ MODEL_IDS = {
     "core_item": 1865429026,
     "rendaku": 1865429027,
     "mining": 1865429029,
+    "kanji_contrast": 1865429030,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -273,6 +275,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_item": "v5",
     "rendaku": "v3",
     "mining": "v9",
+    "kanji_contrast": "v3",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -298,6 +301,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "core_item": 14,
     "rendaku": 15,
     "mining": 20,
+    "kanji_contrast": 21,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -322,6 +326,7 @@ NOTE_TYPE_NAMES = {
     "core_item": "WK Core Item",
     "rendaku": "WK Update-Safe Rendaku",
     "mining": "WK Yomitan Immersion",
+    "kanji_contrast": "WK Update-Safe Kanji Contrast",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -538,6 +543,14 @@ FILTERED_DECK_DEFINITIONS = [
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
+    {
+        "name": "WK::Kanji Contrast",
+        "search": daily_filtered_deck_search(
+            'deck:"WaniKani Kanji Contrast" tag:kanji-contrast',
+        ),
+        "limit": 10,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
 ]
 
 DECK_NAMES = {
@@ -562,6 +575,7 @@ DECK_NAMES = {
     "core-kanji": "WaniKani Core · Kanji",
     "core-vocabulary": "WaniKani Core · Vocabulary",
     "mining": "Immersion · Yomitan Mining",
+    "kanji-contrast": "WaniKani Kanji Contrast",
 }
 
 PAIR_RULES = [
@@ -1262,6 +1276,18 @@ class WkModel(genanki.Model):
         return data
 
 
+def export_models(deck: genanki.Deck) -> List[genanki.Model]:
+    """Models registered on the deck, or else inferred from notes (genanki default)."""
+    registered = list(deck.models.values())
+    if registered:
+        return registered
+    by_model_id: Dict[int, genanki.Model] = {}
+    for note in deck.notes:
+        model = note.model
+        by_model_id[int(model.model_id)] = model
+    return list(by_model_id.values())
+
+
 def package_write_timestamp(models: Iterable[genanki.Model]) -> float:
     epochs = [template_mod_epoch(model.template_key) for model in models if hasattr(model, "template_key")]
     if not epochs:
@@ -1314,7 +1340,7 @@ def write_bundled_apkg(
         return
     all_models: List[genanki.Model] = []
     for deck in decks:
-        all_models.extend(deck.models.values())
+        all_models.extend(export_models(deck))
     package = genanki.Package(decks[0])
     package.decks = list(decks)
     attach_deck_media(package, decks)
@@ -1497,7 +1523,7 @@ def write_apkg(
     media_files: Optional[Sequence[str]] = None,
     patch_apkg_scheduling: bool = False,
 ) -> None:
-    models = list(deck.models.values())
+    models = export_models(deck)
     package = genanki.Package(deck)
     attach_deck_media(package, [deck])
     merge_package_media_files(package, media_files)
@@ -5761,6 +5787,7 @@ def deck_names_for_run(
     dictation_item_count: int = 0,
     rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
+    kanji_contrast_resolved: Sequence[Tuple[object, Sequence[dict]]] = (),
 ) -> List[str]:
     names: List[str] = []
     if "core-radical" in wanted:
@@ -5793,6 +5820,8 @@ def deck_names_for_run(
         names.append(DECK_NAMES["rendaku"])
     if "mining" in wanted:
         names.append(DECK_NAMES["mining"])
+    if "kanji-contrast" in wanted and kanji_contrast_resolved:
+        names.append(DECK_NAMES["kanji-contrast"])
     if "pitch-leeches" in wanted and leeches and count_pitch_leeches(leeches, pitch_index):
         names.append(DECK_NAMES["pitch-leeches"])
     return names
@@ -6148,6 +6177,7 @@ def print_preview_report(
     pitch_index: Dict[Tuple[str, str], dict],
     review_index: Dict[int, dict],
     vocab_reading_index: Optional[Dict[str, List[dict]]] = None,
+    kanji_contrast_resolved: Sequence[Tuple[object, Sequence[dict]]] = (),
 ) -> None:
     print("\nDRY RUN — no .apkg files will be written")
     print("=" * 60)
@@ -6178,6 +6208,14 @@ def print_preview_report(
             [
                 " / ".join(i["data"].get("characters") or "?" for i in group)
                 for group in confusables
+            ],
+        )
+    if "kanji-contrast" in wanted:
+        preview_deck_section(
+            DECK_NAMES["kanji-contrast"],
+            [
+                " · ".join(item["data"].get("characters") or "?" for item in members)
+                for _group, members in kanji_contrast_resolved
             ],
         )
     if "phonetic-families" in wanted:
@@ -6518,6 +6556,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--deck", choices=[
         "leeches", "verb-pairs", "confusables", "phonetic-families",
         "pitch-leeches", "radicals", "reading-keywords", "kanji-radicals",
+        "kanji-contrast",
         "conjugations",
         "conjugations-verbs",
         "conjugations-adjectives",
@@ -6695,6 +6734,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--leech-score-min", type=float, default=1.0, help="Minimum composite leech score after incorrect/streak filters.")
     parser.add_argument("--max-cards", type=int, default=200)
     parser.add_argument("--max-confusable-group-size", type=int, default=7)
+    parser.add_argument(
+        "--kanji-contrast-groups",
+        default=cfg.get("kanji_contrast_groups"),
+        help="Path to kanji_contrast_groups.json (default: kanji_contrast_groups.json in repo root).",
+    )
     parser.add_argument("--min-family-size", type=int, default=3)
     parser.add_argument("--max-family-members", type=int, default=12)
     parser.add_argument(
@@ -6943,6 +6987,22 @@ def main() -> None:
         if "kanji-radicals" in wanted
         else []
     )
+    kanji_contrast_resolved: List[Tuple[object, List[dict]]] = []
+    if "kanji-contrast" in wanted:
+        from kanji_contrast_decks import load_kanji_contrast_groups, resolve_kanji_contrast_groups
+
+        groups_path = (
+            Path(args.kanji_contrast_groups).expanduser()
+            if getattr(args, "kanji_contrast_groups", None)
+            else None
+        )
+        contrast_groups = load_kanji_contrast_groups(groups_path)
+        kanji_contrast_resolved, contrast_warnings = resolve_kanji_contrast_groups(
+            contrast_groups,
+            all_kanji_by_char,
+        )
+        for warning in contrast_warnings:
+            print(f"Kanji contrast: {warning}")
     conjugation_verb_drills = (
         collect_conjugation_drills(
             vocab_items,
@@ -7054,6 +7114,8 @@ def main() -> None:
         print(f"Reading keywords: {len(reading_keywords)}")
     if kanji_radical_items:
         print(f"Kanji radical breakdown: {len(kanji_radical_items)}")
+    if kanji_contrast_resolved:
+        print(f"Kanji contrast groups: {len(kanji_contrast_resolved)}")
     if conjugation_verb_drills:
         print(f"Verb conjugation drills: {len(conjugation_verb_drills)} (min SRS {args.conjugation_min_srs})")
     if conjugation_adjective_drills:
@@ -7109,6 +7171,7 @@ def main() -> None:
             dictation_item_count=len(dictation_items),
             rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,
+            kanji_contrast_resolved=kanji_contrast_resolved,
         )
         history_path = append_run_history(
             output_dir,
@@ -7165,6 +7228,7 @@ def main() -> None:
             pitch_index=pitch_index,
             review_index=indexes["reviews"],
             vocab_reading_index=vocab_reading_index,
+            kanji_contrast_resolved=kanji_contrast_resolved,
         )
         return
     created: List[Path] = []
@@ -7246,6 +7310,18 @@ def main() -> None:
         built_decks.append(deck)
     if "confusables" in wanted and confusables:
         path, deck = build_confusables_deck(confusables, indexes, pitch_index, output_dir, subject_index)
+        created.append(path)
+        built_decks.append(deck)
+    if "kanji-contrast" in wanted and kanji_contrast_resolved:
+        from kanji_contrast_decks import build_kanji_contrast_deck
+
+        path, deck = build_kanji_contrast_deck(
+            kanji_contrast_resolved,
+            indexes["assignments"],
+            pitch_index,
+            radical_index_by_id(subjects),
+            output_dir,
+        )
         created.append(path)
         built_decks.append(deck)
     if "phonetic-families" in wanted and phonetic_families:
