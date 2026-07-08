@@ -29,7 +29,8 @@ from wk_decks import (
     primary_meanings,
     srs_stage,
     stable_guid,
-    supplementary_import_tags,
+    vocab_kanji_prerequisite_ids,
+    vocab_supplementary_import_tags,
     versioned_css,
     write_apkg,
 )
@@ -106,6 +107,7 @@ def make_dictation_model() -> WkModel:
         fields=[
             {"name": "GuidKey"},
             {"name": "WkSubjectId"},
+            {"name": "PrerequisiteIds"},
             {"name": "PronunciationAudio"},
             {"name": "Expression"},
             {"name": "Reading"},
@@ -156,9 +158,6 @@ def build_dictation_deck(
     deck = genanki.Deck(DICTATION_DECK_ID, DICTATION_DECK_NAME)
     model = make_dictation_model()
     template_label = DICTATION_TEMPLATE_VERSION
-    stage_interval_map = interval_map or load_srs_stage_interval_days(
-        CACHE_DIR / WK_SPACED_REPETITION_SYSTEMS_CACHE_NAME
-    )
     media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
     audio_ok = 0
@@ -204,12 +203,13 @@ def build_dictation_deck(
             f"wk-level-{level}",
             f"voice-{voice_actor_slug(voice_actor)}",
         ]
-        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
+        note_tags.extend(vocab_supplementary_import_tags(vocab))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
                 str(vocab["id"]),
+                vocab_kanji_prerequisite_ids(vocab),
                 audio_field,
                 html.escape(item.expression),
                 html.escape(item.reading),

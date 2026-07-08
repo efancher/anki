@@ -117,9 +117,10 @@ class DictationDeckTests(unittest.TestCase):
             self.assertEqual(len(media), 1)
             note = deck.notes[0]
             self.assertEqual(note.fields[1], "99")
-            self.assertTrue(note.fields[2].startswith("[sound:wk_reading_vocabulary_"))
-            self.assertEqual(note.fields[3], "猫")
-            self.assertEqual(note.fields[4], "ねこ")
+            self.assertEqual(note.fields[2], "")
+            self.assertTrue(note.fields[3].startswith("[sound:wk_reading_vocabulary_"))
+            self.assertEqual(note.fields[4], "猫")
+            self.assertEqual(note.fields[5], "ねこ")
 
     def test_cached_wk_vocab_has_pronunciation_audio(self) -> None:
         cache_path = REPO_ROOT / ".wk_cache" / "subjects_vocabulary_kanji_radical.json"

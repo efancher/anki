@@ -26,7 +26,6 @@ from wk_decks import (
     first_reading,
     load_srs_stage_interval_days,
     primary_meanings,
-    require_edge_tts,
     srs_stage,
     stable_guid,
     supplementary_import_tags,
@@ -278,9 +277,11 @@ def build_rendaku_deck(
     *,
     interval_map=None,
     reading_audio: bool = True,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field, resolve_tts_config
+    from wk_sentence_tts import format_sentence_tts_label, require_sentence_tts
 
     deck = genanki.Deck(RENDAKU_DECK_ID, RENDAKU_DECK_NAME)
     model = make_rendaku_model()
@@ -290,9 +291,10 @@ def build_rendaku_deck(
     )
     media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=reading_audio_voice)
     if reading_audio:
-        require_edge_tts()
-        print(f"Rendaku reading audio (voice={reading_audio_voice})...")
+        require_sentence_tts(config)
+        print(f"Rendaku reading audio (TTS fallback: {format_sentence_tts_label(config)})...")
 
     for item in items:
         vocab = item.vocab
@@ -307,7 +309,7 @@ def build_rendaku_deck(
                 media_dir,
                 vocab=vocab,
                 wk_voice=DEFAULT_WK_READING_VOICE,
-                tts_voice=reading_audio_voice,
+                tts_config=config,
             )
             media_files.extend(answer_paths)
         note_tags = [

@@ -12,6 +12,8 @@ Decks (default --deck all):
   - vocab-cloze: reading cloze in WaniKani context sentences (Master+ by default)
   - grammar: JLPT grammar cloze from Hanabira open data (see grammar_decks.py)
   - dictation: native WK pronunciation audio → type the reading in kana (see dictation_decks.py)
+  - kanji-meaning: kanji → English meaning only, lighter anchor alongside core kanji reading (see kanji_meaning_decks.py)
+  - vocab-sentence: WK context sentences with highlighted vocab — meaning recall and reading type-in (see vocab_sentence_decks.py)
   - rendaku: two-kanji compounds where the second morpheme voices (連濁) (see rendaku_decks.py)
   - mining: open Yomitan immersion deck (note type only; see docs/yomitan_mining.md)
   - all: all of the above
@@ -124,6 +126,8 @@ DEFAULT_GENERATE_DECKS = (
     "verb-types",
     "vocab-cloze",
     "dictation",
+    "kanji-meaning",
+    "vocab-sentence",
     "rendaku",
     "grammar",
     "mining",
@@ -233,6 +237,9 @@ DECK_IDS = {
     "rendaku": 2059400131,
     "mining": 2059400132,
     "kanji-contrast": 2059400133,
+    "kanji-meaning": 2059400134,
+    "vocab-sentence-meaning": 2059400135,
+    "vocab-sentence-reading": 2059400136,
 }
 
 MODEL_IDS = {
@@ -253,6 +260,9 @@ MODEL_IDS = {
     "rendaku": 1865429027,
     "mining": 1865429029,
     "kanji_contrast": 1865429030,
+    "kanji_meaning": 1865429031,
+    "vocab_sentence_meaning": 1865429032,
+    "vocab_sentence_reading": 1865429033,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -267,15 +277,18 @@ MODEL_TEMPLATE_VERSIONS = {
     "phonetic_drill": "v5",
     "conjugation": "v6",
     "word_class": "v4",
-    "vocab_cloze": "v7",
+    "vocab_cloze": "v8",
     "conjugation_reverse": "v6",
     "grammar_cloze": "v4",
-    "dictation": "v3",
+    "dictation": "v4",
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
     "mining": "v9",
     "kanji_contrast": "v3",
+    "kanji_meaning": "v1",
+    "vocab_sentence_meaning": "v1",
+    "vocab_sentence_reading": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -302,6 +315,9 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "rendaku": 15,
     "mining": 20,
     "kanji_contrast": 21,
+    "kanji_meaning": 22,
+    "vocab_sentence_meaning": 23,
+    "vocab_sentence_reading": 24,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -327,6 +343,9 @@ NOTE_TYPE_NAMES = {
     "rendaku": "WK Update-Safe Rendaku",
     "mining": "WK Yomitan Immersion",
     "kanji_contrast": "WK Update-Safe Kanji Contrast",
+    "kanji_meaning": "WK Update-Safe Kanji Meaning",
+    "vocab_sentence_meaning": "WK Update-Safe Vocab Sentence Meaning",
+    "vocab_sentence_reading": "WK Update-Safe Vocab Sentence Reading",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -369,6 +388,8 @@ RUN_HISTORY_COLUMNS = [
     "adjective_type_cards",
     "vocab_cloze",
     "dictation_items",
+    "kanji_meaning_items",
+    "vocab_sentence_items",
     "rendaku_items",
     "grammar_cards",
     "pitch_entries",
@@ -476,6 +497,24 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
+        "name": "WK::Kanji Meaning",
+        "search": daily_filtered_deck_search('deck:"WaniKani Kanji Meaning Anchor"'),
+        "limit": 20,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Vocab Sentence Meaning",
+        "search": daily_filtered_deck_search('deck:"WaniKani Vocabulary Sentence Meaning"'),
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Vocab Sentence Reading",
+        "search": daily_filtered_deck_search('deck:"WaniKani Vocabulary Sentence Reading"'),
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
         "name": "WK::Rendaku",
         "search": daily_filtered_deck_search('deck:"WaniKani Rendaku" tag:rendaku'),
         "limit": 20,
@@ -576,6 +615,9 @@ DECK_NAMES = {
     "core-vocabulary": "WaniKani Core · Vocabulary",
     "mining": "Immersion · Yomitan Mining",
     "kanji-contrast": "WaniKani Kanji Contrast",
+    "kanji-meaning": "WaniKani Kanji Meaning Anchor",
+    "vocab-sentence-meaning": "WaniKani Vocabulary Sentence Meaning",
+    "vocab-sentence-reading": "WaniKani Vocabulary Sentence Reading",
 }
 
 PAIR_RULES = [
@@ -1668,6 +1710,19 @@ def supplementary_import_tags(
     return tags
 
 
+def vocab_kanji_prerequisite_ids(vocab: dict) -> str:
+    """Comma-separated WK kanji ids in this vocab word (Kanji Meaning Anchor unlock chain)."""
+    component_ids = (vocab.get("data") or {}).get("component_subject_ids") or []
+    return ",".join(str(component_id) for component_id in component_ids)
+
+
+def vocab_supplementary_import_tags(vocab: dict) -> List[str]:
+    """Lock vocab supplementary notes until kanji meaning anchor prereqs are Guru+ in Anki."""
+    if vocab_kanji_prerequisite_ids(vocab):
+        return [WK_LOCKED_TAG]
+    return []
+
+
 def all_vocab_subjects(subjects: Sequence[dict], args: argparse.Namespace) -> List[dict]:
     return [
         subject
@@ -2231,75 +2286,135 @@ def prepare_sentence_for_tts(plain_sentence: str, vocab: dict, *, source_ja: str
 
 
 def sentence_audio_cache_key(text: str, voice: str) -> str:
-    raw = f"{voice}\0{text}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    """Legacy edge-only cache key (tests and kanji reading TTS)."""
+    from wk_sentence_tts import SentenceTtsConfig, sentence_audio_cache_key as _cache_key
+
+    return _cache_key(text, SentenceTtsConfig.edge_only(voice), engine="edge")
 
 
 def sentence_audio_cache_path(text: str, voice: str) -> Path:
-    return SENTENCE_AUDIO_CACHE_DIR / f"{sentence_audio_cache_key(text, voice)}.mp3"
+    from wk_sentence_tts import SentenceTtsConfig, sentence_audio_cache_path as _cache_path
+
+    return _cache_path(
+        text,
+        SentenceTtsConfig.edge_only(voice),
+        engine="edge",
+        cache_dir=SENTENCE_AUDIO_CACHE_DIR,
+    )
 
 
 def tts_audio_basename(text: str, voice: str) -> str:
-    """Shared Anki media name for TTS clips — dedupes identical sentences across decks."""
-    plain = strip_html(text).strip()
-    if not plain:
-        return ""
-    return f"wk_tts_{sentence_audio_cache_key(plain, voice)}.mp3"
+    from wk_sentence_tts import SentenceTtsConfig, tts_audio_basename as _basename
+
+    return _basename(text, SentenceTtsConfig.edge_only(voice), cache_dir=SENTENCE_AUDIO_CACHE_DIR)
+
+
+def tts_audio_basename_for_config(text: str, config: "SentenceTtsConfig") -> str:
+    from wk_sentence_tts import SentenceTtsConfig, tts_audio_basename as _basename
+
+    return _basename(text, config, cache_dir=SENTENCE_AUDIO_CACHE_DIR)
 
 
 def vocab_cloze_audio_basename(vocab_id: int) -> str:
     return f"wk_vocab_cloze_{vocab_id}.mp3"
 
 
-def require_edge_tts():
-    try:
-        import edge_tts  # noqa: F401
-    except ImportError as exc:
-        raise SystemExit(
-            "edge-tts is required for sentence audio. "
-            "Install it: pip install edge-tts — or disable with --no-sentence-audio / --no-grammar-sentence-audio."
-        ) from exc
+def build_sentence_tts_config(args: argparse.Namespace) -> "SentenceTtsConfig":
+    from wk_sentence_tts import SentenceTtsConfig
+
+    return SentenceTtsConfig.from_mapping(
+        {
+            "engine": getattr(args, "sentence_tts_engine", "auto"),
+            "voicevox_engine_url": getattr(args, "voicevox_engine_url", "http://127.0.0.1:50021"),
+            "voicevox_speaker_id": getattr(args, "voicevox_speaker_id", 3),
+            "edge_tts_voice": getattr(args, "sentence_audio_voice", DEFAULT_SENTENCE_AUDIO_VOICE),
+        }
+    )
 
 
-async def _write_edge_tts_mp3(text: str, voice: str, path: Path) -> None:
-    import edge_tts
+def sentence_tts_enabled(args: argparse.Namespace) -> bool:
+    return bool(
+        args.sentence_audio
+        or args.grammar_sentence_audio
+        or getattr(args, "vocab_sentence_sentence_audio", False)
+        or getattr(args, "reading_audio", False)
+    )
 
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(str(path))
+
+def print_sentence_tts_summary(args: argparse.Namespace) -> None:
+    if not sentence_tts_enabled(args):
+        return
+    from wk_sentence_tts import format_sentence_tts_label
+
+    config = build_sentence_tts_config(args)
+    print(f"Sentence TTS: {format_sentence_tts_label(config)}")
+
+
+def require_edge_tts() -> None:
+    from wk_sentence_tts import require_edge_tts as _require
+
+    _require()
 
 
 def generate_sentence_audio_cache(text: str, voice: str, cache_path: Path) -> None:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    asyncio.run(_write_edge_tts_mp3(text, voice, cache_path))
+    from wk_sentence_tts import SentenceTtsConfig, synthesize_sentence_audio_cache
+
+    config = SentenceTtsConfig.edge_only(voice)
+    if not synthesize_sentence_audio_cache(text, config, cache_path, engine="edge"):
+        raise RuntimeError(f"edge-tts failed for {text[:40]!r}")
 
 
 def sentence_audio_cache_is_usable(cache_path: Path) -> bool:
-    return cache_path.is_file() and cache_path.stat().st_size > 0
+    from wk_sentence_tts import sentence_audio_cache_is_usable as _usable
+
+    return _usable(cache_path)
 
 
 def ensure_sentence_audio_file(
     text: str,
-    voice: str,
+    voice_or_config,
     dest_path: Path,
     *,
     refresh: bool = False,
 ) -> Tuple[bool, bool]:
-    """Return (success, was_cached). was_cached is True when TTS was skipped."""
-    plain = strip_html(text).strip()
-    if not plain:
-        return False, False
-    cache_path = sentence_audio_cache_path(plain, voice)
-    try:
-        was_cached = sentence_audio_cache_is_usable(cache_path) and not refresh
-        if not was_cached:
-            generate_sentence_audio_cache(plain, voice, cache_path)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(cache_path, dest_path)
-        ok = dest_path.is_file() and dest_path.stat().st_size > 0
-        return ok, was_cached and ok
-    except Exception as exc:
-        print(f"  Warning: sentence audio failed ({plain[:40]}…): {exc}", file=sys.stderr)
-        return False, False
+    from wk_sentence_tts import ensure_sentence_audio_file as _ensure
+
+    return _ensure(
+        text,
+        voice_or_config,
+        dest_path,
+        cache_dir=SENTENCE_AUDIO_CACHE_DIR,
+        refresh=refresh,
+    )
+
+
+def unique_sentence_audio_texts(texts: Sequence[str]) -> List[str]:
+    from wk_sentence_tts import unique_sentence_audio_texts as _unique
+
+    return _unique(texts)
+
+
+def prefetch_sentence_audio_texts(
+    texts: Sequence[str],
+    voice_or_config,
+    *,
+    refresh: bool = False,
+    label: str = "Sentence audio",
+) -> Tuple[int, int, int]:
+    from wk_sentence_tts import SentenceTtsConfig, prefetch_sentence_audio_texts as _prefetch
+
+    config = (
+        SentenceTtsConfig.edge_only(voice_or_config)
+        if isinstance(voice_or_config, str)
+        else voice_or_config
+    )
+    return _prefetch(
+        texts,
+        config,
+        cache_dir=SENTENCE_AUDIO_CACHE_DIR,
+        refresh=refresh,
+        label=label,
+    )
 
 
 def meaning_synonyms(subject: dict, study_index: Dict[int, dict]) -> List[str]:
@@ -3994,6 +4109,7 @@ def make_vocab_cloze_model() -> WkModel:
         fields=[
             {"name": "GuidKey"},
             {"name": "WkSubjectId"},
+            {"name": "PrerequisiteIds"},
             {"name": "ClozeSentence"},
             {"name": "Hint"},
             {"name": "FormHint"},
@@ -4946,16 +5062,21 @@ def build_leech_deck(
     reading_audio: bool = True,
     wk_voice: str = "Kyoko",
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     refresh_reading_audio: bool = False,
 ) -> Tuple[Path, genanki.Deck]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, ReadingAudioProgressBar, prepare_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, ReadingAudioProgressBar, prepare_reading_audio_field, resolve_tts_config
+    from wk_sentence_tts import format_sentence_tts_label
 
     deck = genanki.Deck(DECK_IDS["leeches"], DECK_NAMES["leeches"])
     model = make_item_model()
     media_dir = output_dir / "media/leech_reading"
     media_files: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=tts_voice)
     if reading_audio:
-        print(f"Leech reading audio (vocab: WK {wk_voice}, kanji: TTS {tts_voice})...")
+        print(
+            f"Leech reading audio (vocab: WK {wk_voice}, kanji: {format_sentence_tts_label(config)})..."
+        )
     progress = ReadingAudioProgressBar(len(items), label="Leech reading audio", enabled=reading_audio)
     audio_ok = 0
     for item in items:
@@ -4965,6 +5086,7 @@ def build_leech_deck(
                 item,
                 media_dir,
                 wk_voice=wk_voice or DEFAULT_WK_READING_VOICE,
+                tts_config=config,
                 tts_voice=tts_voice,
                 refresh=refresh_reading_audio,
             )
@@ -4997,9 +5119,10 @@ def build_pitch_leeches_deck(
     reading_audio: bool = True,
     wk_voice: str = "Kyoko",
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     refresh_reading_audio: bool = False,
 ) -> Optional[Tuple[Path, genanki.Deck]]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, ReadingAudioProgressBar, prepare_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, ReadingAudioProgressBar, prepare_reading_audio_field, resolve_tts_config
 
     pitch_items = [i for i in items if pitch_for(i, pitch_index).get("pitch") or pitch_for(i, pitch_index).get("pattern")]
     if not pitch_items:
@@ -5008,6 +5131,7 @@ def build_pitch_leeches_deck(
     model = make_item_model()
     media_dir = output_dir / "media/pitch_leech_reading"
     media_files: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=tts_voice)
     progress = ReadingAudioProgressBar(len(pitch_items), label="Pitch leech reading audio", enabled=reading_audio)
     audio_ok = 0
     for item in pitch_items:
@@ -5017,6 +5141,7 @@ def build_pitch_leeches_deck(
                 item,
                 media_dir,
                 wk_voice=wk_voice or DEFAULT_WK_READING_VOICE,
+                tts_config=config,
                 tts_voice=tts_voice,
                 refresh=refresh_reading_audio,
             )
@@ -5303,9 +5428,11 @@ def build_conjugation_deck(
     tag_kind: str,
     interval_map: Optional[Mapping[int, int]] = None,
     reading_audio: bool = True,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field, resolve_tts_config
+    from wk_sentence_tts import format_sentence_tts_label, require_sentence_tts
 
     deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_conjugation_model()
@@ -5315,9 +5442,10 @@ def build_conjugation_deck(
     )
     media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=reading_audio_voice)
     if reading_audio:
-        require_edge_tts()
-        print(f"Conjugation reading audio (voice={reading_audio_voice})...")
+        require_sentence_tts(config)
+        print(f"Conjugation reading audio (TTS fallback: {format_sentence_tts_label(config)})...")
     outfile = (
         "wk_conjugations_verbs.apkg"
         if deck_key == "conjugations-verbs"
@@ -5338,12 +5466,12 @@ def build_conjugation_deck(
                 media_dir,
                 vocab=vocab,
                 wk_voice=DEFAULT_WK_READING_VOICE,
-                tts_voice=reading_audio_voice,
+                tts_config=config,
             )
             answer_audio, answer_paths = prepare_kana_reading_audio_field(
                 drill.conj_reading,
                 media_dir,
-                tts_voice=reading_audio_voice,
+                tts_config=config,
             )
             media_files.extend(prompt_paths)
             media_files.extend(answer_paths)
@@ -5387,6 +5515,7 @@ def build_conjugation_verb_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    tts_config: Optional["SentenceTtsConfig"] = None,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_conjugation_deck(
         "conjugations-verbs",
@@ -5395,6 +5524,7 @@ def build_conjugation_verb_deck(
         assignment_index,
         tag_kind="conjugation-verb",
         interval_map=interval_map,
+        tts_config=tts_config,
     )
 
 
@@ -5404,6 +5534,7 @@ def build_conjugation_adjective_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    tts_config: Optional["SentenceTtsConfig"] = None,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_conjugation_deck(
         "conjugations-adjectives",
@@ -5412,6 +5543,7 @@ def build_conjugation_adjective_deck(
         assignment_index,
         tag_kind="conjugation-adjective",
         interval_map=interval_map,
+        tts_config=tts_config,
     )
 
 
@@ -5422,9 +5554,11 @@ def build_conjugation_reverse_deck(
     *,
     interval_map: Optional[Mapping[int, int]] = None,
     reading_audio: bool = True,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field, resolve_tts_config
+    from wk_sentence_tts import format_sentence_tts_label, require_sentence_tts
 
     deck = genanki.Deck(DECK_IDS["conjugations-reverse"], DECK_NAMES["conjugations-reverse"])
     model = make_conjugation_reverse_model()
@@ -5434,9 +5568,12 @@ def build_conjugation_reverse_deck(
     )
     media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=reading_audio_voice)
     if reading_audio:
-        require_edge_tts()
-        print(f"Conjugation reverse reading audio (voice={reading_audio_voice})...")
+        require_sentence_tts(config)
+        print(
+            f"Conjugation reverse reading audio (TTS fallback: {format_sentence_tts_label(config)})..."
+        )
     for drill in drills:
         vocab = drill.vocab
         level = vocab["data"].get("level", "?")
@@ -5450,14 +5587,14 @@ def build_conjugation_reverse_deck(
             prompt_audio, prompt_paths = prepare_kana_reading_audio_field(
                 drill.conj_reading,
                 media_dir,
-                tts_voice=reading_audio_voice,
+                tts_config=config,
             )
             answer_audio, answer_paths = prepare_kana_reading_audio_field(
                 drill.dict_reading,
                 media_dir,
                 vocab=vocab,
                 wk_voice=DEFAULT_WK_READING_VOICE,
-                tts_voice=reading_audio_voice,
+                tts_config=config,
             )
             media_files.extend(prompt_paths)
             media_files.extend(answer_paths)
@@ -5503,9 +5640,11 @@ def build_word_class_deck(
     drill_kind: str,
     interval_map: Optional[Mapping[int, int]] = None,
     reading_audio: bool = True,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
-    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field
+    from wk_reading_audio import DEFAULT_WK_READING_VOICE, prepare_kana_reading_audio_field, resolve_tts_config
+    from wk_sentence_tts import format_sentence_tts_label, require_sentence_tts
 
     deck = genanki.Deck(DECK_IDS[deck_key], DECK_NAMES[deck_key])
     model = make_word_class_model()
@@ -5515,9 +5654,10 @@ def build_word_class_deck(
     )
     media_dir = output_dir / WK_SHARED_MEDIA_SUBDIR
     media_files: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=reading_audio_voice)
     if reading_audio:
-        require_edge_tts()
-        print(f"Word-class reading audio (voice={reading_audio_voice})...")
+        require_sentence_tts(config)
+        print(f"Word-class reading audio (TTS fallback: {format_sentence_tts_label(config)})...")
     guid_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
     tag_kind = "verb-type" if drill_kind == "verb" else "adjective-type"
     prompt = (
@@ -5556,7 +5696,7 @@ def build_word_class_deck(
                 media_dir,
                 vocab=vocab,
                 wk_voice=DEFAULT_WK_READING_VOICE,
-                tts_voice=reading_audio_voice,
+                tts_config=config,
             )
             answer_audio = prompt_audio
             media_files.extend(prompt_paths)
@@ -5598,6 +5738,7 @@ def build_verb_type_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    tts_config: Optional["SentenceTtsConfig"] = None,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_word_class_deck(
         "verb-types",
@@ -5606,6 +5747,7 @@ def build_verb_type_deck(
         assignment_index,
         drill_kind="verb",
         interval_map=interval_map,
+        tts_config=tts_config,
     )
 
 
@@ -5615,6 +5757,7 @@ def build_adjective_type_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    tts_config: Optional["SentenceTtsConfig"] = None,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_word_class_deck(
         "adjective-types",
@@ -5623,6 +5766,7 @@ def build_adjective_type_deck(
         assignment_index,
         drill_kind="adjective",
         interval_map=interval_map,
+        tts_config=tts_config,
     )
 
 
@@ -5633,6 +5777,7 @@ def build_vocab_cloze_deck(
     *,
     vocab_reading_index: Optional[Dict[str, List[dict]]] = None,
     sentence_audio: bool = False,
+    sentence_tts_config: Optional["SentenceTtsConfig"] = None,
     sentence_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_sentence_audio: bool = False,
     interval_map: Optional[Mapping[int, int]] = None,
@@ -5648,9 +5793,17 @@ def build_vocab_cloze_deck(
     audio_ok = 0
     audio_cached = 0
     audio_new = 0
+    from wk_sentence_tts import SentenceTtsConfig, require_sentence_tts
+
+    tts_config = sentence_tts_config or SentenceTtsConfig.edge_only(sentence_audio_voice)
     if sentence_audio:
-        require_edge_tts()
-        print(f"Sentence audio (voice={sentence_audio_voice}, cache={SENTENCE_AUDIO_CACHE_DIR})...")
+        require_sentence_tts(tts_config)
+        from wk_sentence_tts import format_sentence_tts_label
+
+        print(
+            f"Vocab cloze sentence audio ({format_sentence_tts_label(tts_config)}, "
+            f"cache={SENTENCE_AUDIO_CACHE_DIR})..."
+        )
     reading_index = vocab_reading_index or {}
     for item in cloze_items:
         vocab = item.vocab
@@ -5675,12 +5828,12 @@ def build_vocab_cloze_deck(
                 item.vocab,
                 source_ja=item.source_ja,
             )
-            basename = tts_audio_basename(tts_text, sentence_audio_voice)
+            basename = tts_audio_basename_for_config(tts_text, tts_config)
             if basename:
                 dest = media_dir / basename
                 ok, was_cached = ensure_sentence_audio_file(
                     tts_text,
-                    sentence_audio_voice,
+                    tts_config,
                     dest,
                     refresh=refresh_sentence_audio,
                 )
@@ -5702,12 +5855,13 @@ def build_vocab_cloze_deck(
             "vocab-cloze",
             f"wk-level-{level}",
         ]
-        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
+        note_tags.extend(vocab_supplementary_import_tags(vocab))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
                 str(vocab["id"]),
+                vocab_kanji_prerequisite_ids(vocab),
                 html.escape(item.cloze_sentence),
                 html.escape(meaning),
                 html.escape(form_hint),
@@ -5752,6 +5906,9 @@ def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
         normalized.discard("conjugations")
         normalized.add("conjugations-verbs")
         normalized.add("conjugations-adjectives")
+    if "vocab-sentence" in normalized:
+        normalized.discard("vocab-sentence")
+        normalized.update(("vocab-sentence-meaning", "vocab-sentence-reading"))
     return normalized
 
 
@@ -5785,6 +5942,8 @@ def deck_names_for_run(
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_card_count: int,
     dictation_item_count: int = 0,
+    kanji_meaning_item_count: int = 0,
+    vocab_sentence_item_count: int = 0,
     rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
     kanji_contrast_resolved: Sequence[Tuple[object, Sequence[dict]]] = (),
@@ -5816,6 +5975,12 @@ def deck_names_for_run(
         names.append(DECK_NAMES["grammar"])
     if "dictation" in wanted and dictation_item_count:
         names.append(DECK_NAMES["dictation"])
+    if "kanji-meaning" in wanted and kanji_meaning_item_count:
+        names.append(DECK_NAMES["kanji-meaning"])
+    if "vocab-sentence-meaning" in wanted and vocab_sentence_item_count:
+        names.append(DECK_NAMES["vocab-sentence-meaning"])
+    if "vocab-sentence-reading" in wanted and vocab_sentence_item_count:
+        names.append(DECK_NAMES["vocab-sentence-reading"])
     if "rendaku" in wanted and rendaku_item_count:
         names.append(DECK_NAMES["rendaku"])
     if "mining" in wanted:
@@ -5851,6 +6016,8 @@ def build_run_history_row(
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_card_count: int,
     dictation_item_count: int = 0,
+    kanji_meaning_item_count: int = 0,
+    vocab_sentence_item_count: int = 0,
     rendaku_item_count: int = 0,
     pitch_index: Dict[Tuple[str, str], dict],
     bundled_deck_names: Sequence[str],
@@ -5889,6 +6056,8 @@ def build_run_history_row(
         "vocab_cloze": len(vocab_cloze_items),
         "grammar_cards": grammar_card_count,
         "dictation_items": dictation_item_count,
+        "kanji_meaning_items": kanji_meaning_item_count,
+        "vocab_sentence_items": vocab_sentence_item_count,
         "rendaku_items": rendaku_item_count,
         "pitch_entries": len(pitch_index),
         "pitch_leeches": count_pitch_leeches(leeches, pitch_index),
@@ -6171,6 +6340,8 @@ def print_preview_report(
     vocab_cloze_items: Sequence[VocabClozeItem],
     grammar_cards: Sequence[Any],
     dictation_items: Sequence[Any],
+    kanji_meaning_items: Sequence[Any] = (),
+    vocab_sentence_items: Sequence[Any] = (),
     rendaku_items: Sequence[Any],
     radical_items: Sequence[dict],
     preview_levels: RadicalPreviewLevels,
@@ -6319,6 +6490,22 @@ def print_preview_report(
                 for item in dictation_items
             ],
         )
+    if "kanji-meaning" in wanted:
+        preview_deck_section(
+            DECK_NAMES["kanji-meaning"],
+            [
+                f"{item.expression} · {item.meaning[:40]}"
+                for item in kanji_meaning_items
+            ],
+        )
+    if "vocab-sentence-meaning" in wanted or "vocab-sentence-reading" in wanted:
+        preview_deck_section(
+            DECK_NAMES["vocab-sentence-meaning"],
+            [
+                f"{item.expression} ({item.reading}) · {item.full_sentence[:50]}"
+                for item in vocab_sentence_items
+            ],
+        )
     if "rendaku" in wanted:
         preview_deck_section(
             DECK_NAMES["rendaku"],
@@ -6362,18 +6549,27 @@ def print_preview_report(
             f"Dictation filter: min_srs={args.dictation_min_srs}, voice={args.dictation_voice} "
             f"(WaniKani native pronunciation)"
         )
+    if "kanji-meaning" in wanted:
+        print(
+            f"Kanji meaning filter: min_srs={args.kanji_meaning_min_srs} "
+            f"(Guru+ when {WK_SRS_STAGE_GURU_1}, Master+ when {WK_SRS_STAGE_MASTER})"
+        )
     if "rendaku" in wanted:
         print(f"Rendaku filter: min_srs={args.rendaku_min_srs} (Master+ when 7)")
     if "mining" in wanted:
         print(f"Yomitan immersion: {DECK_NAMES['mining']} (see docs/yomitan_mining.md)")
     if args.sentence_audio:
-        print(f"Vocab sentence audio: on (voice={args.sentence_audio_voice})")
+        print("Vocab cloze sentence audio: on (plays on card back)")
     else:
-        print("Vocab sentence audio: off (pass --sentence-audio to generate; plays on card back)")
+        print("Vocab cloze sentence audio: off (pass --sentence-audio to generate; plays on card back)")
     if args.grammar_sentence_audio:
-        print(f"Grammar sentence audio: on (voice={args.sentence_audio_voice})")
+        print("Grammar sentence audio: on (plays on card back)")
     else:
         print("Grammar sentence audio: off (--no-grammar-sentence-audio)")
+    if getattr(args, "vocab_sentence_sentence_audio", False):
+        print("Vocab sentence deck audio: on (plays on card front)")
+    elif "vocab-sentence-meaning" in wanted or "vocab-sentence-reading" in wanted:
+        print("Vocab sentence deck audio: off (--no-vocab-sentence-sentence-audio)")
     print("\nRe-run without --dry-run to write decks.")
 
 
@@ -6457,6 +6653,16 @@ def parser_defaults_from_config(config: dict) -> dict:
         defaults["sentence_audio_voice"] = config["sentence_audio_voice"]
     if "refresh_sentence_audio" in config:
         defaults["refresh_sentence_audio"] = bool(config["refresh_sentence_audio"])
+    sentence_tts = config.get("sentence_tts") or {}
+    sentence_tts_key_map = {
+        "engine": "sentence_tts_engine",
+        "voicevox_engine_url": "voicevox_engine_url",
+        "voicevox_speaker_id": "voicevox_speaker_id",
+        "edge_tts_voice": "sentence_audio_voice",
+    }
+    for config_key, dest in sentence_tts_key_map.items():
+        if config_key in sentence_tts:
+            defaults[dest] = sentence_tts[config_key]
     if "reading_audio" in config:
         defaults["reading_audio"] = bool(config["reading_audio"])
     if "reading_voice" in config:
@@ -6489,6 +6695,16 @@ def parser_defaults_from_config(config: dict) -> dict:
     for config_key, dest in dictation_key_map.items():
         if config_key in dictation:
             defaults[dest] = dictation[config_key]
+
+    kanji_meaning = config.get("kanji_meaning") or {}
+    if "min_srs" in kanji_meaning:
+        defaults["kanji_meaning_min_srs"] = int(kanji_meaning["min_srs"])
+
+    vocab_sentence = config.get("vocab_sentence") or {}
+    if "min_srs" in vocab_sentence:
+        defaults["vocab_sentence_min_srs"] = int(vocab_sentence["min_srs"])
+    if "sentence_audio" in vocab_sentence:
+        defaults["vocab_sentence_sentence_audio"] = bool(vocab_sentence["sentence_audio"])
 
     rendaku = config.get("rendaku") or {}
     if "min_srs" in rendaku:
@@ -6529,6 +6745,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         JLPT_LEVELS,
     )
     from dictation_decks import DEFAULT_DICTATION_VOICE, DICTATION_DEFAULT_MIN_SRS
+    from kanji_meaning_decks import KANJI_MEANING_DEFAULT_MIN_SRS
+    from vocab_sentence_decks import VOCAB_SENTENCE_DEFAULT_MIN_SRS, VOCAB_SENTENCE_SENTENCE_AUDIO_DEFAULT
     from rendaku_decks import RENDAKU_DEFAULT_MIN_SRS
 
     config_path = resolve_config_path_from_argv(argv)
@@ -6561,7 +6779,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "conjugations-verbs",
         "conjugations-adjectives",
         "conjugations-reverse",
-        "verb-types", "adjective-types", "vocab-cloze", "dictation", "rendaku", "mining", "grammar",
+        "verb-types", "adjective-types", "vocab-cloze", "dictation", "kanji-meaning", "vocab-sentence", "rendaku", "mining", "grammar",
         "core", "all",
     ], default=cfg.get("deck", "all"))
     parser.add_argument("--refresh-cache", action="store_true", default=cfg.get("refresh_cache", False))
@@ -6645,6 +6863,24 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Minimum WK SRS stage for dictation cards (7 = Master+, 5 = Guru+).",
     )
     parser.add_argument(
+        "--kanji-meaning-min-srs",
+        type=int,
+        default=cfg.get("kanji_meaning_min_srs", KANJI_MEANING_DEFAULT_MIN_SRS),
+        help="Minimum WK SRS stage for kanji meaning anchor cards (5 = Guru+, 7 = Master+).",
+    )
+    parser.add_argument(
+        "--vocab-sentence-min-srs",
+        type=int,
+        default=cfg.get("vocab_sentence_min_srs", VOCAB_SENTENCE_DEFAULT_MIN_SRS),
+        help="Minimum WK SRS stage for vocab sentence decks (7 = Master+, 5 = Guru+).",
+    )
+    parser.add_argument(
+        "--vocab-sentence-sentence-audio",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.get("vocab_sentence_sentence_audio", VOCAB_SENTENCE_SENTENCE_AUDIO_DEFAULT),
+        help="Generate sentence audio on vocab sentence deck fronts (VOICEVOX/edge-tts; default: on).",
+    )
+    parser.add_argument(
         "--rendaku-min-srs",
         type=int,
         default=cfg.get("rendaku_min_srs", RENDAKU_DEFAULT_MIN_SRS),
@@ -6666,18 +6902,35 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--sentence-audio",
         action=argparse.BooleanOptionalAction,
         default=cfg.get("sentence_audio", False),
-        help="Generate sentence audio for vocab-cloze cards via edge-tts (plays on card back).",
+        help="Generate sentence audio for vocab-cloze cards (VOICEVOX/edge-tts; plays on card back).",
     )
     parser.add_argument(
         "--grammar-sentence-audio",
         action=argparse.BooleanOptionalAction,
         default=cfg.get("grammar_sentence_audio", True),
-        help="Generate sentence audio for grammar-cloze cards via edge-tts (plays on card back; default: on).",
+        help="Generate sentence audio for grammar-cloze cards (VOICEVOX/edge-tts; plays on card back; default: on).",
     )
     parser.add_argument(
         "--sentence-audio-voice",
         default=cfg.get("sentence_audio_voice", DEFAULT_SENTENCE_AUDIO_VOICE),
-        help=f"edge-tts voice for sentence audio (default: {DEFAULT_SENTENCE_AUDIO_VOICE}).",
+        help=f"edge-tts voice for sentence audio fallback (default: {DEFAULT_SENTENCE_AUDIO_VOICE}).",
+    )
+    parser.add_argument(
+        "--sentence-tts-engine",
+        choices=["auto", "voicevox", "edge"],
+        default=cfg.get("sentence_tts_engine", "auto"),
+        help="Sentence TTS engine: auto (VOICEVOX then edge-tts), voicevox, or edge (default: auto).",
+    )
+    parser.add_argument(
+        "--voicevox-engine-url",
+        default=cfg.get("voicevox_engine_url", "http://127.0.0.1:50021"),
+        help="VOICEVOX HTTP API base URL (default: http://127.0.0.1:50021).",
+    )
+    parser.add_argument(
+        "--voicevox-speaker-id",
+        type=int,
+        default=cfg.get("voicevox_speaker_id", 3),
+        help="VOICEVOX speaker/style id (default: 3).",
     )
     parser.add_argument(
         "--refresh-sentence-audio",
@@ -6812,7 +7065,7 @@ def run_standalone_grammar_deck(args: argparse.Namespace, output_dir: Path) -> N
         grammar_cards,
         output_dir,
         sentence_audio=args.grammar_sentence_audio,
-        sentence_audio_voice=args.sentence_audio_voice,
+        sentence_tts_config=build_sentence_tts_config(args),
         refresh_sentence_audio=args.refresh_sentence_audio,
     )
     bundle_path: Optional[Path] = None
@@ -6951,7 +7204,11 @@ def main() -> None:
             )
             core_assignment_index = assignment_by_subject_id(core_assignments)
     core_radical_items = radical_subjects(subjects, args) if "core-radical" in wanted else []
-    core_kanji_items = all_wk_kanji_subjects(subjects, args) if "core-kanji" in wanted else []
+    core_kanji_items = (
+        all_wk_kanji_subjects(subjects, args)
+        if "core-kanji" in wanted or "kanji-meaning" in wanted
+        else []
+    )
     core_vocab_items: List[dict] = []
     if "core-vocabulary" in wanted:
         from core_decks import all_core_vocab_subjects
@@ -7073,6 +7330,24 @@ def main() -> None:
             min_srs=supplementary_min_srs(args, args.dictation_min_srs),
             voice_actor=args.dictation_voice,
         )
+    kanji_meaning_items = []
+    if "kanji-meaning" in wanted:
+        from kanji_meaning_decks import collect_kanji_meaning_items
+
+        kanji_meaning_items = collect_kanji_meaning_items(
+            core_kanji_items,
+            indexes["assignments"],
+            min_srs=supplementary_min_srs(args, args.kanji_meaning_min_srs),
+        )
+    vocab_sentence_items = []
+    if "vocab-sentence-meaning" in wanted or "vocab-sentence-reading" in wanted:
+        from vocab_sentence_decks import collect_vocab_sentence_items
+
+        vocab_sentence_items = collect_vocab_sentence_items(
+            vocab_items,
+            indexes["assignments"],
+            min_srs=supplementary_min_srs(args, args.vocab_sentence_min_srs),
+        )
     rendaku_items = []
     if "rendaku" in wanted:
         from rendaku_decks import collect_rendaku_items
@@ -7085,7 +7360,12 @@ def main() -> None:
             max_level=args.max_level,
         )
     core_priority_index: Dict[int, object] = {}
-    if "core-radical" in wanted or "core-kanji" in wanted or "core-vocabulary" in wanted:
+    if (
+        "core-radical" in wanted
+        or "core-kanji" in wanted
+        or "core-vocabulary" in wanted
+        or "kanji-meaning" in wanted
+    ):
         from wk_study_priority import build_core_priority_index, write_study_priority_json
 
         core_priority_index = build_core_priority_index(
@@ -7138,6 +7418,20 @@ def main() -> None:
             f"Dictation: {len(dictation_items)} "
             f"(min SRS {args.dictation_min_srs}, voice={args.dictation_voice})"
         )
+    if kanji_meaning_items:
+        print(f"Kanji meaning anchor: {len(kanji_meaning_items)} (min SRS {args.kanji_meaning_min_srs})")
+    if vocab_sentence_items:
+        from wk_sentence_tts import format_sentence_tts_label
+
+        audio_note = (
+            format_sentence_tts_label(build_sentence_tts_config(args))
+            if args.vocab_sentence_sentence_audio
+            else "off"
+        )
+        print(
+            f"Vocab sentence decks: {len(vocab_sentence_items)} "
+            f"(min SRS {args.vocab_sentence_min_srs}, sentence audio: {audio_note})"
+        )
     if rendaku_items:
         print(f"Rendaku: {len(rendaku_items)} (min SRS {args.rendaku_min_srs})")
     if "mining" in wanted:
@@ -7151,6 +7445,7 @@ def main() -> None:
     if args.bootstrap_wk_scheduling and core_wanted:
         print("WK scheduling bootstrap: enabled for core decks")
     print(f"Pitch entries loaded: {len(pitch_index)}")
+    print_sentence_tts_summary(args)
     if args.dry_run:
         would_bundle = deck_names_for_run(
             wanted,
@@ -7169,6 +7464,8 @@ def main() -> None:
             vocab_cloze_items=vocab_cloze_items,
             grammar_card_count=len(grammar_cards),
             dictation_item_count=len(dictation_items),
+            kanji_meaning_item_count=len(kanji_meaning_items),
+            vocab_sentence_item_count=len(vocab_sentence_items),
             rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,
             kanji_contrast_resolved=kanji_contrast_resolved,
@@ -7198,6 +7495,8 @@ def main() -> None:
                 vocab_cloze_items=vocab_cloze_items,
                 grammar_card_count=len(grammar_cards),
                 dictation_item_count=len(dictation_items),
+                kanji_meaning_item_count=len(kanji_meaning_items),
+                vocab_sentence_item_count=len(vocab_sentence_items),
                 rendaku_item_count=len(rendaku_items),
                 pitch_index=pitch_index,
                 bundled_deck_names=would_bundle,
@@ -7222,6 +7521,8 @@ def main() -> None:
             vocab_cloze_items=vocab_cloze_items,
             grammar_cards=grammar_cards,
             dictation_items=dictation_items,
+            kanji_meaning_items=kanji_meaning_items,
+            vocab_sentence_items=vocab_sentence_items,
             rendaku_items=rendaku_items,
             radical_items=radical_items,
             preview_levels=preview_levels,
@@ -7233,6 +7534,7 @@ def main() -> None:
         return
     created: List[Path] = []
     built_decks: List[genanki.Deck] = []
+    sentence_tts_config = build_sentence_tts_config(args)
     bundled_media_files: List[str] = []
     if core_wanted:
         from core_decks import build_core_kanji_deck, build_core_radical_deck, build_core_vocab_deck
@@ -7243,6 +7545,7 @@ def main() -> None:
             "reading_audio": bool(args.reading_audio),
             "wk_voice": args.reading_voice,
             "tts_voice": args.sentence_audio_voice,
+            "tts_config": sentence_tts_config,
             "refresh_reading_audio": bool(args.refresh_reading_audio),
         }
         if "core-radical" in wanted and core_radical_items:
@@ -7299,6 +7602,7 @@ def main() -> None:
             output_dir,
             reading_audio=bool(args.reading_audio),
             wk_voice=args.reading_voice,
+            tts_config=sentence_tts_config,
             tts_voice=args.sentence_audio_voice,
             refresh_reading_audio=bool(args.refresh_reading_audio),
         )
@@ -7356,6 +7660,7 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            tts_config=sentence_tts_config,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7366,6 +7671,7 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            tts_config=sentence_tts_config,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7376,6 +7682,7 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            tts_config=sentence_tts_config,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7386,6 +7693,7 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            tts_config=sentence_tts_config,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7396,6 +7704,7 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            tts_config=sentence_tts_config,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7407,7 +7716,7 @@ def main() -> None:
             output_dir,
             vocab_reading_index=vocab_reading_index,
             sentence_audio=args.sentence_audio,
-            sentence_audio_voice=args.sentence_audio_voice,
+            sentence_tts_config=sentence_tts_config,
             refresh_sentence_audio=args.refresh_sentence_audio,
             interval_map=srs_interval_map,
         )
@@ -7421,7 +7730,7 @@ def main() -> None:
             grammar_cards,
             output_dir,
             sentence_audio=args.grammar_sentence_audio,
-            sentence_audio_voice=args.sentence_audio_voice,
+            sentence_tts_config=sentence_tts_config,
             refresh_sentence_audio=args.refresh_sentence_audio,
         )
         created.append(path)
@@ -7441,6 +7750,56 @@ def main() -> None:
         created.append(path)
         built_decks.append(deck)
         bundled_media_files.extend(media)
+    if "kanji-meaning" in wanted and kanji_meaning_items:
+        from kanji_meaning_decks import build_kanji_meaning_deck
+
+        path, deck = build_kanji_meaning_deck(
+            kanji_meaning_items,
+            output_dir,
+            indexes["assignments"],
+            interval_map=srs_interval_map,
+        )
+        created.append(path)
+        built_decks.append(deck)
+    if vocab_sentence_items and args.vocab_sentence_sentence_audio and (
+        "vocab-sentence-meaning" in wanted or "vocab-sentence-reading" in wanted
+    ):
+        from vocab_sentence_decks import collect_vocab_sentence_tts_texts
+
+        prefetch_sentence_audio_texts(
+            collect_vocab_sentence_tts_texts(vocab_sentence_items),
+            sentence_tts_config,
+            refresh=bool(args.refresh_sentence_audio),
+            label="Vocab sentence audio",
+        )
+    if "vocab-sentence-meaning" in wanted and vocab_sentence_items:
+        from vocab_sentence_decks import build_vocab_sentence_meaning_deck
+
+        path, deck, media = build_vocab_sentence_meaning_deck(
+            vocab_sentence_items,
+            output_dir,
+            indexes["assignments"],
+            sentence_audio=bool(args.vocab_sentence_sentence_audio),
+            sentence_tts_config=sentence_tts_config,
+            refresh_sentence_audio=False,
+        )
+        created.append(path)
+        built_decks.append(deck)
+        bundled_media_files.extend(media)
+    if "vocab-sentence-reading" in wanted and vocab_sentence_items:
+        from vocab_sentence_decks import build_vocab_sentence_reading_deck
+
+        path, deck, media = build_vocab_sentence_reading_deck(
+            vocab_sentence_items,
+            output_dir,
+            indexes["assignments"],
+            sentence_audio=bool(args.vocab_sentence_sentence_audio),
+            sentence_tts_config=sentence_tts_config,
+            refresh_sentence_audio=False,
+        )
+        created.append(path)
+        built_decks.append(deck)
+        bundled_media_files.extend(media)
     if "rendaku" in wanted and rendaku_items:
         from rendaku_decks import build_rendaku_deck
 
@@ -7449,6 +7808,7 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            tts_config=sentence_tts_config,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7467,6 +7827,7 @@ def main() -> None:
             output_dir,
             reading_audio=bool(args.reading_audio),
             wk_voice=args.reading_voice,
+            tts_config=sentence_tts_config,
             tts_voice=args.sentence_audio_voice,
             refresh_reading_audio=bool(args.refresh_reading_audio),
         )
@@ -7500,6 +7861,8 @@ def main() -> None:
                 vocab_cloze_items=vocab_cloze_items,
                 grammar_card_count=len(grammar_cards),
                 dictation_item_count=len(dictation_items),
+                kanji_meaning_item_count=len(kanji_meaning_items),
+                vocab_sentence_item_count=len(vocab_sentence_items),
                 rendaku_item_count=len(rendaku_items),
                 pitch_index=pitch_index,
                 bundled_deck_names=[],
@@ -7555,6 +7918,8 @@ def main() -> None:
             vocab_cloze_items=vocab_cloze_items,
             grammar_card_count=len(grammar_cards),
             dictation_item_count=len(dictation_items),
+            kanji_meaning_item_count=len(kanji_meaning_items),
+            vocab_sentence_item_count=len(vocab_sentence_items),
             rendaku_item_count=len(rendaku_items),
             pitch_index=pitch_index,
             bundled_deck_names=[deck.name for deck in built_decks],

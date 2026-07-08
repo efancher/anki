@@ -33,14 +33,14 @@ from wk_decks import (
     WkModel,
     apply_wk_paren_readings,
     ensure_sentence_audio_file,
-    require_edge_tts,
     stable_guid,
-    tts_audio_basename,
+    tts_audio_basename_for_config,
     WK_SHARED_MEDIA_SUBDIR,
     strip_html,
     versioned_css,
     write_apkg,
 )
+from wk_sentence_tts import SentenceTtsConfig, require_sentence_tts
 
 HANABIRA_GRAMMAR_CACHE_DIR = CACHE_DIR / "hanabira_grammar"
 GRAMMAR_MEDIA_SUBDIR = "media/grammar_cloze"
@@ -419,9 +419,11 @@ def build_grammar_deck(
     output_dir: Path,
     *,
     sentence_audio: bool = True,
+    sentence_tts_config: Optional[SentenceTtsConfig] = None,
     sentence_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh_sentence_audio: bool = False,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
+    tts_config = sentence_tts_config or SentenceTtsConfig.edge_only(sentence_audio_voice)
     deck = genanki.Deck(GRAMMAR_DECK_ID, GRAMMAR_DECK_NAME)
     model = make_grammar_model()
     template_label = GRAMMAR_TEMPLATE_VERSION
@@ -431,8 +433,8 @@ def build_grammar_deck(
     audio_cached = 0
     audio_new = 0
     if sentence_audio:
-        require_edge_tts()
-        print(f"Grammar sentence audio (voice={sentence_audio_voice})...")
+        require_sentence_tts(tts_config)
+        print(f"Grammar sentence audio (engine={tts_config.engine})...")
     for item in cards:
         guid = stable_guid("grammar", item.point_id)
         meta = (
@@ -442,12 +444,12 @@ def build_grammar_deck(
         sentence_audio_field = ""
         if sentence_audio:
             tts_text = prepare_grammar_sentence_for_tts(item.full_sentence)
-            basename = tts_audio_basename(tts_text, sentence_audio_voice)
+            basename = tts_audio_basename_for_config(tts_text, tts_config)
             if basename:
                 dest = media_dir / basename
                 ok, was_cached = ensure_sentence_audio_file(
                     tts_text,
-                    sentence_audio_voice,
+                    tts_config,
                     dest,
                     refresh=refresh_sentence_audio,
                 )
@@ -492,7 +494,7 @@ def build_grammar_deck(
         if cards and audio_ok == 0:
             print(
                 "  Warning: no grammar sentence audio was generated. "
-                "Install edge-tts, check network, or pass --no-grammar-sentence-audio to skip.",
+                "Install edge-tts, start VOICEVOX, check network, or pass --no-grammar-sentence-audio to skip.",
                 file=sys.stderr,
             )
     deck.wk_media_files = media_files

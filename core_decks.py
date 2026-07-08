@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import genanki
+
+if TYPE_CHECKING:
+    from wk_sentence_tts import SentenceTtsConfig
 
 from wk_decks import (
     COMMON_CSS,
@@ -367,6 +370,7 @@ def _populate_core_item_deck(
     wk_voice: str,
     tts_voice: str,
     refresh_reading_audio: bool,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
 ) -> Dict[str, WkCardScheduleSpec]:
@@ -376,7 +380,13 @@ def _populate_core_item_deck(
     audio_ok = 0
 
     if reading_audio:
-        print(f"Reading audio (vocab: WK {wk_voice}, kanji: TTS {tts_voice})...")
+        from wk_reading_audio import resolve_tts_config
+        from wk_sentence_tts import format_sentence_tts_label
+
+        config = resolve_tts_config(tts_config, tts_voice=tts_voice)
+        print(
+            f"Reading audio (vocab: WK {wk_voice}, kanji: {format_sentence_tts_label(config)})..."
+        )
 
     progress = ReadingAudioProgressBar(len(items), label="Reading audio", enabled=reading_audio)
 
@@ -387,6 +397,7 @@ def _populate_core_item_deck(
                 subject,
                 media_dir,
                 wk_voice=wk_voice,
+                tts_config=tts_config,
                 tts_voice=tts_voice,
                 refresh=refresh_reading_audio,
             )
@@ -433,6 +444,7 @@ def build_core_kanji_deck(
     reading_audio: bool = True,
     wk_voice: str = DEFAULT_WK_READING_VOICE,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     refresh_reading_audio: bool = False,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
@@ -460,6 +472,7 @@ def build_core_kanji_deck(
         reading_audio=reading_audio,
         wk_voice=wk_voice,
         tts_voice=tts_voice,
+        tts_config=tts_config,
         refresh_reading_audio=refresh_reading_audio,
         priority_index=priority_index,
         include_grammar_role_tags=include_grammar_role_tags,
@@ -485,6 +498,7 @@ def build_core_vocab_deck(
     reading_audio: bool = True,
     wk_voice: str = DEFAULT_WK_READING_VOICE,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     refresh_reading_audio: bool = False,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
@@ -512,6 +526,7 @@ def build_core_vocab_deck(
         reading_audio=reading_audio,
         wk_voice=wk_voice,
         tts_voice=tts_voice,
+        tts_config=tts_config,
         refresh_reading_audio=refresh_reading_audio,
         priority_index=priority_index,
         include_grammar_role_tags=include_grammar_role_tags,

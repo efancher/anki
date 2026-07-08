@@ -82,6 +82,17 @@
       "title": "Stab, sky, sharpen",
       "kanji": ["刺", "空", "研"],
       "note": "研 = sharpen/grind (appears in 研究 research)."
+    },
+    {
+      "id": "elephant-pig-statue-house",
+      "title": "Elephant, pig, statue, House",
+      "kanji": ["象", "豚", "像", "家"]
+    },
+    {
+      "id": "pass through week",
+      "title": "pass through, week",
+      "kanji": ["週", "道", "通", "返"]
     }
+
   ]
 }

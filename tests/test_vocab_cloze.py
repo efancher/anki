@@ -25,6 +25,7 @@ from wk_decks import (
     select_vocab_cloze_sentence,
     sentence_audio_cache_key,
     sentence_audio_cache_path,
+    unique_sentence_audio_texts,
     vocab_cloze_audio_basename,
     vocab_cloze_blank_targets,
     vocab_cloze_form_hint,
@@ -140,6 +141,12 @@ class VocabClozeTests(unittest.TestCase):
             sentence_audio_cache_key("猫が好きです。", "ja-JP-NanamiNeural"),
         )
 
+    def test_unique_sentence_audio_texts_dedupes(self) -> None:
+        self.assertEqual(
+            unique_sentence_audio_texts(["本を読みます。", "本を読みます。", "  "]),
+            ["本を読みます。"],
+        )
+
     def test_vocab_cloze_audio_basename(self) -> None:
         self.assertEqual(vocab_cloze_audio_basename(2467), "wk_vocab_cloze_2467.mp3")
 
@@ -177,13 +184,14 @@ class VocabClozeTests(unittest.TestCase):
             dest.parent.rmdir()
 
     def test_ensure_sentence_audio_file_regenerates_empty_cache(self) -> None:
-        with mock.patch("wk_decks.generate_sentence_audio_cache") as generate:
+        with mock.patch("wk_sentence_tts.synthesize_sentence_audio_cache") as synthesize:
 
-            def write_fake(_text: str, _voice: str, path: Path) -> None:
+            def write_fake(_text, _config, path: Path, *, engine: str) -> bool:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"fake-mp3")
+                return True
 
-            generate.side_effect = write_fake
+            synthesize.side_effect = write_fake
             cache_path = sentence_audio_cache_path("私は学生だ。", "ja-JP-NanamiNeural")
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_bytes(b"")
@@ -193,7 +201,7 @@ class VocabClozeTests(unittest.TestCase):
             ok, was_cached = ensure_sentence_audio_file("私は学生だ。", "ja-JP-NanamiNeural", dest)
             self.assertEqual((ok, was_cached), (True, False))
             self.assertTrue(dest.is_file())
-            generate.assert_called_once()
+            synthesize.assert_called_once()
             dest.unlink()
             dest.parent.rmdir()
 

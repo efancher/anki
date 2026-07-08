@@ -114,10 +114,13 @@ class WkReadingAudioTests(unittest.TestCase):
         media_dir = REPO_ROOT / "out" / "test_reading_media_kanji"
         reading = "おも"
         with mock.patch("wk_reading_audio.ensure_kanji_reading_audio_file", return_value=(True, False)) as mock_tts:
-            field, paths = prepare_reading_audio_field(mock_kanji(reading), media_dir)
+            with mock.patch(
+                "wk_reading_audio.tts_audio_basename_for_config",
+                return_value="wk_tts_abc123.mp3",
+            ):
+                field, paths = prepare_reading_audio_field(mock_kanji(reading), media_dir)
         mock_tts.assert_called_once()
-        expected = reading_audio_basename(mock_kanji(reading), "Kyoko", "mp3", reading=reading)
-        self.assertEqual(field, f"[sound:{expected}]")
+        self.assertEqual(field, "[sound:wk_tts_abc123.mp3]")
         self.assertEqual(len(paths), 1)
 
     def test_prepare_reading_audio_field_kanji_multiple_readings(self) -> None:

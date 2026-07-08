@@ -116,6 +116,16 @@ def collect_core_unlock_notes() -> List[NoteUnlockState]:
     return notes
 
 
+def collect_kanji_meaning_unlock_notes() -> List[NoteUnlockState]:
+    notes: List[NoteUnlockState] = []
+    for note in mw.col.find_notes("tag:kanji-meaning"):
+        model_note = mw.col.get_note(note)
+        state = _note_unlock_state(model_note)
+        if state is not None:
+            notes.append(state)
+    return notes
+
+
 def collect_supplementary_unlock_notes() -> List[NoteUnlockState]:
     notes: List[NoteUnlockState] = []
     for note in mw.col.find_notes("tag:wk-locked -tag:wk-core"):
@@ -155,10 +165,18 @@ def run_unlock_pass(*, quiet: bool = False) -> Tuple[int, int]:
 
     config = load_unlock_config()
     core_notes = collect_core_unlock_notes()
+    kanji_meaning_notes = collect_kanji_meaning_unlock_notes()
     supplementary_notes = collect_supplementary_unlock_notes()
     mature_ids = build_mature_subject_ids(core_notes, config=config)
+    kanji_meaning_mature_ids = build_mature_subject_ids(kanji_meaning_notes, config=config)
     actions = unlock_actions_for_notes(core_notes, config=config, mature_subject_ids=mature_ids)
-    actions.extend(supplementary_unlock_actions_for_notes(supplementary_notes, mature_ids))
+    actions.extend(
+        supplementary_unlock_actions_for_notes(
+            supplementary_notes,
+            core_mature_subject_ids=mature_ids,
+            kanji_meaning_mature_subject_ids=kanji_meaning_mature_ids,
+        )
+    )
     unlocked = 0
     for action in actions:
         apply_unlock_action(action)

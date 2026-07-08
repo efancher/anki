@@ -20,6 +20,7 @@ from wk_decks import (
     DEFAULT_GENERATE_DECKS,
     decks_need_wk_review_statistics,
     load_wk_deck_config,
+    normalize_wanted_decks,
     parse_args,
     parser_defaults_from_config,
     wanted_decks,
@@ -28,6 +29,22 @@ from wk_decks import (
 
 
 class WkDeckConfigTests(unittest.TestCase):
+    def test_parser_defaults_from_config_maps_sentence_tts_section(self) -> None:
+        defaults = parser_defaults_from_config(
+            {
+                "sentence_tts": {
+                    "engine": "voicevox",
+                    "voicevox_engine_url": "http://localhost:50021",
+                    "voicevox_speaker_id": 8,
+                    "edge_tts_voice": "ja-JP-KeitaNeural",
+                },
+            }
+        )
+        self.assertEqual(defaults["sentence_tts_engine"], "voicevox")
+        self.assertEqual(defaults["voicevox_engine_url"], "http://localhost:50021")
+        self.assertEqual(defaults["voicevox_speaker_id"], 8)
+        self.assertEqual(defaults["sentence_audio_voice"], "ja-JP-KeitaNeural")
+
     def test_parser_defaults_from_config_maps_grammar_section(self) -> None:
         defaults = parser_defaults_from_config(
             {
@@ -160,7 +177,7 @@ class WkDeckConfigTests(unittest.TestCase):
         args = parse_args([])
         args.deck = "all"
         args.generate_decks = None
-        self.assertEqual(wanted_decks(args), set(DEFAULT_GENERATE_DECKS))
+        self.assertEqual(wanted_decks(args), normalize_wanted_decks(set(DEFAULT_GENERATE_DECKS)))
 
 
 if __name__ == "__main__":

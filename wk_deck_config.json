@@ -11,6 +11,8 @@
     "adjective-types",
     "vocab-cloze",
     "dictation",
+    "kanji-meaning",
+    "vocab-sentence",
     "grammar",
     "mining"
   ],
@@ -32,6 +34,19 @@
   "dictation": {
     "min_srs": 7,
     "voice": "Kyoko"
+  },
+  "kanji_meaning": {
+    "min_srs": 5
+  },
+  "vocab_sentence": {
+    "min_srs": 7,
+    "sentence_audio": true
+  },
+  "sentence_tts": {
+    "engine": "auto",
+    "voicevox_engine_url": "http://127.0.0.1:50021",
+    "voicevox_speaker_id": 3,
+    "edge_tts_voice": "ja-JP-NanamiNeural"
   },
   "fetch_wk_review_statistics": false,
   "core": {

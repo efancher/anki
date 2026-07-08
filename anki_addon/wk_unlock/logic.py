@@ -152,9 +152,15 @@ def unlock_actions_for_notes(
 
 def supplementary_unlock_actions_for_notes(
     notes: Sequence[NoteUnlockState],
-    mature_subject_ids: Set[int],
+    *,
+    core_mature_subject_ids: Set[int],
+    kanji_meaning_mature_subject_ids: Set[int],
 ) -> List[UnlockAction]:
-    """Unsuspend supplementary notes when their linked WkSubjectId is mature in core."""
+    """Unsuspend supplementary notes when their unlock prereqs are mature.
+
+    Notes with PrerequisiteIds unlock when those kanji are Guru+ in Kanji Meaning
+    Anchor. Other supplementary notes unlock when their WkSubjectId is mature in core.
+    """
     actions: List[UnlockAction] = []
     for note in notes:
         if WK_CORE_TAG in note.tags:
@@ -162,12 +168,16 @@ def supplementary_unlock_actions_for_notes(
         if note.wk_subject_id is None:
             continue
         tag_set = set(note.tags)
-        waiting_on_core = WK_LOCKED_TAG in tag_set or any(
+        waiting_on_lock = WK_LOCKED_TAG in tag_set or any(
             card.queue == ANKI_QUEUE_SUSPENDED for card in note.cards
         )
-        if not waiting_on_core:
+        if not waiting_on_lock:
             continue
-        if note.wk_subject_id not in mature_subject_ids:
+        if note.prerequisite_ids:
+            deps_met = prerequisites_met(note.prerequisite_ids, kanji_meaning_mature_subject_ids)
+        else:
+            deps_met = note.wk_subject_id in core_mature_subject_ids
+        if not deps_met:
             continue
         add_tags: List[str] = []
         remove_tags: List[str] = []

@@ -2,7 +2,7 @@
 wk_reading_audio.py
 
 Reading pronunciation for Anki cards: WaniKani native audio for vocabulary,
-edge-tts for kanji readings (WK has no kanji pronunciation clips).
+VOICEVOX/edge-tts for kanji readings and other paths without WK pronunciation clips.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional, TextIO, Tuple
+from typing import TYPE_CHECKING, List, Optional, TextIO, Tuple
 
 import requests
 
@@ -22,8 +22,11 @@ from wk_decks import (
     ensure_sentence_audio_file,
     first_reading,
     primary_readings,
-    tts_audio_basename,
+    tts_audio_basename_for_config,
 )
+
+if TYPE_CHECKING:
+    from wk_sentence_tts import SentenceTtsConfig
 
 PRONUNCIATION_AUDIO_CACHE_DIR = CACHE_DIR / "pronunciation_audio"
 DEFAULT_WK_READING_VOICE = "Kyoko"
@@ -304,6 +307,18 @@ def ensure_pronunciation_audio_file(
         return False, False
 
 
+def resolve_tts_config(
+    tts_config: Optional["SentenceTtsConfig"] = None,
+    *,
+    tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
+) -> "SentenceTtsConfig":
+    from wk_sentence_tts import SentenceTtsConfig
+
+    if tts_config is not None:
+        return tts_config
+    return SentenceTtsConfig.edge_only(tts_voice)
+
+
 def reading_tts_text(subject: dict) -> str:
     """Kana text for kanji TTS (first primary reading)."""
     readings = kanji_tts_readings(subject)
@@ -315,12 +330,14 @@ def ensure_kanji_reading_audio_file(
     reading: str,
     dest_path: Path,
     *,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh: bool = False,
 ) -> Tuple[bool, bool]:
     if not reading:
         return False, False
-    return ensure_sentence_audio_file(reading, tts_voice, dest_path, refresh=refresh)
+    config = resolve_tts_config(tts_config, tts_voice=tts_voice)
+    return ensure_sentence_audio_file(reading, config, dest_path, refresh=refresh)
 
 
 def ensure_reading_audio_for_subject(
@@ -328,6 +345,7 @@ def ensure_reading_audio_for_subject(
     dest_path: Path,
     *,
     wk_voice: str = DEFAULT_WK_READING_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh: bool = False,
 ) -> Tuple[bool, bool]:
@@ -348,6 +366,7 @@ def ensure_reading_audio_for_subject(
             subject,
             text,
             dest_path,
+            tts_config=tts_config,
             tts_voice=tts_voice,
             refresh=refresh,
         )
@@ -359,6 +378,7 @@ def prepare_reading_audio_field(
     media_dir: Path,
     *,
     wk_voice: str = DEFAULT_WK_READING_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh: bool = False,
 ) -> Tuple[str, List[str]]:
@@ -397,14 +417,17 @@ def prepare_reading_audio_field(
 
     sound_tags: List[str] = []
     media_paths: List[str] = []
+    config = resolve_tts_config(tts_config, tts_voice=tts_voice)
     for reading in kanji_tts_readings(subject):
-        basename = reading_audio_basename(subject, wk_voice, "mp3", reading=reading)
+        basename = tts_audio_basename_for_config(reading, config)
+        if not basename:
+            continue
         dest = media_dir / basename
         ok, _was_cached = ensure_kanji_reading_audio_file(
             subject,
             reading,
             dest,
-            tts_voice=tts_voice,
+            tts_config=config,
             refresh=refresh,
         )
         if not ok:
@@ -420,12 +443,13 @@ def prepare_kana_reading_audio_field(
     *,
     vocab: Optional[dict] = None,
     wk_voice: str = DEFAULT_WK_READING_VOICE,
+    tts_config: Optional["SentenceTtsConfig"] = None,
     tts_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
     refresh: bool = False,
 ) -> Tuple[str, List[str]]:
     """
     Audio for a single kana reading on drill cards.
-    Uses WK native vocabulary audio when available; otherwise edge-tts.
+    Uses WK native vocabulary audio when available; otherwise VOICEVOX/edge-tts.
     """
     plain = (reading or "").strip()
     if not plain:
@@ -456,9 +480,12 @@ def prepare_kana_reading_audio_field(
             if ok:
                 return f"[sound:{basename}]", [str(dest.resolve())]
 
-    basename = tts_audio_basename(plain, tts_voice)
+    config = resolve_tts_config(tts_config, tts_voice=tts_voice)
+    basename = tts_audio_basename_for_config(plain, config)
+    if not basename:
+        return "", []
     dest = media_dir / basename
-    ok, _was_cached = ensure_sentence_audio_file(plain, tts_voice, dest, refresh=refresh)
+    ok, _was_cached = ensure_sentence_audio_file(plain, config, dest, refresh=refresh)
     if not ok:
         return "", []
     return f"[sound:{basename}]", [str(dest.resolve())]

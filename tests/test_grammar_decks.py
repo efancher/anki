@@ -220,7 +220,7 @@ class GrammarDeckTests(unittest.TestCase):
         self.assertIn("{{#SentenceAudio}}", template["afmt"])
 
     def test_build_grammar_deck_sentence_audio_default_on(self) -> None:
-        def fake_ensure(text: str, voice: str, dest: Path, *, refresh: bool = False):
+        def fake_ensure(text: str, voice_or_config, dest: Path, *, refresh: bool = False):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(b"fake-mp3")
             return True, True
@@ -228,7 +228,7 @@ class GrammarDeckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
             with mock.patch("grammar_decks.ensure_sentence_audio_file", side_effect=fake_ensure):
-                with mock.patch("grammar_decks.require_edge_tts"):
+                with mock.patch("grammar_decks.require_sentence_tts"):
                     _path, deck, media = build_grammar_deck([SAMPLE_GRAMMAR_CARD], output_dir)
             note = deck.notes[0]
             self.assertEqual(note.fields[3], "casual state-of-being")
@@ -256,7 +256,7 @@ class GrammarDeckTests(unittest.TestCase):
             self.assertEqual(media, [])
 
     def test_build_grammar_deck_standalone_apkg_bundles_sentence_audio(self) -> None:
-        def fake_ensure(text: str, voice: str, dest: Path, *, refresh: bool = False):
+        def fake_ensure(text: str, voice_or_config, dest: Path, *, refresh: bool = False):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(b"fake-mp3")
             return True, False
@@ -264,7 +264,7 @@ class GrammarDeckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
             with mock.patch("grammar_decks.ensure_sentence_audio_file", side_effect=fake_ensure):
-                with mock.patch("grammar_decks.require_edge_tts"):
+                with mock.patch("grammar_decks.require_sentence_tts"):
                     apkg_path, deck, media = build_grammar_deck([SAMPLE_GRAMMAR_CARD], output_dir)
             self.assertEqual(apkg_path.name, "wk_grammar.apkg")
             with zipfile.ZipFile(apkg_path) as zf:
@@ -277,7 +277,7 @@ class GrammarDeckTests(unittest.TestCase):
     def test_build_grammar_deck_bundles_sentence_audio_media(self) -> None:
         from wk_decks import BUNDLE_FILENAME, write_bundled_apkg
 
-        def fake_ensure(text: str, voice: str, dest: Path, *, refresh: bool = False):
+        def fake_ensure(text: str, voice_or_config, dest: Path, *, refresh: bool = False):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(b"fake-mp3")
             return True, False
@@ -285,7 +285,7 @@ class GrammarDeckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
             with mock.patch("grammar_decks.ensure_sentence_audio_file", side_effect=fake_ensure):
-                with mock.patch("grammar_decks.require_edge_tts"):
+                with mock.patch("grammar_decks.require_sentence_tts"):
                     _path, deck, media = build_grammar_deck([SAMPLE_GRAMMAR_CARD], output_dir)
             bundle_path = output_dir / BUNDLE_FILENAME
             write_bundled_apkg([deck], bundle_path, media_files=media or None)

@@ -25,6 +25,8 @@ from wk_decks import (
     prereq_filtered_deck_search,
     passes_progress_filter,
     supplementary_import_tags,
+    vocab_supplementary_import_tags,
+    vocab_kanji_prerequisite_ids,
     supplementary_min_srs,
 )
 from wk_scheduling import (
@@ -36,11 +38,15 @@ from wk_scheduling import (
 )
 
 
-def mock_vocab(vocab_id: int, *, level: int = 5) -> dict:
+def mock_vocab(vocab_id: int, *, level: int = 5, component_ids: list | None = None) -> dict:
     return {
         "id": vocab_id,
         "object": "vocabulary",
-        "data": {"characters": "本", "level": level},
+        "data": {
+            "characters": "本",
+            "level": level,
+            "component_subject_ids": component_ids if component_ids is not None else [10, 11],
+        },
     }
 
 
@@ -75,6 +81,15 @@ class WkSupplementaryGatingTests(unittest.TestCase):
         assignment_index = {42: {"data": {"subject_id": 42, "srs_stage": 1}}}
         tags = supplementary_import_tags(vocab, assignment_index)
         self.assertIn("wk-locked", tags)
+
+    def test_vocab_supplementary_import_tags_locks_when_kanji_prereqs(self) -> None:
+        vocab = mock_vocab(42, component_ids=[10, 11])
+        self.assertEqual(vocab_kanji_prerequisite_ids(vocab), "10,11")
+        self.assertIn("wk-locked", vocab_supplementary_import_tags(vocab))
+
+    def test_vocab_supplementary_import_tags_unlocked_for_kana_only_vocab(self) -> None:
+        vocab = mock_vocab(42, component_ids=[])
+        self.assertEqual(vocab_supplementary_import_tags(vocab), [])
 
     def test_supplementary_import_tags_omits_locked_when_mature(self) -> None:
         vocab = mock_vocab(42)
