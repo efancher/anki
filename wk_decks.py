@@ -274,7 +274,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "radical": "v5",
     "reading_keyword": "v3",
     "kanji_radical": "v2",
-    "phonetic_drill": "v5",
+    "phonetic_drill": "v7",
     "conjugation": "v6",
     "word_class": "v4",
     "vocab_cloze": "v8",
@@ -3864,6 +3864,7 @@ def make_phonetic_drill_model() -> WkModel:
             {"name": "PhoneticReadings"},
             {"name": "AnchorHtml"},
             {"name": "Meaning"},
+            {"name": "PrerequisiteIds"},
             {"name": "Meta"},
         ],
         templates=[
@@ -5304,6 +5305,7 @@ def build_phonetic_family_deck(
             *reading_tags,
         ]
         note_tags.extend(supplementary_import_tags(kanji, assignment_index, interval_map=stage_interval_map))
+        prereq_ids = ",".join(str(member["id"]) for member in family_members)
         note = genanki.Note(
             model=model,
             fields=[
@@ -5316,6 +5318,7 @@ def build_phonetic_family_deck(
                 html.escape(comp_readings),
                 anchor_html,
                 html.escape(meaning),
+                prereq_ids,
                 html.escape(meta),
             ],
             tags=note_tags,

@@ -26,6 +26,7 @@ from .logic import (
     UnlockAction,
     WkUnlockConfig,
     build_mature_subject_ids,
+    build_reviewed_once_subject_ids,
     mining_hint_updates_for_notes,
     parse_prerequisite_ids,
     supplementary_unlock_actions_for_notes,
@@ -98,7 +99,13 @@ def _note_unlock_state(note) -> Optional[NoteUnlockState]:
     cards: List[CardState] = []
     for card_id in note.card_ids():
         card = mw.col.get_card(card_id)
-        cards.append(CardState(ivl=int(card.ivl or 0), queue=int(card.queue)))
+        cards.append(
+            CardState(
+                ivl=int(card.ivl or 0),
+                queue=int(card.queue),
+                reps=int(card.reps or 0),
+            )
+        )
 
     return NoteUnlockState(
         note_id=int(note.id),
@@ -112,6 +119,16 @@ def _note_unlock_state(note) -> Optional[NoteUnlockState]:
 def collect_core_unlock_notes() -> List[NoteUnlockState]:
     notes: List[NoteUnlockState] = []
     for note in mw.col.find_notes("tag:wk-core"):
+        model_note = mw.col.get_note(note)
+        state = _note_unlock_state(model_note)
+        if state is not None:
+            notes.append(state)
+    return notes
+
+
+def collect_core_kanji_unlock_notes() -> List[NoteUnlockState]:
+    notes: List[NoteUnlockState] = []
+    for note in mw.col.find_notes("tag:wk-core tag:kanji"):
         model_note = mw.col.get_note(note)
         state = _note_unlock_state(model_note)
         if state is not None:
@@ -242,16 +259,21 @@ def run_unlock_pass(*, quiet: bool = False) -> Tuple[int, int]:
 
     config = load_unlock_config()
     core_notes = collect_core_unlock_notes()
+    core_kanji_notes = collect_core_kanji_unlock_notes()
     kanji_meaning_notes = collect_kanji_meaning_unlock_notes()
     supplementary_notes = collect_supplementary_unlock_notes()
     mature_ids = build_mature_subject_ids(core_notes, config=config)
     kanji_meaning_mature_ids = build_mature_subject_ids(kanji_meaning_notes, config=config)
+    reviewed_once_ids = build_reviewed_once_subject_ids(core_kanji_notes) | build_reviewed_once_subject_ids(
+        kanji_meaning_notes
+    )
     actions = unlock_actions_for_notes(core_notes, config=config, mature_subject_ids=mature_ids)
     actions.extend(
         supplementary_unlock_actions_for_notes(
             supplementary_notes,
             core_mature_subject_ids=mature_ids,
             kanji_meaning_mature_subject_ids=kanji_meaning_mature_ids,
+            core_reviewed_once_subject_ids=reviewed_once_ids,
         )
     )
     mining_notes = collect_mining_hint_notes()

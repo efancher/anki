@@ -171,6 +171,56 @@ class WkUnlockLogicTests(unittest.TestCase):
         )
         self.assertEqual(actions, [])
 
+    def test_phonetic_family_unlocks_when_any_family_kanji_reviewed_once(self) -> None:
+        phonetic = NoteUnlockState(
+            note_id=4,
+            wk_subject_id=200,
+            prerequisite_ids=(10, 20, 30),
+            tags=("wanikani", "phonetic-family", "phonetic-drill", "wk-locked"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        actions = supplementary_unlock_actions_for_notes(
+            [phonetic],
+            core_mature_subject_ids=set(),
+            kanji_meaning_mature_subject_ids=set(),
+            core_reviewed_once_subject_ids={20},
+        )
+        self.assertEqual(len(actions), 1)
+        self.assertTrue(actions[0].unsuspend)
+
+    def test_phonetic_family_stays_locked_until_family_kanji_reviewed_once(self) -> None:
+        phonetic = NoteUnlockState(
+            note_id=4,
+            wk_subject_id=200,
+            prerequisite_ids=(10, 20),
+            tags=("wanikani", "phonetic-family", "wk-locked"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        actions = supplementary_unlock_actions_for_notes(
+            [phonetic],
+            core_mature_subject_ids={200},
+            kanji_meaning_mature_subject_ids={10, 20},
+            core_reviewed_once_subject_ids=set(),
+        )
+        self.assertEqual(actions, [])
+
+    def test_build_reviewed_once_subject_ids(self) -> None:
+        seen = NoteUnlockState(
+            note_id=1,
+            wk_subject_id=10,
+            prerequisite_ids=(),
+            tags=("wk-core", "kanji"),
+            cards=(CardState(ivl=0, queue=1, reps=1),),
+        )
+        unseen = NoteUnlockState(
+            note_id=2,
+            wk_subject_id=20,
+            prerequisite_ids=(),
+            tags=("wk-core", "kanji"),
+            cards=(CardState(ivl=0, queue=0, reps=0),),
+        )
+        self.assertEqual(logic.build_reviewed_once_subject_ids([seen, unseen]), {10})
+
     def test_mining_hint_stage_one_when_kanji_mature(self) -> None:
         note = logic.MiningHintState(
             note_id=1,

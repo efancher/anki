@@ -16,6 +16,7 @@ WK_LOCKED_TAG = "wk-locked"
 WK_DEPS_MET_TAG = "wk-deps-met"
 WK_MATURE_TAG = "wk-mature"
 WK_CORE_TAG = "wk-core"
+PHONETIC_FAMILY_TAG = "phonetic-family"
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class WkUnlockConfig:
 class CardState:
     ivl: int
     queue: int
+    reps: int = 0
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,32 @@ def prerequisites_met(
     return all(prerequisite_id in mature_subject_ids for prerequisite_id in prerequisite_ids)
 
 
+def any_prerequisites_met(
+    prerequisite_ids: Sequence[int],
+    subject_ids: Set[int],
+) -> bool:
+    if not prerequisite_ids or not subject_ids:
+        return False
+    return any(prerequisite_id in subject_ids for prerequisite_id in prerequisite_ids)
+
+
+def subject_reviewed_once(cards: Sequence[CardState]) -> bool:
+    active = [card for card in cards if card.queue != ANKI_QUEUE_SUSPENDED]
+    if not active:
+        return False
+    return any(card.reps > 0 for card in active)
+
+
+def build_reviewed_once_subject_ids(notes: Sequence[NoteUnlockState]) -> Set[int]:
+    reviewed: Set[int] = set()
+    for note in notes:
+        if note.wk_subject_id is None:
+            continue
+        if subject_reviewed_once(note.cards):
+            reviewed.add(note.wk_subject_id)
+    return reviewed
+
+
 def unlock_actions_for_notes(
     notes: Sequence[NoteUnlockState],
     *,
@@ -155,12 +183,18 @@ def supplementary_unlock_actions_for_notes(
     *,
     core_mature_subject_ids: Set[int],
     kanji_meaning_mature_subject_ids: Set[int],
+    core_reviewed_once_subject_ids: Optional[Set[int]] = None,
 ) -> List[UnlockAction]:
     """Unsuspend supplementary notes when their unlock prereqs are mature.
 
-    Notes with PrerequisiteIds unlock when those kanji are Guru+ in Kanji Meaning
-    Anchor. Other supplementary notes unlock when their WkSubjectId is mature in core.
+    Phonetic-family notes unlock when any kanji in PrerequisiteIds has been reviewed
+    once (reps > 0) in core kanji or Kanji Meaning Anchor.
+
+    Other notes with PrerequisiteIds unlock when those kanji are Guru+ in Kanji
+    Meaning Anchor. Remaining supplementary notes unlock when WkSubjectId is mature
+    in core.
     """
+    reviewed_once_ids = core_reviewed_once_subject_ids or set()
     actions: List[UnlockAction] = []
     for note in notes:
         if WK_CORE_TAG in note.tags:
@@ -173,7 +207,9 @@ def supplementary_unlock_actions_for_notes(
         )
         if not waiting_on_lock:
             continue
-        if note.prerequisite_ids:
+        if PHONETIC_FAMILY_TAG in tag_set and note.prerequisite_ids:
+            deps_met = any_prerequisites_met(note.prerequisite_ids, reviewed_once_ids)
+        elif note.prerequisite_ids:
             deps_met = prerequisites_met(note.prerequisite_ids, kanji_meaning_mature_subject_ids)
         else:
             deps_met = note.wk_subject_id in core_mature_subject_ids
