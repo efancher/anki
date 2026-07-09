@@ -56,7 +56,8 @@ Optional file: **`out/wk_immersion_config.json`** (created on first use if missi
   "on_mine": true,
   "engine": "voicevox",
   "voicevox_engine_url": "http://127.0.0.1:50021",
-  "voicevox_speaker_id": 3,
+  "voicevox_speaker_id": 2,
+  "voicevox_volume_scale": 1.5,
   "edge_tts_voice": "ja-JP-NanamiNeural",
   "python_executable": ""
 }
@@ -68,7 +69,8 @@ Optional file: **`out/wk_immersion_config.json`** (created on first use if missi
 | `on_mine` | `true` | Synthesize when Yomitan adds a note |
 | `engine` | `voicevox` | `voicevox`, `edge`, or `auto` (try VOICEVOX, then edge-tts) |
 | `voicevox_engine_url` | `http://127.0.0.1:50021` | VOICEVOX HTTP API base URL |
-| `voicevox_speaker_id` | `3` | Numeric style id (see table below) |
+| `voicevox_speaker_id` | `2` | Numeric style id (see table below) |
+| `voicevox_volume_scale` | `1.5` | VOICEVOX `volumeScale` (1.0 = engine default; try 1.25–2.0) |
 | `edge_tts_voice` | `ja-JP-NanamiNeural` | Used when `engine` is `edge` or `auto` fallback |
 | `python_executable` | `""` | Path to Python for edge-tts; empty = `python3` on PATH |
 
@@ -78,14 +80,14 @@ After editing config, restart Anki (or use **Tools → WK Synthesize Immersion S
 
 ## Choosing a voice (speaker id)
 
-Default **`voicevox_speaker_id`: 3** = **ずんだもん** (Zundamon), normal style.
+Default **`voicevox_speaker_id`: 2** = **四国めたん** (Shikoku Metan), normal style.
 
 Common ids (VOICEVOX must be running to list all):
 
 | ID | Character | Style |
 |----|-----------|-------|
-| 3 | ずんだもん (Zundamon) | Normal — **default** |
-| 2 | 四国めたん (Shikoku Metan) | Normal |
+| 2 | 四国めたん (Shikoku Metan) | Normal — **default** |
+| 3 | ずんだもん (Zundamon) | Normal |
 | 8 | 春日部つむぎ (Kasukabe Tsumugi) | Normal |
 | 11 | 玄野武宏 (Genno Takehiro) | Normal (male) |
 | 13 | 青山龍星 (Aoyama Ryusei) | Normal (male) |

@@ -20,10 +20,13 @@ from aqt.utils import showInfo, showWarning, tooltip
 from .logic import (
     ANKI_QUEUE_SUSPENDED,
     CardState,
+    MiningHintState,
+    MiningHintUpdate,
     NoteUnlockState,
     UnlockAction,
     WkUnlockConfig,
     build_mature_subject_ids,
+    mining_hint_updates_for_notes,
     parse_prerequisite_ids,
     supplementary_unlock_actions_for_notes,
     unlock_actions_for_notes,
@@ -126,6 +129,80 @@ def collect_kanji_meaning_unlock_notes() -> List[NoteUnlockState]:
     return notes
 
 
+MINING_NOTE_TYPE = "WK Yomitan Immersion"
+FIELD_HINT_STAGE = "HintStage"
+FIELD_SHOW_ENGLISH = "ShowEnglish"
+FIELD_SHOW_KANA = "ShowKana"
+FIELD_SHOW_JJ_BACK = "ShowJjBack"
+FIELD_WK_SUBJECT_ID = "WkSubjectId"
+FIELD_PREREQUISITE_IDS = "PrerequisiteIds"
+
+
+def _mining_hint_state(note) -> Optional[MiningHintState]:
+    model = note.note_type()
+    if model["name"] != MINING_NOTE_TYPE:
+        return None
+    name_to_ord = {field["name"]: index for index, field in enumerate(model["flds"])}
+    if FIELD_HINT_STAGE not in name_to_ord:
+        return None
+
+    def field_value(name: str) -> str:
+        ord_index = name_to_ord.get(name)
+        if ord_index is None:
+            return ""
+        return note.fields[ord_index] or ""
+
+    subject_text = field_value(FIELD_WK_SUBJECT_ID).strip()
+    subject_id: Optional[int] = None
+    if subject_text:
+        try:
+            subject_id = int(subject_text)
+        except ValueError:
+            subject_id = None
+    hint_text = field_value(FIELD_HINT_STAGE).strip()
+    try:
+        hint_stage = int(hint_text) if hint_text else 0
+    except ValueError:
+        hint_stage = 0
+    return MiningHintState(
+        note_id=int(note.id),
+        wk_subject_id=subject_id,
+        prerequisite_ids=parse_prerequisite_ids(field_value(FIELD_PREREQUISITE_IDS)),
+        hint_stage=hint_stage,
+    )
+
+
+def collect_mining_hint_notes() -> List[MiningHintState]:
+    notes: List[MiningHintState] = []
+    for note_id in mw.col.find_notes("tag:yomitan-mining -tag:mining-setup"):
+        model_note = mw.col.get_note(note_id)
+        state = _mining_hint_state(model_note)
+        if state is not None:
+            notes.append(state)
+    return notes
+
+
+def apply_mining_hint_update(action: MiningHintUpdate) -> None:
+    note = mw.col.get_note(NoteId(action.note_id))
+    name_to_ord = {field["name"]: index for index, field in enumerate(note.note_type()["flds"])}
+    updates = {
+        FIELD_HINT_STAGE: action.hint_stage,
+        FIELD_SHOW_ENGLISH: action.show_english,
+        FIELD_SHOW_KANA: action.show_kana,
+        FIELD_SHOW_JJ_BACK: action.show_jj_back,
+    }
+    changed = False
+    for name, value in updates.items():
+        ord_index = name_to_ord.get(name)
+        if ord_index is None:
+            continue
+        if note.fields[ord_index] != value:
+            note.fields[ord_index] = value
+            changed = True
+    if changed:
+        mw.col.update_note(note)
+
+
 def collect_supplementary_unlock_notes() -> List[NoteUnlockState]:
     notes: List[NoteUnlockState] = []
     for note in mw.col.find_notes("tag:wk-locked -tag:wk-core"):
@@ -177,19 +254,32 @@ def run_unlock_pass(*, quiet: bool = False) -> Tuple[int, int]:
             kanji_meaning_mature_subject_ids=kanji_meaning_mature_ids,
         )
     )
+    mining_notes = collect_mining_hint_notes()
+    hint_updates = mining_hint_updates_for_notes(
+        mining_notes,
+        kanji_meaning_mature_subject_ids=kanji_meaning_mature_ids,
+        core_mature_subject_ids=mature_ids,
+    )
     unlocked = 0
     for action in actions:
         apply_unlock_action(action)
         if action.unsuspend:
             unlocked += 1
-    if actions:
+    hints_updated = 0
+    for hint_update in hint_updates:
+        apply_mining_hint_update(hint_update)
+        hints_updated += 1
+    if actions or hint_updates:
         mw.col.reset()
     if not quiet:
-        if actions:
-            tooltip(f"WK unlock: {unlocked} notes unsuspended, {len(actions)} notes updated.")
+        if actions or hint_updates:
+            tooltip(
+                f"WK unlock: {unlocked} unsuspended, {len(actions)} notes updated; "
+                f"{hints_updated} mining hint stages refreshed."
+            )
         else:
             tooltip("WK unlock: no changes.")
-    return unlocked, len(actions)
+    return unlocked, len(actions) + hints_updated
 
 
 def on_collection_did_load(col) -> None:

@@ -150,12 +150,15 @@ Copy `wk_immersion` into Anki's add-ons folder (or run `./scripts/sync_anki_addo
 ## At mine time
 
 1. Start **VOICEVOX** — see [docs/voicevox_setup.md](../docs/voicevox_setup.md) (English; no need to use VOICEVOX’s Japanese UI). Or set `"engine": "edge"` in `out/wk_immersion_config.json`.
-2. Mine with Yomitan **+** — the add-on fills **SentenceAudio** before the note is saved.
+2. Mine with Yomitan **+** — **wk_immersion** enriches cloze/WK fields and fills **SentenceAudio** before the note is saved.
 
 ## Backfill / CLI
 
+- **Tools → WK Enrich Mining Notes (cloze + WK links)** — backfill cloze blank, WK ids, hint flags on existing notes
 - **Tools → WK Synthesize Immersion Sentence Audio** — notes missing **SentenceAudio**
 - `python3 scripts/synthesize_immersion_sentence_audio.py` — via AnkiConnect (Anki must be open)
+
+Hint stages (English → kana-only → full J–J on back) update on **Tools → WK Run Unlock Pass** in **wk_unlock** (no suspend/lock).
 
 See [docs/yomitan_mining.md](../docs/yomitan_mining.md) and [docs/voicevox_setup.md](../docs/voicevox_setup.md).
 

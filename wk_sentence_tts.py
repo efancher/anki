@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Set, Tuple, Union
 
 DEFAULT_VOICEVOX_ENGINE_URL = "http://127.0.0.1:50021"
-DEFAULT_VOICEVOX_SPEAKER_ID = 3
+DEFAULT_VOICEVOX_SPEAKER_ID = 2  # 四国めたん (Shikoku Metan), normal style
+DEFAULT_VOICEVOX_VOLUME_SCALE = 1.5
 DEFAULT_EDGE_TTS_VOICE = "ja-JP-NanamiNeural"
 DEFAULT_SENTENCE_TTS_ENGINE = "auto"
 VOICEVOX_SYNTH_TIMEOUT_SECONDS = 45
@@ -34,6 +35,7 @@ class SentenceTtsConfig:
     engine: str = DEFAULT_SENTENCE_TTS_ENGINE  # voicevox | edge | auto
     voicevox_engine_url: str = DEFAULT_VOICEVOX_ENGINE_URL
     voicevox_speaker_id: int = DEFAULT_VOICEVOX_SPEAKER_ID
+    voicevox_volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE
     edge_tts_voice: str = DEFAULT_EDGE_TTS_VOICE
 
     @classmethod
@@ -45,6 +47,9 @@ class SentenceTtsConfig:
             ).rstrip("/"),
             voicevox_speaker_id=int(
                 payload.get("voicevox_speaker_id", DEFAULT_VOICEVOX_SPEAKER_ID)
+            ),
+            voicevox_volume_scale=float(
+                payload.get("voicevox_volume_scale", DEFAULT_VOICEVOX_VOLUME_SCALE)
             ),
             edge_tts_voice=str(payload.get("edge_tts_voice", DEFAULT_EDGE_TTS_VOICE)),
         )
@@ -66,7 +71,7 @@ def sentence_audio_cache_key(
 ) -> str:
     plain = strip_html(text).strip()
     voice_part = (
-        f"vv:{config.voicevox_speaker_id}"
+        f"vv:{config.voicevox_speaker_id}:{config.voicevox_volume_scale:g}"
         if engine == "voicevox"
         else config.edge_tts_voice
     )
@@ -127,11 +132,21 @@ def resolve_python_executable() -> Optional[str]:
     return shutil.which("python3") or shutil.which("python")
 
 
+def apply_voicevox_volume(audio_query: dict, volume_scale: float) -> dict:
+    """Set VOICEVOX volumeScale on an audio_query (1.0 = engine default)."""
+    if volume_scale == 1.0:
+        return audio_query
+    updated = dict(audio_query)
+    updated["volumeScale"] = float(volume_scale)
+    return updated
+
+
 def synthesize_voicevox_wav(
     text: str,
     *,
     engine_url: str,
     speaker_id: int,
+    volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
     timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     plain = strip_html(text).strip()
@@ -145,7 +160,10 @@ def synthesize_voicevox_wav(
     try:
         query_req = urllib.request.Request(query_url, data=b"", method="POST")
         with urllib.request.urlopen(query_req, timeout=timeout_seconds) as resp:
-            audio_query = json.loads(resp.read().decode("utf-8"))
+            audio_query = apply_voicevox_volume(
+                json.loads(resp.read().decode("utf-8")),
+                volume_scale,
+            )
         synth_url = f"{base}/synthesis?{urllib.parse.urlencode({'speaker': str(speaker_id)})}"
         body = json.dumps(audio_query).encode("utf-8")
         req = urllib.request.Request(
@@ -230,6 +248,7 @@ def synthesize_sentence_audio_cache(
             plain,
             engine_url=config.voicevox_engine_url,
             speaker_id=config.voicevox_speaker_id,
+            volume_scale=config.voicevox_volume_scale,
         )
         return bool(wav and _write_cache_file(cache_path, wav))
     if engine == "edge":

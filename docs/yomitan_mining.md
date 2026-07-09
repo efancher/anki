@@ -1,13 +1,15 @@
 # Yomitan immersion mining
 
-Mine vocabulary from reading (web, ebooks, Satori Reader, etc.) into Anki with **word on the front** and **full sentence + audio on the back**. Cards are **not** gated by WK progress — study them whenever you mine them.
+Mine vocabulary from reading (web, ebooks, Satori Reader, etc.) into Anki with **sentence cloze on the front** (type the word in kanji) and **full sentence + audio on the back**. Cards stay **unlocked** — hints fade as related kanji/vocab reach Guru+ in your WK core decks.
 
 ## What you get
 
 | Piece | Role |
 |-------|------|
 | **Immersion · Yomitan Mining** deck | Home deck for mined cards |
-| **WK Yomitan Immersion** note type | Recognition card; Yomitan sends notes here via AnkiConnect |
+| **WK Yomitan Immersion** note type | Sentence cloze + type-in; Yomitan sends notes here via AnkiConnect |
+| **wk_immersion** add-on | Cloze blank, WK links, hint flags, **SentenceAudio** at mine time |
+| **wk_unlock** add-on | **Tools → WK Run Unlock Pass** updates hint stages (no suspend) |
 | **UserNotes** field | Empty at mine time; personal mnemonics (katakana bridges, etc.) |
 | **Glossary / Synonyms / Antonyms** | J–J definition + thesaurus hooks on the card back (template **v9+**; see below) |
 | **WK::Immersion · Yomitan** filtered deck | Optional daily queue (install `wk_filtered_decks`, then **Tools → WK Setup Filtered Decks**) |
@@ -21,6 +23,8 @@ python wk_decks.py --deck mining
 ```
 
 Import `out/wk_mining.apkg` (or `out/wk_all.apkg` from a normal regen — **mining is included** in the default bundle). Choose **Update** when re-importing after template changes.
+
+Sync add-ons: `./scripts/sync_anki_addons.sh` → restart Anki.
 
 The export includes one **suspended** setup card so Anki creates the deck (empty decks are skipped on import). Delete it in Browse after your first real mine, or leave it suspended.
 
@@ -53,15 +57,15 @@ Also keep **Jitendex**, **Kanjium** (pitch), and **DOJG** from your existing set
 
 **Yomitan → Popup behavior:** enable **Allow scanning popup content** — you will look up words inside J–J definitions.
 
-### 4. Update the note type (template v9)
+### 4. Update the note type (template v10)
 
-If you already imported the mining deck, refresh the note type so **Synonyms** and **Antonyms** fields exist:
+If you already imported the mining deck, refresh the note type so cloze fields (**ClozeSentence**, **HintStage**, etc.) exist:
 
 ```bash
 python3 wk_decks.py --deck mining
 ```
 
-In Anki: **File → Import** → `out/wk_mining.apkg` → choose **Update** (not “Import as new”). Restart Anki (or mine once so **wk_immersion** can patch fields in-place).
+In Anki: **File → Import** → `out/wk_mining.apkg` → choose **Update** (not “Import as new”). Restart Anki, then run **Tools → WK Enrich Mining Notes** once to backfill cloze/WK fields on older notes.
 
 ### 5. Yomitan field mapping
 
@@ -97,6 +101,7 @@ In Yomitan **Settings → Anki** (enable Advanced if needed):
 
 | Note field | Who fills it |
 |------------|----------------|
+| ClozeSentence, WkSubjectId, PrerequisiteIds, WkMeaning, HintGlossary, HintStage, ShowEnglish, ShowKana, ShowJjBack, SentenceKana, DictLinksJa, DictLinksEn | **wk_immersion** at mine time (needs `out/wk_mining_vocab_index.json` from a full regen or `--deck mining` with cached WK vocab) |
 | SentenceAudio | **wk_immersion** add-on at mine time (full-sentence TTS) |
 | VoicevoxAudio | *(reserved — future tooling)* |
 | VoicevoxSpeakerId | *(reserved)* |
@@ -157,12 +162,16 @@ CLI (Anki + AnkiConnect running): `python3 scripts/synthesize_immersion_sentence
 
 Both play buttons appear on the back — word audio near the definition, sentence audio above the context line.
 
-## Card layout (template v9)
+## Card layout (template v10)
 
-- **Front:** mined word — kanji with ruby (**Furigana**) when Yomitan provides it, otherwise **Expression**; **Reading** (kana) shown underneath.
-- **Back:** word + **Reading** + **Pitch** → **意味** (**Glossary**, J–J from 例解) → **類** / **対** when present → **WORD** / **SENTENCE** audio → full sentence → optional **Your notes** → source link.
+- **Front:** sentence with blank (`ClozeSentence`) + progressive hints + `{{type:Expression}}`.
+- **Hints:** stage 0 = kana + WK English + J–E links + pitch + J–J snippet; stage 1 = kana only; stage 2 = no hints.
+- **Back (always):** typed answer, full sentence, VOICEVOX **SentenceAudio**.
+- **Back (stage 2 only):** **SentenceKana** (speaking practice), pitch, full **Glossary / Synonyms / Antonyms**, JP dict links.
 
-Sections **意味 / 類 / 対** only appear when Yomitan filled that field at mine time.
+Hint stages update on **Tools → WK Run Unlock Pass** (no card locking). Post-mine enrichment runs in **wk_immersion** when Yomitan adds a note.
+
+> Design reference: [yomitan_mining_cloze_design.md](yomitan_mining_cloze_design.md).
 
 ## Quick checklist (definitions + thesaurus on cards)
 
@@ -214,7 +223,7 @@ Anki deduplicates on the **first field** only.
 
 | Tool | Best for |
 |------|----------|
-| **This deck + Yomitan** | Reading, web, ebooks — word → sentence recognition |
+| **This deck + Yomitan** | Reading, web, ebooks — sentence cloze → type word in kanji |
 | **Migaku** | Video clips with timestamp audio |
 | **WK Vocabulary Context** | WK sentence clozes (generator-built, type-in production) |
 

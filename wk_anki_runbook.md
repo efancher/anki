@@ -326,7 +326,7 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::Conjugations · Verbs / Adjectives / Reverse / Verb Types / Adjective Types** | Conjugation drills (5-card batches)                                        |
 | **WK::Grammar**                                                                    | Hanabira pattern clozes (**Japanese Grammar Context**)                     |
 | **WK::Phonetic Families**                                                          | Phonetic on'yomi drills                                                    |
-| **WK::Immersion · Yomitan**                                                        | Yomitan-mined word → sentence cards (open, no WK gating)                   |
+| **WK::Immersion · Yomitan**                                                        | Yomitan-mined sentence cloze → type word (progressive hints via unlock pass) |
 
 
 All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only — no review-ahead), and **Relative overdueness** ordering. **Prereq** decks also use `-tag:wk-mature` so Guru I+ items (interval ≥ 7d on all card types, tagged by **wk_unlock**) drop out once they satisfy the chain.
@@ -357,14 +357,15 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 |-----|---------|---------|
 | `engine` | `auto` | `auto` → VOICEVOX if reachable, else edge-tts; or `voicevox` / `edge` |
 | `voicevox_engine_url` | `http://127.0.0.1:50021` | VOICEVOX HTTP API |
-| `voicevox_speaker_id` | `3` | Speaker/style id |
+| `voicevox_speaker_id` | `2` | Speaker/style id (Shikoku Metan) |
+| `voicevox_volume_scale` | `1.5` | VOICEVOX output volume multiplier |
 | `edge_tts_voice` | `ja-JP-NanamiNeural` | edge-tts fallback voice |
 
-CLI overrides: `--sentence-tts-engine auto`, `--voicevox-engine-url`, `--voicevox-speaker-id`, `--sentence-audio-voice`. Same `sentence_tts` settings apply to **sentence decks** (vocab sentence, vocab cloze, grammar), **kanji reading audio** on core/leech cards, and **TTS fallbacks** on conjugation/rendaku/drill cards when WK native audio is unavailable. **Vocab reading** and **dictation** keep WaniKani Kyoko/Kenichi recordings. See [docs/voicevox_setup.md](docs/voicevox_setup.md) for starting VOICEVOX.
+CLI overrides: `--sentence-tts-engine auto`, `--voicevox-engine-url`, `--voicevox-speaker-id`, `--voicevox-volume-scale`, `--sentence-audio-voice`. Same `sentence_tts` settings apply to **sentence decks** (vocab sentence, vocab cloze, grammar), **kanji reading audio** on core/leech cards, and **TTS fallbacks** on conjugation/rendaku/drill cards when WK native audio is unavailable. **Vocab reading** and **dictation** keep WaniKani Kyoko/Kenichi recordings. See [docs/voicevox_setup.md](docs/voicevox_setup.md) for starting VOICEVOX.
 
 **Rendaku:** Two-kanji WK compounds where the second morpheme voices (e.g. やま + かわ → やま**が**わ). Card shows morpheme hint → type full reading. Filtered deck **WK::Rendaku**. Default min SRS Master+ (`--rendaku-min-srs 7`).
 
-**Yomitan immersion:** Open deck for live mining — word + kana on front, sentence + audio + pitch on back. No WK gating. One-time: `python wk_decks.py --deck mining`, import `out/wk_mining.apkg`, configure Yomitan → AnkiConnect (map **Furigana**, **Reading**, pitch fields — see doc). Add personal glosses in **UserNotes** (Browse or **E** while reviewing). Full setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
+**Yomitan immersion:** Sentence cloze on front — type the mined word in kanji; hints fade as kanji/vocab mature in core (no card locking). One-time: `python wk_decks.py --deck mining`, import `out/wk_mining.apkg` (**Update** note type), sync add-ons, configure Yomitan → AnkiConnect (map **Furigana**, **Reading**, pitch fields — see doc). **Tools → WK Enrich Mining Notes** backfills cloze/WK fields on older notes; **Tools → WK Run Unlock Pass** refreshes hint stages. Full setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
 
 ---
 
@@ -564,7 +565,7 @@ Dedicated leech decks are optional (legacy). Anki’s **Browse →** `tag:leech`
 | Idea                                                       | When it’s worth it                                                                                               |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading                                                                          |
-| **Yomitan immersion deck**                                 | [docs/yomitan_mining.md](docs/yomitan_mining.md) — word on front, sentence on back; optional **UserNotes**       |
+| **Yomitan immersion deck**                                 | [docs/yomitan_mining.md](docs/yomitan_mining.md) — sentence cloze + progressive hints; optional **UserNotes**    |
 | **VOICEVOX TTS (immersion)**                               | [docs/wk_voicevox_tts_design.md](docs/wk_voicevox_tts_design.md) — **VoicevoxAudio** reserved; synthesis planned |
 | YouTube immersion deck                                     | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) (deferred)                            |
 | **Video sentence mining (Migaku, etc.)**                   | Separate deck/note type; can coexist with Yomitan reading mining                                                 |

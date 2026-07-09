@@ -23,7 +23,8 @@ FIELD_SENTENCE_AUDIO = "SentenceAudio"
 FIELD_SPEAKER = "VoicevoxSpeakerId"
 
 DEFAULT_VOICEVOX_ENGINE_URL = "http://127.0.0.1:50021"
-DEFAULT_VOICEVOX_SPEAKER_ID = 3
+DEFAULT_VOICEVOX_SPEAKER_ID = 2  # 四国めたん (Shikoku Metan), normal style
+DEFAULT_VOICEVOX_VOLUME_SCALE = 1.5
 DEFAULT_EDGE_TTS_VOICE = "ja-JP-NanamiNeural"
 DEFAULT_SYNTH_ENGINE = "voicevox"
 SENTENCE_AUDIO_FILENAME_PREFIX = "wk_immersion_sent_"
@@ -38,6 +39,7 @@ class ImmersionTtsConfig:
     engine: str = DEFAULT_SYNTH_ENGINE  # voicevox | edge | auto
     voicevox_engine_url: str = DEFAULT_VOICEVOX_ENGINE_URL
     voicevox_speaker_id: int = DEFAULT_VOICEVOX_SPEAKER_ID
+    voicevox_volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE
     edge_tts_voice: str = DEFAULT_EDGE_TTS_VOICE
     python_executable: str = ""
 
@@ -51,6 +53,9 @@ class ImmersionTtsConfig:
                 payload.get("voicevox_engine_url", DEFAULT_VOICEVOX_ENGINE_URL)
             ).rstrip("/"),
             voicevox_speaker_id=int(payload.get("voicevox_speaker_id", DEFAULT_VOICEVOX_SPEAKER_ID)),
+            voicevox_volume_scale=float(
+                payload.get("voicevox_volume_scale", DEFAULT_VOICEVOX_VOLUME_SCALE)
+            ),
             edge_tts_voice=str(payload.get("edge_tts_voice", DEFAULT_EDGE_TTS_VOICE)),
             python_executable=str(payload.get("python_executable", "")),
         )
@@ -128,10 +133,25 @@ def resolve_python_executable(configured: str = "") -> Optional[str]:
     return found
 
 
-def sentence_media_basename(text: str, *, engine: str, speaker_id: int, ext: str) -> str:
-    raw = f"{engine}\0{speaker_id}\0{text}".encode("utf-8")
+def sentence_media_basename(
+    text: str,
+    *,
+    engine: str,
+    speaker_id: int,
+    volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
+    ext: str,
+) -> str:
+    raw = f"{engine}\0{speaker_id}\0{volume_scale:g}\0{text}".encode("utf-8")
     digest = hashlib.sha256(raw).hexdigest()[:24]
     return f"{SENTENCE_AUDIO_FILENAME_PREFIX}{digest}{ext}"
+
+
+def apply_voicevox_volume(audio_query: dict, volume_scale: float) -> dict:
+    if volume_scale == 1.0:
+        return audio_query
+    updated = dict(audio_query)
+    updated["volumeScale"] = float(volume_scale)
+    return updated
 
 
 def synthesize_voicevox_wav(
@@ -139,6 +159,7 @@ def synthesize_voicevox_wav(
     *,
     engine_url: str,
     speaker_id: int,
+    volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
     timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     if not text.strip():
@@ -151,7 +172,10 @@ def synthesize_voicevox_wav(
     try:
         query_req = urllib.request.Request(query_url, data=b"", method="POST")
         with urllib.request.urlopen(query_req, timeout=timeout_seconds) as resp:
-            audio_query = json.loads(resp.read().decode("utf-8"))
+            audio_query = apply_voicevox_volume(
+                json.loads(resp.read().decode("utf-8")),
+                volume_scale,
+            )
         synth_url = f"{base}/synthesis?{urllib.parse.urlencode({'speaker': str(speaker_id)})}"
         body = json.dumps(audio_query).encode("utf-8")
         req = urllib.request.Request(
@@ -218,6 +242,7 @@ def synthesize_sentence_audio(
                 plain,
                 engine_url=config.voicevox_engine_url,
                 speaker_id=config.voicevox_speaker_id,
+                volume_scale=config.voicevox_volume_scale,
             )
             if wav:
                 return wav, ".wav", "voicevox"

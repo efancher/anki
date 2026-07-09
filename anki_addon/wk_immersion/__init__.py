@@ -33,6 +33,7 @@ from .logic import (
     sound_field_value,
     synthesize_sentence_audio,
 )
+from .mining_enrich import apply_mining_enrichment
 from .model_upgrade import ensure_immersion_model
 
 ADDON_NAME = "WK Immersion"
@@ -160,10 +161,12 @@ def _store_sentence_audio(
             return False
 
         speaker_id = config.voicevox_speaker_id if engine_label == "voicevox" else 0
+        volume_scale = config.voicevox_volume_scale if engine_label == "voicevox" else 1.0
         basename = sentence_media_basename(
             tts_text,
             engine=engine_label,
             speaker_id=speaker_id,
+            volume_scale=volume_scale,
             ext=ext,
         )
         if col.media.have(basename):
@@ -236,15 +239,23 @@ def synthesize_for_note_ids(note_ids: List[int], *, silent: bool) -> None:
             showInfo(message)
 
 
+def _enrich_mining_note(note) -> None:
+    field_map = _field_map(note)
+    if "ClozeSentence" not in field_map:
+        return
+    apply_mining_enrichment(note, field_map=field_map)
+
+
 def on_note_will_be_added(col, note, deck_id) -> None:
-    """Yomitan / AnkiConnect — synthesize before the note is saved (Anki 23.10+)."""
+    """Yomitan / AnkiConnect — enrich cloze fields and synthesize before save (Anki 23.10+)."""
     try:
         if col is None or note.note_type()["name"] != MINING_NOTE_TYPE:
             return
+        ensure_immersion_model(col)
+        _enrich_mining_note(note)
         config = load_immersion_config()
         if not config.enabled or not config.on_mine:
             return
-        ensure_immersion_model(col)
         _store_sentence_audio(note, col=col, config=config, silent=True)
     except Exception as exc:
         # Never block note creation — user can backfill from Tools menu.
@@ -254,6 +265,43 @@ def on_note_will_be_added(col, note, deck_id) -> None:
 def on_add_cards_did_add_note(_note) -> None:
     """Add dialog path — note is saved after this hook; batch menu can backfill."""
     pass
+
+
+def enrich_mining_notes(note_ids: List[int], *, silent: bool) -> None:
+    if mw.col is None:
+        showWarning("Open a collection first.")
+        return
+    if ensure_immersion_model(mw.col):
+        mw.col.save()
+    ok = 0
+    skipped = 0
+    for note_id in note_ids:
+        note = mw.col.get_note(note_id)
+        if note.note_type()["name"] != MINING_NOTE_TYPE:
+            skipped += 1
+            continue
+        if apply_mining_enrichment(note, field_map=_field_map(note)):
+            note.flush()
+            ok += 1
+        else:
+            skipped += 1
+    mw.col.save()
+    message = f"Mining enrich: {ok} updated, {skipped} skipped."
+    if silent:
+        tooltip(message)
+    else:
+        showInfo(message)
+
+
+def enrich_selected_mining_notes() -> None:
+    if mw.col is None:
+        showWarning("Open a collection first.")
+        return
+    note_ids = mw.col.find_notes('note:"WK Yomitan Immersion" -tag:mining-setup')
+    if not note_ids:
+        showInfo("No mining notes found.")
+        return
+    enrich_mining_notes([int(note_id) for note_id in note_ids], silent=False)
 
 
 def synthesize_missing_sentence_audio() -> None:
@@ -288,6 +336,9 @@ def setup_menu() -> None:
     action = QAction("WK Synthesize Immersion Sentence Audio", mw)
     action.triggered.connect(synthesize_missing_sentence_audio)
     mw.form.menuTools.addAction(action)
+    enrich_action = QAction("WK Enrich Mining Notes (cloze + WK links)", mw)
+    enrich_action.triggered.connect(enrich_selected_mining_notes)
+    mw.form.menuTools.addAction(enrich_action)
 
 
 def on_main_window_did_init() -> None:

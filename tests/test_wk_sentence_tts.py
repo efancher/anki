@@ -78,13 +78,31 @@ class WkSentenceTtsTests(unittest.TestCase):
                 )
             )
 
+    def test_apply_voicevox_volume(self) -> None:
+        from wk_sentence_tts import apply_voicevox_volume
+
+        query = {"speedScale": 1.0, "volumeScale": 1.0}
+        boosted = apply_voicevox_volume(query, 1.5)
+        self.assertEqual(boosted["volumeScale"], 1.5)
+        self.assertEqual(apply_voicevox_volume(query, 1.0), query)
+
+    def test_sentence_audio_cache_key_includes_volume(self) -> None:
+        config = SentenceTtsConfig(voicevox_volume_scale=1.5)
+        quiet = sentence_audio_cache_key("本を読みます。", config, engine="voicevox")
+        loud = sentence_audio_cache_key(
+            "本を読みます。",
+            SentenceTtsConfig(voicevox_volume_scale=2.0),
+            engine="voicevox",
+        )
+        self.assertNotEqual(quiet, loud)
+
     def test_format_sentence_tts_label_auto_voicevox(self) -> None:
-        config = SentenceTtsConfig(engine="auto", voicevox_speaker_id=3)
+        config = SentenceTtsConfig(engine="auto", voicevox_speaker_id=2)
         with mock.patch("wk_sentence_tts.voicevox_engine_reachable", return_value=True):
             from wk_sentence_tts import format_sentence_tts_label
 
             label = format_sentence_tts_label(config)
-        self.assertIn("VOICEVOX speaker 3", label)
+        self.assertIn("VOICEVOX speaker 2", label)
         self.assertIn("edge fallback", label)
 
     def test_format_sentence_tts_label_auto_edge_only(self) -> None:

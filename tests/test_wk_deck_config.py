@@ -36,6 +36,7 @@ class WkDeckConfigTests(unittest.TestCase):
                     "engine": "voicevox",
                     "voicevox_engine_url": "http://localhost:50021",
                     "voicevox_speaker_id": 8,
+                    "voicevox_volume_scale": 2.0,
                     "edge_tts_voice": "ja-JP-KeitaNeural",
                 },
             }
@@ -43,6 +44,7 @@ class WkDeckConfigTests(unittest.TestCase):
         self.assertEqual(defaults["sentence_tts_engine"], "voicevox")
         self.assertEqual(defaults["voicevox_engine_url"], "http://localhost:50021")
         self.assertEqual(defaults["voicevox_speaker_id"], 8)
+        self.assertEqual(defaults["voicevox_volume_scale"], 2.0)
         self.assertEqual(defaults["sentence_audio_voice"], "ja-JP-KeitaNeural")
 
     def test_parser_defaults_from_config_maps_grammar_section(self) -> None:

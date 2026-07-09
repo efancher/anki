@@ -202,3 +202,74 @@ def index_notes_by_subject_id(notes: Sequence[NoteUnlockState]) -> Dict[int, Not
         if note.wk_subject_id is not None:
             indexed[note.wk_subject_id] = note
     return indexed
+
+
+@dataclass(frozen=True)
+class MiningHintState:
+    note_id: int
+    wk_subject_id: Optional[int]
+    prerequisite_ids: Tuple[int, ...]
+    hint_stage: int
+
+
+@dataclass(frozen=True)
+class MiningHintUpdate:
+    note_id: int
+    hint_stage: str
+    show_english: str
+    show_kana: str
+    show_jj_back: str
+
+
+def mining_hint_display_flags(hint_stage: int) -> Tuple[str, str, str, str]:
+    stage = max(0, min(2, int(hint_stage)))
+    return (
+        str(stage),
+        "1" if stage == 0 else "",
+        "1" if stage < 2 else "",
+        "1" if stage >= 2 else "",
+    )
+
+
+def compute_mining_hint_stage(
+    wk_subject_id: Optional[int],
+    prerequisite_ids: Sequence[int],
+    *,
+    kanji_meaning_mature_subject_ids: Set[int],
+    core_mature_subject_ids: Set[int],
+) -> int:
+    stage = 0
+    if prerequisites_met(prerequisite_ids, kanji_meaning_mature_subject_ids):
+        stage = 1
+    if wk_subject_id is not None and wk_subject_id in core_mature_subject_ids:
+        stage = 2
+    return stage
+
+
+def mining_hint_updates_for_notes(
+    notes: Sequence[MiningHintState],
+    *,
+    kanji_meaning_mature_subject_ids: Set[int],
+    core_mature_subject_ids: Set[int],
+) -> List[MiningHintUpdate]:
+    updates: List[MiningHintUpdate] = []
+    for note in notes:
+        new_stage = compute_mining_hint_stage(
+            note.wk_subject_id,
+            note.prerequisite_ids,
+            kanji_meaning_mature_subject_ids=kanji_meaning_mature_subject_ids,
+            core_mature_subject_ids=core_mature_subject_ids,
+        )
+        if new_stage == note.hint_stage:
+            continue
+        hint_stage, show_english, show_kana, show_jj_back = mining_hint_display_flags(new_stage)
+        updates.append(
+            MiningHintUpdate(
+                note_id=note.note_id,
+                hint_stage=hint_stage,
+                show_english=show_english,
+                show_kana=show_kana,
+                show_jj_back=show_jj_back,
+            )
+        )
+    return updates

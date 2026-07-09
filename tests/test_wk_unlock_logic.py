@@ -171,6 +171,40 @@ class WkUnlockLogicTests(unittest.TestCase):
         )
         self.assertEqual(actions, [])
 
+    def test_mining_hint_stage_one_when_kanji_mature(self) -> None:
+        note = logic.MiningHintState(
+            note_id=1,
+            wk_subject_id=100,
+            prerequisite_ids=(10, 11),
+            hint_stage=0,
+        )
+        updates = logic.mining_hint_updates_for_notes(
+            [note],
+            kanji_meaning_mature_subject_ids={10, 11},
+            core_mature_subject_ids=set(),
+        )
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].hint_stage, "1")
+        self.assertEqual(updates[0].show_kana, "1")
+        self.assertEqual(updates[0].show_english, "")
+
+    def test_mining_hint_stage_two_when_vocab_mature(self) -> None:
+        note = logic.MiningHintState(
+            note_id=2,
+            wk_subject_id=100,
+            prerequisite_ids=(10,),
+            hint_stage=1,
+        )
+        updates = logic.mining_hint_updates_for_notes(
+            [note],
+            kanji_meaning_mature_subject_ids={10},
+            core_mature_subject_ids={100},
+        )
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].hint_stage, "2")
+        self.assertEqual(updates[0].show_jj_back, "1")
+        self.assertEqual(updates[0].show_kana, "")
+
 
 if __name__ == "__main__":
     unittest.main()

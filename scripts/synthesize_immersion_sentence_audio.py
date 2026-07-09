@@ -169,10 +169,12 @@ def main() -> None:
             continue
 
         speaker_id = config.voicevox_speaker_id if engine_label == "voicevox" else 0
+        volume_scale = config.voicevox_volume_scale if engine_label == "voicevox" else 1.0
         basename = sentence_media_basename(
             tts_text,
             engine=engine_label,
             speaker_id=speaker_id,
+            volume_scale=volume_scale,
             ext=ext,
         )
         stored = anki_request(

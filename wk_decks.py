@@ -284,7 +284,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v9",
+    "mining": "v10",
     "kanji_contrast": "v3",
     "kanji_meaning": "v1",
     "vocab_sentence_meaning": "v1",
@@ -2326,7 +2326,8 @@ def build_sentence_tts_config(args: argparse.Namespace) -> "SentenceTtsConfig":
         {
             "engine": getattr(args, "sentence_tts_engine", "auto"),
             "voicevox_engine_url": getattr(args, "voicevox_engine_url", "http://127.0.0.1:50021"),
-            "voicevox_speaker_id": getattr(args, "voicevox_speaker_id", 3),
+            "voicevox_speaker_id": getattr(args, "voicevox_speaker_id", 2),
+            "voicevox_volume_scale": getattr(args, "voicevox_volume_scale", 1.5),
             "edge_tts_voice": getattr(args, "sentence_audio_voice", DEFAULT_SENTENCE_AUDIO_VOICE),
         }
     )
@@ -6658,6 +6659,7 @@ def parser_defaults_from_config(config: dict) -> dict:
         "engine": "sentence_tts_engine",
         "voicevox_engine_url": "voicevox_engine_url",
         "voicevox_speaker_id": "voicevox_speaker_id",
+        "voicevox_volume_scale": "voicevox_volume_scale",
         "edge_tts_voice": "sentence_audio_voice",
     }
     for config_key, dest in sentence_tts_key_map.items():
@@ -6929,8 +6931,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--voicevox-speaker-id",
         type=int,
-        default=cfg.get("voicevox_speaker_id", 3),
-        help="VOICEVOX speaker/style id (default: 3).",
+        default=cfg.get("voicevox_speaker_id", 2),
+        help="VOICEVOX speaker/style id (default: 2 = Shikoku Metan).",
+    )
+    parser.add_argument(
+        "--voicevox-volume-scale",
+        type=float,
+        default=cfg.get("voicevox_volume_scale", 1.5),
+        help="VOICEVOX volumeScale multiplier (default: 1.5; engine default is 1.0).",
     )
     parser.add_argument(
         "--refresh-sentence-audio",
@@ -7017,7 +7025,20 @@ def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> No
         print("  See docs/yomitan_mining.md for Yomitan field mapping and UserNotes.")
         print("\nRe-run without --dry-run to write wk_mining.apkg.")
         return
-    path, deck = build_mining_deck(output_dir)
+    vocab_items: Optional[List[dict]] = None
+    cached = load_cache_items_only("subjects", "vocabulary_kanji_radical")
+    if cached:
+        vocab_items = [item for item in cached if item.get("object") == "vocabulary"]
+        if vocab_items:
+            print(f"Mining vocab index: using {len(vocab_items)} cached vocabulary subjects")
+    elif output_dir.joinpath("wk_mining_vocab_index.json").is_file():
+        print("Mining vocab index: reusing existing out/wk_mining_vocab_index.json")
+    else:
+        print(
+            "Mining vocab index: no .wk_cache vocabulary data — "
+            "run a full regen once or mine without WK English/prerequisite hints until then."
+        )
+    path, deck = build_mining_deck(output_dir, vocab_items=vocab_items)
     bundle_path: Optional[Path] = None
     if not args.no_bundle:
         bundle_path = output_dir / BUNDLE_FILENAME
@@ -7816,7 +7837,7 @@ def main() -> None:
     if "mining" in wanted:
         from mining_decks import MINING_SETUP_TAG, build_mining_deck
 
-        path, deck = build_mining_deck(output_dir)
+        path, deck = build_mining_deck(output_dir, vocab_items=core_vocab_items or vocab_items)
         created.append(path)
         built_decks.append(deck)
     if "pitch-leeches" in wanted and leeches:
