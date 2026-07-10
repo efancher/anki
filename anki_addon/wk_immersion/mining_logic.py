@@ -13,10 +13,18 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 CLOZE_BLANK_DISPLAY = "＿＿＿"
-GLOSSARY_SNIPPET_MAX_LEN = 120
+GLOSSARY_SNIPPET_MAX_LEN = 80
 
 _RUBY_WITH_RT = re.compile(r"<ruby>(.*?)<rt>(.*?)</rt></ruby>", re.DOTALL | re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
+_STYLE_SCRIPT_RE = re.compile(
+    r"<(style|script)\b[^>]*>.*?</\1>",
+    re.DOTALL | re.IGNORECASE,
+)
+_CSS_LIKE_RE = re.compile(r"[{}]|\.yomitan|data-|[a-z-]+\s*\{", re.IGNORECASE)
+_DICT_NAME_PARENS_RE = re.compile(r"\([^)]*(?:例解|辞典|国語)[^)]*\)")
+_SENSE_CIRCLED_RE = re.compile(r"(?:❶|❷|❸|❹|①|②|③|④)")
+_SENSE_NUMBERED_RE = re.compile(r"(?:１|２|３|４|[0-9]+)\s*")
 
 
 def strip_html(value: str) -> str:
@@ -77,8 +85,49 @@ def build_sentence_kana(sentence_furigana: str, sentence: str, reading: str) -> 
     return ""
 
 
+def _strip_yomitan_glossary_html(glossary: str) -> str:
+    text = _STYLE_SCRIPT_RE.sub("", glossary or "")
+    return strip_html(text)
+
+
+def _extract_glossary_sense(plain: str) -> str:
+    text = plain.replace("\n", " ").strip()
+    text = re.sub(r"^\s*意味\s*", "", text)
+    text = _DICT_NAME_PARENS_RE.sub("", text)
+
+    circled = _SENSE_CIRCLED_RE.search(text)
+    if circled:
+        text = text[circled.end():]
+    else:
+        numbered = _SENSE_NUMBERED_RE.search(text)
+        if numbered:
+            text = text[numbered.end():]
+        text = re.sub(r"【[^】]+】", "", text)
+        text = re.sub(r"(?:名|動|形|副|接|連|感|代|助|補|句)\s*", " ", text)
+        text = re.sub(r"[ァ-ヴー]+", " ", text)
+        text = re.sub(r"^[^\u3040-\u9fff\u3400-\u4dbf]+", "", text)
+
+    stop = re.search(r"(?:❷|❸|❹|例[ 　]|類[ 　]|対[ 　])", text)
+    if stop and stop.start() > 0:
+        text = text[: stop.start()]
+
+    text = re.sub(r"\s+", " ", text).strip(" ・.。")
+    return text
+
+
+def _japanese_gloss_chunks(plain: str) -> List[str]:
+    return re.findall(
+        r"[\u3040-\u9fff\u3400-\u4dbf\u3000-\u303f]+(?:[。、]?[\u3040-\u9fff\u3400-\u4dbf\u3000-\u303f]*)*",
+        plain,
+    )
+
+
 def glossary_snippet(glossary: str, *, max_len: int = GLOSSARY_SNIPPET_MAX_LEN) -> str:
-    plain = strip_html(glossary).replace("\n", " ").strip()
+    plain = _extract_glossary_sense(_strip_yomitan_glossary_html(glossary))
+    if not plain or _CSS_LIKE_RE.search(plain):
+        chunks = _japanese_gloss_chunks(_strip_yomitan_glossary_html(glossary))
+        plain = chunks[0] if chunks else ""
+    plain = re.sub(r"\s+", " ", plain).strip()
     if not plain:
         return ""
     if len(plain) <= max_len:
@@ -169,13 +218,15 @@ def enrich_mining_note_fields(
 ) -> MiningEnrichment:
     targets = blank_targets_for_expression(expression, reading)
     cloze_html, _plain = build_cloze_sentence(sentence, targets)
-    dict_ja, dict_en = dictionary_links_html(expression, reading)
     wk_subject_id = str(wk_entry["id"]) if wk_entry else ""
     prerequisite_ids = str(wk_entry.get("prerequisite_ids") or "") if wk_entry else ""
     wk_meaning = str(wk_entry.get("meaning") or "") if wk_entry else ""
     hint_stage, show_english, show_kana, show_jj_back = mining_hint_display_flags(0)
     sentence_kana = build_sentence_kana(sentence_furigana, sentence, reading)
-    hint_glossary = glossary_snippet(glossary)
+    hint_glossary = glossary_snippet(glossary) if not wk_meaning else ""
+    dict_ja, dict_en = dictionary_links_html(expression, reading)
+    if wk_meaning:
+        dict_en = ""
     if not cloze_html and sentence:
         cloze_html = html.escape(strip_html(sentence))
     return MiningEnrichment(

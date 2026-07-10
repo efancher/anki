@@ -83,8 +83,8 @@ MINING_FRONT = """
   <div class="hint-block">
     {{#ShowKana}}{{#Reading}}<div class="hint-reading">{{Reading}}</div>{{/Reading}}{{/ShowKana}}
     {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{/ShowEnglish}}
-    {{#ShowEnglish}}{{{DictLinksEn}}}{{/ShowEnglish}}
-    {{#ShowEnglish}}{{#HintGlossary}}<div class="hint-glossary"><span class="meta">意味</span> {{HintGlossary}}</div>{{/HintGlossary}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{^WkMeaning}}{{{DictLinksEn}}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{^WkMeaning}}{{#HintGlossary}}<div class="hint-glossary"><span class="meta">意味</span> {{HintGlossary}}</div>{{/HintGlossary}}{{/WkMeaning}}{{/ShowEnglish}}
     {{#ShowEnglish}}
     {{#PitchAccents}}<div class="hint-pitch"><span class="meta">Pitch</span> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>{{/PitchAccents}}
     {{/ShowEnglish}}

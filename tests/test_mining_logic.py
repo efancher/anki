@@ -57,6 +57,32 @@ class MiningLogicTests(unittest.TestCase):
         self.assertLessEqual(len(snippet), 20)
         self.assertTrue(snippet.endswith("…"))
 
+    def test_glossary_snippet_strips_yomitan_css_and_extracts_sense(self) -> None:
+        raw = (
+            '<style>.yomitan-glossary [data-content="x"] { color: red; }</style>'
+            '<div class="yomitan-glossary">'
+            "意味 (小学館例解学習国語 第十二版) １ねがい【願４い】 名 ネガイ"
+            "❶ねがうこと。例 ぼくの願いを聞いてください。"
+            "</div>"
+        )
+        snippet = glossary_snippet(raw)
+        self.assertEqual(snippet, "ねがうこと")
+        self.assertNotIn("yomitan", snippet)
+        self.assertNotIn("{", snippet)
+
+    def test_enrich_skips_jj_and_jisho_when_wk_meaning_present(self) -> None:
+        result = enrich_mining_note_fields(
+            expression="学生",
+            reading="がくせい",
+            sentence="私は学生です。",
+            sentence_furigana="",
+            glossary="❶学ぶ人。",
+            wk_entry={"id": 123, "meaning": "student", "prerequisite_ids": "10"},
+        )
+        self.assertEqual(result.wk_meaning, "student")
+        self.assertEqual(result.hint_glossary, "")
+        self.assertEqual(result.dict_links_en, "")
+
     def test_mining_hint_display_flags(self) -> None:
         self.assertEqual(mining_hint_display_flags(0), ("0", "1", "1", ""))
         self.assertEqual(mining_hint_display_flags(1), ("1", "", "1", ""))

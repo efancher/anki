@@ -284,7 +284,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v10",
+    "mining": "v11",
     "kanji_contrast": "v3",
     "kanji_meaning": "v1",
     "vocab_sentence_meaning": "v1",

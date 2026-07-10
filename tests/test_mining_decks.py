@@ -70,7 +70,7 @@ class MiningDeckTests(unittest.TestCase):
         self.assertIn(MINING_SENTENCE_TTS, afmt)
 
     def test_mining_template_version(self) -> None:
-        self.assertEqual(MINING_TEMPLATE_VERSION, "v10")
+        self.assertEqual(MINING_TEMPLATE_VERSION, "v11")
 
     def test_template_name(self) -> None:
         template = make_mining_model().templates[0]
