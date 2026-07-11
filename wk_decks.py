@@ -274,21 +274,21 @@ MODEL_TEMPLATE_VERSIONS = {
     "reading_keyword": "v3",
     "kanji_radical": "v2",
     "phonetic_drill": "v7",
-    "conjugation": "v7",
+    "conjugation": "v8",
     "word_class": "v5",
-    "vocab_cloze": "v8",
-    "conjugation_reverse": "v7",
+    "vocab_cloze": "v9",
+    "conjugation_reverse": "v8",
     "grammar_cloze": "v4",
     "dictation": "v4",
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v12",
+    "mining": "v13",
     "kanji_contrast": "v3",
     "kanji_meaning": "v1",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
-    "satori": "v2",
+    "satori": "v3",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -3904,7 +3904,7 @@ def make_conjugation_model() -> WkModel:
                 <div class="reading">{{DictReading}}</div>
                 {{#PromptAudio}}<div class="reading-audio">{{PromptAudio}}</div>{{/PromptAudio}}
                 <div class="meaning">{{Meaning}}</div>
-                <div class="type-answer">{{type:TypeConjExpression}}</div>
+                <div class="type-answer">{{type:ConjReading}}</div>
                 """,
                 "afmt": """
                 {{FrontSide}}
@@ -3956,7 +3956,7 @@ def make_conjugation_reverse_model() -> WkModel:
                 <div class="prompt">What is the dictionary form?</div>
                 <div class="jp">{{ConjExpression}}</div>
                 {{#PromptAudio}}<div class="reading-audio">{{PromptAudio}}</div>{{/PromptAudio}}
-                <div class="type-answer">{{type:TypeDictExpression}}</div>
+                <div class="type-answer">{{type:DictReading}}</div>
                 """,
                 "afmt": """
                 {{FrontSide}}
@@ -4087,7 +4087,7 @@ def make_vocab_cloze_model() -> WkModel:
                 <div class="jp cloze">{{ClozeSentence}}</div>
                 <div class="meaning hint">{{Hint}}</div>
                 {{#FormHint}}<div class="form-hint">{{FormHint}}</div>{{/FormHint}}
-                <div class="type-answer">{{type:TypeExpression}}</div>
+                <div class="type-answer">{{type:Reading}}</div>
                 <div class="meta">{{Meta}}</div>
                 """,
                 "afmt": """
@@ -5453,7 +5453,7 @@ def build_conjugation_deck(
                 html.escape(meaning),
                 html.escape(class_label),
                 html.escape(drill.conj_expr),
-                html.escape(drill.conj_expr),
+                html.escape(drill.conj_reading),
                 html.escape(drill.conj_reading),
                 prompt_audio,
                 answer_audio,
@@ -5581,7 +5581,7 @@ def build_conjugation_reverse_deck(
                 vocab_kanji_prerequisite_ids(vocab),
                 html.escape(drill.prompt),
                 html.escape(drill.dict_expr),
-                html.escape(drill.dict_expr),
+                html.escape(drill.dict_reading),
                 html.escape(drill.dict_reading),
                 html.escape(meaning),
                 html.escape(drill.conj_expr),

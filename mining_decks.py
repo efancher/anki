@@ -92,7 +92,7 @@ MINING_FRONT = """
     {{#PitchAccents}}<div class="hint-pitch"><span class="meta">Pitch</span> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>{{/PitchAccents}}
     {{/ShowEnglish}}
   </div>
-  <div class="type-prompt">{{type:Expression}}</div>
+  <div class="type-prompt">{{type:Reading}}</div>
 </div>
 """
 

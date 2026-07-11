@@ -74,7 +74,7 @@ Migaku normally fills **SentenceAudio** with the clip from the show. If a note h
 
 ## Card layout (template v12)
 
-- **Front:** sentence cloze + progressive hints + `{{type:Expression}}`
+- **Front:** sentence cloze + progressive hints + `{{type:Reading}}` (kana type-in; kanji still shown in cloze/expression)
 - **Hints:** stage 0 = kana + English (WK or Migaku Translation) + short J–J if no English; stage 1 = kana only; stage 2 = no hints
 - **Back (always):** typed answer, **screenshot**, **native sentence audio**, full sentence
 - **Back (stage 2):** kana line, pitch, full glossary, JP dict links

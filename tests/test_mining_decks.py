@@ -56,7 +56,7 @@ class MiningDeckTests(unittest.TestCase):
     def test_front_shows_cloze_and_type(self) -> None:
         template = make_mining_model().templates[0]
         self.assertIn("cloze-sentence", template["qfmt"])
-        self.assertIn("type:Expression", template["qfmt"])
+        self.assertIn("type:Reading", template["qfmt"])
         self.assertIn("Translation", template["qfmt"])
         self.assertNotIn("word-block", template["qfmt"])
 
@@ -77,7 +77,7 @@ class MiningDeckTests(unittest.TestCase):
         self.assertLess(show_pos, glossary_pos)
 
     def test_mining_template_version(self) -> None:
-        self.assertEqual(MINING_TEMPLATE_VERSION, "v12")
+        self.assertEqual(MINING_TEMPLATE_VERSION, "v13")
 
     def test_note_type_name(self) -> None:
         model = make_mining_model()

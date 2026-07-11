@@ -97,7 +97,7 @@ SATORI_FRONT = """
   <div class="hint-block">
     {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{/ShowEnglish}}
   </div>
-  <div class="type-prompt">{{type:Expression}}</div>
+  <div class="type-prompt">{{type:Reading}}</div>
 </div>
 """
 

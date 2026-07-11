@@ -35,7 +35,7 @@ Import the `.apkg` in Anki (**Add** first time, **Update** for note-type templat
 
 ## Card layout
 
-- **Front:** cloze in `Context1` + `{{type:Expression}}` (+ progressive kana/English hints)
+- **Front:** cloze in `Context1` + `{{type:Reading}}` (+ progressive kana/English hints)
 - **Back:** expression + reading, **word English**, full sentence (+ furigana when present), **sentence translation**
 
 ## Related

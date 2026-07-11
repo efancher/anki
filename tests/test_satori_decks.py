@@ -101,6 +101,7 @@ class SatoriDecksTests(unittest.TestCase):
         model = make_satori_model()
         front = model.templates[0]["qfmt"]
         back = model.templates[0]["afmt"]
+        self.assertIn("{{type:Reading}}", front)
         self.assertNotIn("ShowKana", front)
         self.assertNotIn("hint-reading", front)
         self.assertIn("{{furigana:SentenceFurigana}}", back)
