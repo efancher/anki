@@ -38,6 +38,34 @@ Import the `.apkg` in Anki (**Add** first time, **Update** for note-type templat
 - **Front:** cloze in `Context1` + `{{type:Reading}}` (+ progressive kana/English hints)
 - **Back:** expression + reading, **word English**, full sentence (+ furigana when present), **sentence translation**
 
+## Gloss worksheet (Cure Dolly–style mapping practice)
+
+Not an Anki card — a practice sheet so you map **Japanese order → sticky English** before looking at fluent English. CHUNK / ROLE / LIT are blanks; Satori’s translation stays on the EN line.
+
+Anki open with AnkiConnect:
+
+```bash
+python3 scripts/satori_gloss_worksheet.py
+python3 scripts/satori_gloss_worksheet.py --limit 3
+python3 scripts/satori_gloss_worksheet.py --selected
+python3 scripts/satori_gloss_worksheet.py --note-id 2031086401000 -o /tmp/gloss.txt
+```
+
+Ad-hoc (no Anki):
+
+```bash
+python3 scripts/satori_gloss_worksheet.py \
+  --sentence '落ちる間にひまがたっぷりあってまわりをゆっくりみまわせた' \
+  --translation 'There was plenty of time while falling, so I could look around at my leisure.'
+```
+
+Fill in:
+
+1. **CHUNK** — space particles / て links / clause boundaries  
+2. **ROLE** — Aが, engine, を-car, time, …  
+3. **LIT** — Japanese-order sticky English (not fluent EN)  
+4. Compare to **EN**, then optionally open the printed ichi.moe link
+
 ## Related
 
 - [migaku_mining.md](migaku_mining.md) — video/browser mining (same Immersion family)
