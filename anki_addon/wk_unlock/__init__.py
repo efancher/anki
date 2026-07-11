@@ -146,7 +146,7 @@ def collect_kanji_meaning_unlock_notes() -> List[NoteUnlockState]:
     return notes
 
 
-MINING_NOTE_TYPE = "WK Yomitan Immersion"
+MINING_NOTE_TYPE = "WK Migaku Immersion"
 FIELD_HINT_STAGE = "HintStage"
 FIELD_SHOW_ENGLISH = "ShowEnglish"
 FIELD_SHOW_KANA = "ShowKana"
@@ -191,7 +191,9 @@ def _mining_hint_state(note) -> Optional[MiningHintState]:
 
 def collect_mining_hint_notes() -> List[MiningHintState]:
     notes: List[MiningHintState] = []
-    for note_id in mw.col.find_notes("tag:yomitan-mining -tag:mining-setup"):
+    for note_id in mw.col.find_notes(
+        "(tag:migaku-mining OR tag:satori-mining) -tag:mining-setup"
+    ):
         model_note = mw.col.get_note(note_id)
         state = _mining_hint_state(model_note)
         if state is not None:

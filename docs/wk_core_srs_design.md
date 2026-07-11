@@ -1,22 +1,22 @@
 # WaniKani → Anki Core SRS — Design & Implementation Tracker
 
-**Status:** Migration-ready — Phase 1 + Phase 2 complete; post-Phase 2 UX polish (Review card, mnemonics, reading audio, hidden-subject filter)  
-**Last updated:** 2026-06-28  
+**Status:** Meaning-anchor curriculum — core dual Review retired from default; conjugations unlock via kanji meaning  
+**Last updated:** 2026-07-10  
 **Owner intent:** Replace WaniKani’s review queue with Anki + FSRS. One-time WK schedule import. All unlock/availability logic runs **inside Anki** (no weekly Python script for progress).
 
-### Current snapshot (2026-06-28)
+### Current snapshot (2026-07-10)
 
 | Area | State |
 |------|--------|
-| **Generator** | `python wk_decks.py --from-config` builds core + supplementary; `no_wk_progress_filter: true`, `core.bootstrap_scheduling: true` in [wk_deck_config.json](../wk_deck_config.json) |
-| **Core SRS** | Three decks: `WaniKani Core · Radicals/Kanji/Vocabulary`; one **Review** card per kanji/vocab (`WK Core Item` **v4**) |
-| **Unlock** | `anki_addon/wk_unlock` — radical→kanji→vocab via `PrerequisiteIds`; supplementary via linked `WkSubjectId` |
-| **Tests** | 158 passing (scheduling, core, unlock, supplementary gating, mnemonics, reading audio, config) |
-| **User docs** | [wk_anki_runbook.md](../wk_anki_runbook.md#core-srs-migration-wk--anki) migration playbook |
+| **Generator** | `python wk_decks.py --from-config` — default `generate_decks` uses `core-radical` + `kanji-meaning` (not core kanji/vocab Review) |
+| **Kanji path** | **Kanji Meaning Anchor** (kanji → English); readings via cloze / phonetic / immersion |
+| **Unlock** | `wk_unlock` — conjugations, verb/adj types, vocab cloze/dictation/sentence via kanji meaning `PrerequisiteIds` (Guru+); phonetic = reviewed once |
+| **Immersion** | Migaku + Satori (`scripts/import_satori.py`) cloze decks |
+| **User docs** | [wk_anki_runbook.md](../wk_anki_runbook.md), [satori_mining.md](satori_mining.md) |
 
 **Not linked to core unlock:** grammar, Tae Kim exercises, leech decks (no `WkSubjectId` on leech note type).
 
-**Supplementary gating (wk-locked + `WkSubjectId`):** vocab-cloze, dictation, conjugations, conjugation-reverse, phonetic families, verb/adjective types.
+**Supplementary gating (wk-locked + kanji `PrerequisiteIds`):** vocab-cloze, dictation, vocab-sentence, conjugations, conjugation-reverse, verb/adjective types. Phonetic families: family kanji reviewed once.
 
 > **Agents:** Read this entire file before working on core SRS, unlock addon, or scheduling bootstrap. After any meaningful change to those areas, update **Last updated**, **Implementation status**, and **Session log** at the bottom.
 
@@ -132,10 +132,10 @@ Radicals: meaning-only (`WK Core Radical` v2), no reading audio. Kanji audio: ed
 |-----------|------------|-------------------|
 | vocab-cloze | `WkSubjectId` | That vocab mature |
 | dictation | `WkSubjectId` | That vocab mature |
-| conjugations-verbs/adjectives | `WkSubjectId` | That vocab mature in core |
-| conjugations-reverse | `WkSubjectId` | That vocab mature in core |
-| phonetic families | `WkSubjectId` | Linked kanji mature in core |
-| verb/adjective types | `WkSubjectId` | That vocab mature in core |
+| conjugations-verbs/adjectives | `WkSubjectId` + `PrerequisiteIds` | Kanji components Guru+ in Kanji Meaning Anchor |
+| conjugations-reverse | `WkSubjectId` + `PrerequisiteIds` | Kanji components Guru+ in Kanji Meaning Anchor |
+| phonetic families | `WkSubjectId` + `PrerequisiteIds` | Any family kanji reviewed once (meaning anchor or core) |
+| verb/adjective types | `WkSubjectId` + `PrerequisiteIds` | Kanji components Guru+ in Kanji Meaning Anchor |
 | grammar | — | **Not gated** — import caps only (`max_jlpt`, etc.) |
 | tae-kim-exercises | — | **Not gated** — lesson cap at import only |
 
@@ -366,7 +366,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 18 | Filtered decks for core SRS | **Done** | `WK::Core Radicals/Kanji/Vocabulary` in `FILTERED_DECK_DEFINITIONS` |
 | 19 | `WK::Core::` deck hierarchy | **Not started** | Flat names (O1) |
 | 20 | YouTube immersion mining | **Planned** | [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — after core stable |
-| 21 | Yomitan immersion (open deck) | **Done** | [yomitan_mining.md](yomitan_mining.md) — template v5+ |
+| 21 | Migaku immersion (open deck) | **Done** | [migaku_mining.md](migaku_mining.md) — template v12+ |
 | 22 | VOICEVOX TTS for immersion | **Planned** | [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md) — fields reserved; synthesis deferred |
 
 ---
@@ -383,8 +383,8 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | `wk_decks.py` | CLI, models, supplementary gating, filtered deck defs |
 | `wk_deck_config.json` | Default `generate_decks`, core, reading audio |
 | `dictation_decks.py` | Dictation deck (imports audio helpers from `wk_reading_audio`) |
-| `mining_decks.py` | Yomitan immersion note type (open deck, no WK gating) |
-| `docs/yomitan_mining.md` | Yomitan → AnkiConnect setup |
+| `mining_decks.py` | Migaku immersion note type (open deck, progressive hints) |
+| `docs/migaku_mining.md` | Migaku → Anki Map Fields setup |
 | `docs/wk_voicevox_tts_design.md` | **Planned** VOICEVOX synthesis for immersion cards |
 | `anki_addon/wk_unlock/` | Unlock + mature tags (core + supplementary) |
 | `anki_addon/wk_filtered_decks/` | Daily filtered decks |
@@ -446,12 +446,13 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 2026-06-28 | WK mnemonic highlights (`wk_mnemonic_html`); `WK Core Item` v3→v4 reading audio (`wk_reading_audio.py`); config `reading_voice` bool-coercion bugfix. |
 | 2026-06-28 | Doc sync: migration-ready status, deck-linking section, Phase 3 gaps (root radicals, core filtered decks, grammar gating). |
 | 2026-06-28 | Phase 3: root radical auto-unlock (`prerequisites_met` empty→True), core filtered decks, phonetic/verb-type/conjugation-reverse on wk-locked gating + `WkSubjectId`. |
+| 2026-07-10 | Retire default core kanji/vocab dual Review; conjugations + verb/adj types unlock via kanji meaning `PrerequisiteIds`; add Immersion · Satori CSV import. |
 
 ## Related docs
 
 - [wk_anki_runbook.md](../wk_anki_runbook.md) — current weekly import workflow
 - [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — **planned** YouTube sentence mining (deferred)
-- [yomitan_mining.md](yomitan_mining.md) — Yomitan immersion deck (open, no gating)
+- [migaku_mining.md](migaku_mining.md) — Migaku immersion deck
 - [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md) — **planned** VOICEVOX TTS for immersion cards
 - [anki_addon/README.md](../anki_addon/README.md) — filtered decks + FSRS preset addons
 - `.cursor/rules/wk-anki-template-versions.mdc` — bump templates when changing note types

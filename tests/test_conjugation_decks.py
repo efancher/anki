@@ -38,6 +38,16 @@ class ConjugationMinSrsTest(unittest.TestCase):
     def test_default_min_srs_is_master(self) -> None:
         self.assertEqual(CONJUGATION_DEFAULT_MIN_SRS, WK_SRS_STAGE_MASTER)
 
+    def test_conjugation_models_include_kanji_prerequisite_ids(self) -> None:
+        for model in (
+            make_conjugation_model(),
+            make_conjugation_reverse_model(),
+            make_word_class_model(),
+        ):
+            names = [field["name"] for field in model.fields]
+            self.assertIn("PrerequisiteIds", names)
+            self.assertLess(names.index("PrerequisiteIds"), names.index("Meta"))
+
     def test_collect_respects_min_srs(self) -> None:
         vocab = mock_vocab_for_conjugation("食べる", "たべる", ["ichidan verb"], vocab_id=42)
         assignment_index = {

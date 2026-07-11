@@ -1,5 +1,5 @@
 """
-mining_logic.py — pure helpers for Yomitan mining cloze cards (add-on + tests).
+mining_logic.py — pure helpers for Migaku mining cloze cards (add-on + tests).
 
 Lives under wk_immersion for Anki sync; tests import from anki_addon/wk_immersion/.
 """
@@ -25,10 +25,28 @@ _CSS_LIKE_RE = re.compile(r"[{}]|\.yomitan|data-|[a-z-]+\s*\{", re.IGNORECASE)
 _DICT_NAME_PARENS_RE = re.compile(r"\([^)]*(?:例解|辞典|国語)[^)]*\)")
 _SENSE_CIRCLED_RE = re.compile(r"(?:❶|❷|❸|❹|①|②|③|④)")
 _SENSE_NUMBERED_RE = re.compile(r"(?:１|２|３|４|[0-9]+)\s*")
+# Migaku inline syntax: 皆[みな;n2]さん, {、}, etc. (see Migaku-Anki-Addon languages/ja)
+_MIGAKU_CJ_BRACKET_RE = re.compile(r"( +|\[(?!sound:).*?\])(?![^{]*})")
 
 
 def strip_html(value: str) -> str:
     return _TAG_RE.sub("", value or "").strip()
+
+
+def strip_migaku_syntax(text: str) -> str:
+    """Plain Japanese surface form — drop Migaku [reading;pitch] and {punctuation} wrappers."""
+    if not (text or "").strip():
+        return ""
+    if not any(ch in text for ch in "{}[]"):
+        return text.strip()
+    cleaned = _MIGAKU_CJ_BRACKET_RE.sub("", text)
+    cleaned = cleaned.replace("{", "").replace("}", "")
+    cleaned = re.sub(r"  +", " ", cleaned)
+    return cleaned.strip()
+
+
+def plain_mining_text(value: str) -> str:
+    return strip_migaku_syntax(strip_html(value))
 
 
 def blank_targets_for_expression(expression: str, reading: str) -> List[str]:
@@ -46,10 +64,12 @@ def blank_targets_for_expression(expression: str, reading: str) -> List[str]:
 
 def build_cloze_sentence(sentence: str, targets: Sequence[str]) -> Tuple[str, str]:
     """Return (cloze_html, plain_sentence). Falls back to full sentence if no match."""
-    plain = strip_html(sentence)
+    plain = plain_mining_text(sentence)
     if not plain:
         return "", ""
-    for target in targets:
+    clean_targets = [plain_mining_text(target) for target in targets]
+    clean_targets = [target for target in clean_targets if target]
+    for target in clean_targets:
         idx = plain.find(target)
         if idx >= 0:
             before = html.escape(plain[:idx])
@@ -193,6 +213,9 @@ def compute_mining_hint_stage(
 
 @dataclass(frozen=True)
 class MiningEnrichment:
+    expression: str
+    reading: str
+    sentence: str
     cloze_sentence: str
     wk_subject_id: str
     prerequisite_ids: str
@@ -214,22 +237,30 @@ def enrich_mining_note_fields(
     sentence: str,
     sentence_furigana: str,
     glossary: str,
+    translation: str = "",
     wk_entry: Optional[dict],
 ) -> MiningEnrichment:
+    expression = plain_mining_text(expression)
+    reading = plain_mining_text(reading)
+    sentence = plain_mining_text(sentence)
     targets = blank_targets_for_expression(expression, reading)
     cloze_html, _plain = build_cloze_sentence(sentence, targets)
     wk_subject_id = str(wk_entry["id"]) if wk_entry else ""
     prerequisite_ids = str(wk_entry.get("prerequisite_ids") or "") if wk_entry else ""
     wk_meaning = str(wk_entry.get("meaning") or "") if wk_entry else ""
+    english_hint = wk_meaning or (translation or "").strip()
     hint_stage, show_english, show_kana, show_jj_back = mining_hint_display_flags(0)
     sentence_kana = build_sentence_kana(sentence_furigana, sentence, reading)
-    hint_glossary = glossary_snippet(glossary) if not wk_meaning else ""
+    hint_glossary = glossary_snippet(glossary) if not english_hint else ""
     dict_ja, dict_en = dictionary_links_html(expression, reading)
-    if wk_meaning:
+    if english_hint:
         dict_en = ""
     if not cloze_html and sentence:
-        cloze_html = html.escape(strip_html(sentence))
+        cloze_html = html.escape(sentence)
     return MiningEnrichment(
+        expression=expression,
+        reading=reading,
+        sentence=sentence,
         cloze_sentence=cloze_html,
         wk_subject_id=wk_subject_id,
         prerequisite_ids=prerequisite_ids,

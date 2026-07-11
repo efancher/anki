@@ -169,6 +169,13 @@ class WkDeckConfigTests(unittest.TestCase):
         self.assertFalse(args.bootstrap_wk_scheduling)
         self.assertFalse(args.fetch_wk_review_statistics)
 
+    def test_normalize_core_alias_is_radicals_only(self) -> None:
+        self.assertEqual(normalize_wanted_decks({"core"}), {"core-radical"})
+        self.assertEqual(
+            normalize_wanted_decks({"core-kanji", "core-vocabulary"}),
+            {"core-kanji", "core-vocabulary"},
+        )
+
     def test_wanted_decks_uses_generate_decks_from_config(self) -> None:
         args = parse_args([])
         args.deck = "all"

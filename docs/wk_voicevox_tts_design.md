@@ -2,9 +2,9 @@
 
 **Status:** Planned — note type reserved (template v5+); synthesis tooling not built  
 **Last updated:** 2026-07-04  
-**Scope v1:** Yomitan immersion deck (`WK Yomitan Immersion`); extend to grammar cloze later if useful
+**Scope v1:** Migaku immersion deck (`WK Migaku Immersion`); extend to grammar cloze later if useful
 
-> **Prerequisite:** [Yomitan immersion mining](yomitan_mining.md) deck imported; optional Kanjium pitch fields on notes.
+> **Prerequisite:** [Migaku immersion mining](migaku_mining.md) deck imported.
 
 ---
 
@@ -49,7 +49,7 @@
 
 - [x] Add **VoicevoxAudio**, **VoicevoxSpeakerId** to mining note type  
 - [x] Template audio cascade  
-- [x] Document in [yomitan_mining.md](yomitan_mining.md)  
+- [x] Document in [migaku_mining.md](migaku_mining.md)  
 - [x] Tracker row in [wk_core_srs_design.md](wk_core_srs_design.md)  
 
 ### Phase 1 — Local VOICEVOX batch synthesis (CLI or Anki menu)
@@ -107,7 +107,7 @@ Store as `[sound:voicevox_{hash}.wav]` in **VoicevoxAudio**; set **VoicevoxSpeak
 
 ## Related
 
-- [yomitan_mining.md](yomitan_mining.md) — current mining setup  
+- [migaku_mining.md](migaku_mining.md) — current mining setup  
 - [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — clip audio (different pipeline)  
 - External: [Toocanzs/anki-voicevox](https://github.com/Toocanzs/anki-voicevox) — interim manual workflow (writes **Audio**, not **VoicevoxAudio**)
 

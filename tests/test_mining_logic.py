@@ -17,6 +17,7 @@ from mining_logic import (
     enrich_mining_note_fields,
     glossary_snippet,
     mining_hint_display_flags,
+    strip_migaku_syntax,
 )
 
 
@@ -26,6 +27,29 @@ class MiningLogicTests(unittest.TestCase):
         self.assertEqual(plain, "私は学生です。")
         self.assertIn("cloze-blank", cloze)
         self.assertNotIn("学生", cloze)
+
+    def test_build_cloze_sentence_strips_migaku_syntax(self) -> None:
+        raw = "皆[みな;n2]さんは学生[がくせい;h]です。"
+        cloze, plain = build_cloze_sentence(raw, ["学生"])
+        self.assertEqual(plain, "皆さんは学生です。")
+        self.assertIn("cloze-blank", cloze)
+
+    def test_enrich_strips_migaku_syntax_fields(self) -> None:
+        raw_sentence = (
+            "皆[みな;n2]さん と 一緒[いっしょ;h] に{、}"
+            "日本語[にほんご;h]の 勉強[べんきょう;h] を 頑張[がんば;k3]りましょう"
+        )
+        result = enrich_mining_note_fields(
+            expression="頑張[がんば;k3]り",
+            reading="がんばり",
+            sentence=raw_sentence,
+            sentence_furigana="",
+            glossary="",
+            wk_entry=None,
+        )
+        self.assertEqual(result.sentence, "皆さんと一緒に、日本語の勉強を頑張りましょう")
+        self.assertEqual(result.expression, "頑張り")
+        self.assertIn("cloze-blank", result.cloze_sentence)
 
     def test_build_sentence_kana_from_ruby(self) -> None:
         kana = build_sentence_kana("<ruby>学生<rt>がくせい</rt></ruby>です。", "", "")
@@ -77,9 +101,23 @@ class MiningLogicTests(unittest.TestCase):
             sentence="私は学生です。",
             sentence_furigana="",
             glossary="❶学ぶ人。",
+            translation="student from migaku",
             wk_entry={"id": 123, "meaning": "student", "prerequisite_ids": "10"},
         )
         self.assertEqual(result.wk_meaning, "student")
+        self.assertEqual(result.hint_glossary, "")
+        self.assertEqual(result.dict_links_en, "")
+
+    def test_enrich_uses_translation_as_english_hint(self) -> None:
+        result = enrich_mining_note_fields(
+            expression="願い",
+            reading="ねがい",
+            sentence="お願いします。",
+            sentence_furigana="",
+            glossary="❶ねがうこと。",
+            translation="request",
+            wk_entry=None,
+        )
         self.assertEqual(result.hint_glossary, "")
         self.assertEqual(result.dict_links_en, "")
 

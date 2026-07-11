@@ -66,7 +66,7 @@ class ImmersionTtsLogicTests(unittest.TestCase):
     def test_should_synthesize_when_sentence_present(self) -> None:
         self.assertTrue(
             should_synthesize_note(
-                note_type_name="WK Yomitan Immersion",
+                note_type_name="WK Migaku Immersion",
                 sentence="頭が痛い。",
                 sentence_audio="",
                 config=ImmersionTtsConfig(),
@@ -77,7 +77,7 @@ class ImmersionTtsLogicTests(unittest.TestCase):
     def test_should_not_resynthesize_existing_audio(self) -> None:
         self.assertFalse(
             should_synthesize_note(
-                note_type_name="WK Yomitan Immersion",
+                note_type_name="WK Migaku Immersion",
                 sentence="頭が痛い。",
                 sentence_audio="[sound:foo.wav]",
                 config=ImmersionTtsConfig(),

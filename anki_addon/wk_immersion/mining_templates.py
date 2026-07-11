@@ -1,4 +1,4 @@
-"""Shared Anki card templates for WK Yomitan Immersion (mining cloze v10)."""
+"""Shared Anki card templates for WK Migaku Immersion (mining cloze)."""
 
 MINING_SENTENCE_TTS = "{{tts ja_JP:Sentence}}"
 
@@ -8,9 +8,9 @@ MINING_FRONT = """
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
   <div class="hint-block">
     {{#ShowKana}}{{#Reading}}<div class="hint-reading">{{Reading}}</div>{{/Reading}}{{/ShowKana}}
-    {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{/ShowEnglish}}
-    {{#ShowEnglish}}{{^WkMeaning}}{{{DictLinksEn}}}{{/WkMeaning}}{{/ShowEnglish}}
-    {{#ShowEnglish}}{{^WkMeaning}}{{#HintGlossary}}<div class="hint-glossary"><span class="meta">意味</span> {{HintGlossary}}</div>{{/HintGlossary}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{^WkMeaning}}{{#Translation}}<div class="hint-meaning">{{Translation}}</div>{{/Translation}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{^WkMeaning}}{{^Translation}}{{{DictLinksEn}}}{{/Translation}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{^WkMeaning}}{{^Translation}}{{#HintGlossary}}<div class="hint-glossary"><span class="meta">意味</span> {{HintGlossary}}</div>{{/HintGlossary}}{{/Translation}}{{/WkMeaning}}{{/ShowEnglish}}
     {{#ShowEnglish}}
     {{#PitchAccents}}<div class="hint-pitch"><span class="meta">Pitch</span> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>{{/PitchAccents}}
     {{/ShowEnglish}}
@@ -21,6 +21,9 @@ MINING_FRONT = """
 
 MINING_BACK_CONTEXT = (
     """
+{{#Image}}
+<div class="context-image">{{Image}}</div>
+{{/Image}}
 {{#Sentence}}
 <div class="context">
   <div class="sentence-audio-block">

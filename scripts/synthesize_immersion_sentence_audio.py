@@ -1,5 +1,5 @@
 """
-WK Immersion — synthesize full-sentence audio for Yomitan-mined notes.
+WK Immersion — synthesize full-sentence audio for Migaku-mined notes (fallback).
 
 Usage (Anki must be running; VOICEVOX engine recommended):
 
@@ -125,8 +125,8 @@ def main() -> None:
             "Your note type is outdated (imported before SentenceAudio was added).\n"
             "Fix:\n"
             "  1. python3 wk_decks.py --deck mining\n"
-            "  2. Anki → File → Import → out/wk_mining.apkg\n"
-            "  3. Choose **Update** (not Add) for note type WK Yomitan Immersion\n"
+            "  2. Anki → File → Import → out/wk_migaku.apkg\n"
+            "  3. Choose **Update** (not Add) for note type WK Migaku Immersion\n"
             "  4. Re-run this script\n\n"
             "Or use Tools → WK Synthesize Immersion Sentence Audio inside Anki after updating."
         )

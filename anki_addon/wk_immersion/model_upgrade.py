@@ -1,5 +1,5 @@
 """
-Upgrade WK Yomitan Immersion note type in-place for mining cloze template v10.
+Upgrade WK Migaku Immersion note type in-place for mining cloze template.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ MINING_CLOZE_TEMPLATE_MARKER = "cloze-sentence"
 MINING_LEGACY_TEMPLATE_MARKER = "word-block"
 
 MINING_FIELDS_TO_ENSURE: Sequence[str] = (
+    "Translation",
+    "Image",
     "ClozeSentence",
     "WkSubjectId",
     "PrerequisiteIds",

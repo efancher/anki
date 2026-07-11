@@ -15,7 +15,7 @@ Decks (default --deck all):
   - kanji-meaning: kanji → English meaning only, lighter anchor alongside core kanji reading (see kanji_meaning_decks.py)
   - vocab-sentence: WK context sentences with highlighted vocab — meaning recall and reading type-in (see vocab_sentence_decks.py)
   - rendaku: two-kanji compounds where the second morpheme voices (連濁) (see rendaku_decks.py)
-  - mining: open Yomitan immersion deck (note type only; see docs/yomitan_mining.md)
+  - mining: Migaku immersion deck (see docs/migaku_mining.md)
   - all: all of the above
 
 Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
@@ -124,10 +124,7 @@ DEFAULT_GENERATE_DECKS = (
     "conjugations-verbs",
     "conjugations-adjectives",
     "verb-types",
-    "vocab-cloze",
-    "dictation",
     "kanji-meaning",
-    "vocab-sentence",
     "rendaku",
     "grammar",
     "mining",
@@ -235,11 +232,12 @@ DECK_IDS = {
     "core-kanji": 2059400129,
     "core-vocabulary": 2059400130,
     "rendaku": 2059400131,
-    "mining": 2059400132,
+    "mining": 2059400133,
     "kanji-contrast": 2059400133,
     "kanji-meaning": 2059400134,
     "vocab-sentence-meaning": 2059400135,
     "vocab-sentence-reading": 2059400136,
+    "satori": 2059400137,
 }
 
 MODEL_IDS = {
@@ -258,11 +256,12 @@ MODEL_IDS = {
     "core_radical": 1865429025,
     "core_item": 1865429026,
     "rendaku": 1865429027,
-    "mining": 1865429029,
+    "mining": 1865429030,
     "kanji_contrast": 1865429030,
     "kanji_meaning": 1865429031,
     "vocab_sentence_meaning": 1865429032,
     "vocab_sentence_reading": 1865429033,
+    "satori": 1865429034,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -275,20 +274,21 @@ MODEL_TEMPLATE_VERSIONS = {
     "reading_keyword": "v3",
     "kanji_radical": "v2",
     "phonetic_drill": "v7",
-    "conjugation": "v6",
-    "word_class": "v4",
+    "conjugation": "v7",
+    "word_class": "v5",
     "vocab_cloze": "v8",
-    "conjugation_reverse": "v6",
+    "conjugation_reverse": "v7",
     "grammar_cloze": "v4",
     "dictation": "v4",
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v11",
+    "mining": "v12",
     "kanji_contrast": "v3",
     "kanji_meaning": "v1",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
+    "satori": "v2",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -318,6 +318,7 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "kanji_meaning": 22,
     "vocab_sentence_meaning": 23,
     "vocab_sentence_reading": 24,
+    "satori": 25,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -341,11 +342,12 @@ NOTE_TYPE_NAMES = {
     "core_radical": "WK Core Radical",
     "core_item": "WK Core Item",
     "rendaku": "WK Update-Safe Rendaku",
-    "mining": "WK Yomitan Immersion",
+    "mining": "WK Migaku Immersion",
     "kanji_contrast": "WK Update-Safe Kanji Contrast",
     "kanji_meaning": "WK Update-Safe Kanji Meaning",
     "vocab_sentence_meaning": "WK Update-Safe Vocab Sentence Meaning",
     "vocab_sentence_reading": "WK Update-Safe Vocab Sentence Reading",
+    "satori": "WK Satori Immersion",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
@@ -441,39 +443,9 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Core Kanji",
-        "search": daily_filtered_deck_search('deck:"WaniKani Core · Kanji"'),
-        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Core Vocabulary",
-        "search": daily_filtered_deck_search('deck:"WaniKani Core · Vocabulary"'),
-        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::N5 · Kanji",
-        "search": daily_filtered_deck_search(
-            "tag:wk-core tag:jlpt-n5-vocab tag:kanji",
-        ),
-        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::N5 · Vocabulary",
-        "search": daily_filtered_deck_search(
-            "tag:wk-core tag:jlpt-n5-vocab tag:vocabulary",
-        ),
-        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::N5 · Prereq Kanji",
-        "search": prereq_filtered_deck_search(
-            "tag:wk-core tag:jlpt-n5-prereq tag:kanji",
-        ),
-        "limit": 25,
+        "name": "WK::Kanji Meaning",
+        "search": daily_filtered_deck_search('deck:"WaniKani Kanji Meaning Anchor"'),
+        "limit": 20,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
@@ -482,36 +454,6 @@ FILTERED_DECK_DEFINITIONS = [
             "tag:wk-core tag:jlpt-n5-prereq tag:radical",
         ),
         "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Vocab Context",
-        "search": daily_filtered_deck_search('deck:"WaniKani Vocabulary Context"'),
-        "limit": 25,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Dictation",
-        "search": daily_filtered_deck_search('deck:"WaniKani Dictation"'),
-        "limit": 25,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Kanji Meaning",
-        "search": daily_filtered_deck_search('deck:"WaniKani Kanji Meaning Anchor"'),
-        "limit": 20,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Vocab Sentence Meaning",
-        "search": daily_filtered_deck_search('deck:"WaniKani Vocabulary Sentence Meaning"'),
-        "limit": 25,
-        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
-    },
-    {
-        "name": "WK::Vocab Sentence Reading",
-        "search": daily_filtered_deck_search('deck:"WaniKani Vocabulary Sentence Reading"'),
-        "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
@@ -575,9 +517,17 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Immersion · Yomitan",
+        "name": "WK::Immersion · Migaku",
         "search": daily_filtered_deck_search(
-            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:mining-setup',
+            'deck:"Immersion · Migaku Mining" tag:migaku-mining -tag:mining-setup',
+        ),
+        "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Immersion · Satori",
+        "search": daily_filtered_deck_search(
+            'deck:"Immersion · Satori" tag:satori-mining',
         ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
@@ -613,11 +563,12 @@ DECK_NAMES = {
     "core-radical": "WaniKani Core · Radicals",
     "core-kanji": "WaniKani Core · Kanji",
     "core-vocabulary": "WaniKani Core · Vocabulary",
-    "mining": "Immersion · Yomitan Mining",
+    "mining": "Immersion · Migaku Mining",
     "kanji-contrast": "WaniKani Kanji Contrast",
     "kanji-meaning": "WaniKani Kanji Meaning Anchor",
     "vocab-sentence-meaning": "WaniKani Vocabulary Sentence Meaning",
     "vocab-sentence-reading": "WaniKani Vocabulary Sentence Reading",
+    "satori": "Immersion · Satori",
 }
 
 PAIR_RULES = [
@@ -3931,6 +3882,7 @@ def make_conjugation_model() -> WkModel:
         fields=[
             {"name": "GuidKey"},
             {"name": "WkSubjectId"},
+            {"name": "PrerequisiteIds"},
             {"name": "Prompt"},
             {"name": "DictExpression"},
             {"name": "DictReading"},
@@ -3985,6 +3937,7 @@ def make_conjugation_reverse_model() -> WkModel:
         fields=[
             {"name": "GuidKey"},
             {"name": "WkSubjectId"},
+            {"name": "PrerequisiteIds"},
             {"name": "Prompt"},
             {"name": "DictExpression"},
             {"name": "TypeDictExpression"},
@@ -4039,6 +3992,7 @@ def make_word_class_model() -> WkModel:
         fields=[
             {"name": "GuidKey"},
             {"name": "WkSubjectId"},
+            {"name": "PrerequisiteIds"},
             {"name": "Prompt"},
             {"name": "Expression"},
             {"name": "Reading"},
@@ -5431,7 +5385,7 @@ def build_conjugation_deck(
     *,
     tag_kind: str,
     interval_map: Optional[Mapping[int, int]] = None,
-    reading_audio: bool = True,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
@@ -5486,12 +5440,13 @@ def build_conjugation_deck(
             drill.form_key,
             f"wk-level-{level}",
         ]
-        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
+        note_tags.extend(vocab_supplementary_import_tags(vocab))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
                 str(vocab["id"]),
+                vocab_kanji_prerequisite_ids(vocab),
                 html.escape(drill.prompt),
                 html.escape(drill.dict_expr),
                 html.escape(drill.dict_reading),
@@ -5519,7 +5474,9 @@ def build_conjugation_verb_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_conjugation_deck(
         "conjugations-verbs",
@@ -5528,7 +5485,9 @@ def build_conjugation_verb_deck(
         assignment_index,
         tag_kind="conjugation-verb",
         interval_map=interval_map,
+        reading_audio=reading_audio,
         tts_config=tts_config,
+        reading_audio_voice=reading_audio_voice,
     )
 
 
@@ -5538,7 +5497,9 @@ def build_conjugation_adjective_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_conjugation_deck(
         "conjugations-adjectives",
@@ -5547,7 +5508,9 @@ def build_conjugation_adjective_deck(
         assignment_index,
         tag_kind="conjugation-adjective",
         interval_map=interval_map,
+        reading_audio=reading_audio,
         tts_config=tts_config,
+        reading_audio_voice=reading_audio_voice,
     )
 
 
@@ -5557,7 +5520,7 @@ def build_conjugation_reverse_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
-    reading_audio: bool = True,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
@@ -5609,12 +5572,13 @@ def build_conjugation_reverse_deck(
             drill.form_key,
             f"wk-level-{level}",
         ]
-        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
+        note_tags.extend(vocab_supplementary_import_tags(vocab))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
                 str(vocab["id"]),
+                vocab_kanji_prerequisite_ids(vocab),
                 html.escape(drill.prompt),
                 html.escape(drill.dict_expr),
                 html.escape(drill.dict_expr),
@@ -5643,7 +5607,7 @@ def build_word_class_deck(
     *,
     drill_kind: str,
     interval_map: Optional[Mapping[int, int]] = None,
-    reading_audio: bool = True,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
@@ -5710,12 +5674,13 @@ def build_word_class_deck(
             class_key.replace("_", "-"),
             f"wk-level-{level}",
         ]
-        note_tags.extend(supplementary_import_tags(vocab, assignment_index, interval_map=stage_interval_map))
+        note_tags.extend(vocab_supplementary_import_tags(vocab))
         note = genanki.Note(
             model=model,
             fields=[
                 guid,
                 str(vocab["id"]),
+                vocab_kanji_prerequisite_ids(vocab),
                 html.escape(prompt),
                 html.escape(expr),
                 html.escape(reading),
@@ -5742,7 +5707,9 @@ def build_verb_type_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_word_class_deck(
         "verb-types",
@@ -5751,7 +5718,9 @@ def build_verb_type_deck(
         assignment_index,
         drill_kind="verb",
         interval_map=interval_map,
+        reading_audio=reading_audio,
         tts_config=tts_config,
+        reading_audio_voice=reading_audio_voice,
     )
 
 
@@ -5761,7 +5730,9 @@ def build_adjective_type_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map: Optional[Mapping[int, int]] = None,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
+    reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:
     return build_word_class_deck(
         "adjective-types",
@@ -5770,7 +5741,9 @@ def build_adjective_type_deck(
         assignment_index,
         drill_kind="adjective",
         interval_map=interval_map,
+        reading_audio=reading_audio,
         tts_config=tts_config,
+        reading_audio_voice=reading_audio_voice,
     )
 
 
@@ -5904,8 +5877,10 @@ def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, st
 def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
     normalized = set(wanted)
     if "core" in normalized:
+        # Dual meaning/reading Review retired — radicals only. Use core-kanji /
+        # core-vocabulary explicitly if you still want those decks.
         normalized.discard("core")
-        normalized.update(("core-radical", "core-kanji", "core-vocabulary"))
+        normalized.add("core-radical")
     if "conjugations" in normalized:
         normalized.discard("conjugations")
         normalized.add("conjugations-verbs")
@@ -6561,7 +6536,7 @@ def print_preview_report(
     if "rendaku" in wanted:
         print(f"Rendaku filter: min_srs={args.rendaku_min_srs} (Master+ when 7)")
     if "mining" in wanted:
-        print(f"Yomitan immersion: {DECK_NAMES['mining']} (see docs/yomitan_mining.md)")
+        print(f"Migaku immersion: {DECK_NAMES['mining']} (see docs/migaku_mining.md)")
     if args.sentence_audio:
         print("Vocab cloze sentence audio: on (plays on card back)")
     else:
@@ -6954,8 +6929,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--reading-audio",
         action=argparse.BooleanOptionalAction,
-        default=cfg.get("reading_audio", True),
-        help="Generate reading pronunciation on core/leech cards (WK native for vocab, TTS for kanji).",
+        default=cfg.get("reading_audio", False),
+        help="Generate reading pronunciation audio (core/leech/conjugations/drills). Off by default in config.",
     )
     parser.add_argument(
         "--reading-voice",
@@ -7020,13 +6995,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> None:
-    """Build Yomitan immersion deck without WaniKani API (mining-only runs)."""
-    from mining_decks import MINING_SETUP_TAG, build_mining_deck
+    """Build Migaku immersion deck without WaniKani API (mining-only runs)."""
+    from mining_decks import MINING_EXPORT_FILENAME, MINING_SETUP_TAG, build_mining_deck
 
     if args.dry_run:
-        print(f"Yomitan immersion: {DECK_NAMES['mining']} + note type {NOTE_TYPE_NAMES['mining']}")
-        print("  See docs/yomitan_mining.md for Yomitan field mapping and UserNotes.")
-        print("\nRe-run without --dry-run to write wk_mining.apkg.")
+        print(f"Migaku immersion: {DECK_NAMES['mining']} + note type {NOTE_TYPE_NAMES['mining']}")
+        print("  See docs/migaku_mining.md for Migaku Map Fields setup.")
+        print(f"\nRe-run without --dry-run to write {MINING_EXPORT_FILENAME}.")
         return
     vocab_items: Optional[List[dict]] = None
     cached = load_cache_items_only("subjects", "vocabulary_kanji_radical")
@@ -7055,7 +7030,7 @@ def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> No
     print(f"  {path}")
     write_filtered_deck_suggestions(output_dir)
     write_filtered_decks_json(output_dir)
-    print("Yomitan setup: docs/yomitan_mining.md")
+    print("Migaku setup: docs/migaku_mining.md")
     print_import_verification_help(bundle_path)
     maybe_sync_anki_addons(args)
 
@@ -7459,7 +7434,7 @@ def main() -> None:
     if rendaku_items:
         print(f"Rendaku: {len(rendaku_items)} (min SRS {args.rendaku_min_srs})")
     if "mining" in wanted:
-        print(f"Yomitan immersion: note type + deck (see docs/yomitan_mining.md)")
+        print(f"Yomitan immersion: note type + deck (see docs/migaku_mining.md)")
     if core_radical_items:
         print(f"Core radicals: {len(core_radical_items)} (full catalog ≤ level {args.max_level})")
     if core_kanji_items:
@@ -7684,7 +7659,9 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            reading_audio=bool(args.reading_audio),
             tts_config=sentence_tts_config,
+            reading_audio_voice=args.sentence_audio_voice,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7695,7 +7672,9 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            reading_audio=bool(args.reading_audio),
             tts_config=sentence_tts_config,
+            reading_audio_voice=args.sentence_audio_voice,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7706,7 +7685,9 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            reading_audio=bool(args.reading_audio),
             tts_config=sentence_tts_config,
+            reading_audio_voice=args.sentence_audio_voice,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7717,7 +7698,9 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            reading_audio=bool(args.reading_audio),
             tts_config=sentence_tts_config,
+            reading_audio_voice=args.sentence_audio_voice,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7728,7 +7711,9 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            reading_audio=bool(args.reading_audio),
             tts_config=sentence_tts_config,
+            reading_audio_voice=args.sentence_audio_voice,
         )
         created.append(path)
         built_decks.append(deck)
@@ -7832,7 +7817,9 @@ def main() -> None:
             output_dir,
             indexes["assignments"],
             interval_map=srs_interval_map,
+            reading_audio=bool(args.reading_audio),
             tts_config=sentence_tts_config,
+            reading_audio_voice=args.sentence_audio_voice,
         )
         created.append(path)
         built_decks.append(deck)

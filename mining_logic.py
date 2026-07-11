@@ -1,7 +1,7 @@
 """
 mining_logic.py
 
-Duplicate-key helpers for Yomitan immersion cards (Anki first-field dedup).
+Duplicate-key helpers for Migaku immersion cards (Anki first-field dedup).
 """
 
 from __future__ import annotations

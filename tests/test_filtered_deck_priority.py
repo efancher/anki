@@ -25,9 +25,6 @@ FIXTURES_PATH = REPO_ROOT / "filtered_deck_priority_fixtures.json"
 
 PRIORITY_FILTERED_DECK_NAMES = frozenset(
     {
-        "WK::N5 · Kanji",
-        "WK::N5 · Vocabulary",
-        "WK::N5 · Prereq Kanji",
         "WK::N5 · Prereq Radicals",
     }
 )
@@ -67,11 +64,11 @@ class FilteredDeckPriorityTests(unittest.TestCase):
         for name in PRIORITY_FILTERED_DECK_NAMES:
             self.assertIn(name, names)
 
-    def test_n5_kanji_deck_requires_vocab_and_kanji_tags(self) -> None:
-        search = filtered_deck_by_name("WK::N5 · Kanji")["search"]
+    def test_n5_prereq_radicals_deck_requires_prereq_and_radical_tags(self) -> None:
+        search = filtered_deck_by_name("WK::N5 · Prereq Radicals")["search"]
         required, _ = required_and_excluded_tags(search)
-        self.assertIn("jlpt-n5-vocab", required)
-        self.assertIn("kanji", required)
+        self.assertIn("jlpt-n5-prereq", required)
+        self.assertIn("radical", required)
 
     def test_n5_prereq_tags_from_priority_index(self) -> None:
         radical = {

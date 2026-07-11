@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
-MINING_NOTE_TYPE = "WK Yomitan Immersion"
+MINING_NOTE_TYPE = "WK Migaku Immersion"
 FIELD_SENTENCE = "Sentence"
 FIELD_SENTENCE_FURIGANA = "SentenceFurigana"
 FIELD_SENTENCE_AUDIO = "SentenceAudio"

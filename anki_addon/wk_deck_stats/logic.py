@@ -60,7 +60,7 @@ SUPPLEMENTARY_DECK_ORDER: Tuple[str, ...] = (
     "Japanese Grammar Context",
     "WaniKani Dictation",
     "WaniKani Rendaku",
-    "Immersion · Yomitan Mining",
+    "Immersion · Migaku Mining",
     "WaniKani Leech Fixes",
     "WaniKani Pitch Leeches",
     "WaniKani Verb Pair Contrasts",

@@ -31,8 +31,10 @@ This creates/rebuilds filtered decks under the **WK** deck group:
 - WK::Leeches
 - WK::Meaning Leeches
 - WK::Reading Leeches
-- WK::Core Radicals / Kanji / Vocabulary
-- WK::Immersion · Yomitan (optional — Yomitan mining queue)
+- WK::Core Radicals
+- WK::Kanji Meaning
+- WK::Immersion · Migaku (optional — Migaku mining queue)
+- WK::Immersion · Satori (optional — Satori Reader CSV cloze)
 - WK::Confusables Light
 
 ## Optional: default JSON path
@@ -139,9 +141,9 @@ Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
 
 ---
 
-# WK Immersion (Yomitan sentence audio)
+# WK Immersion (Migaku mining)
 
-Synthesizes **full-sentence audio** for **WK Yomitan Immersion** notes when Yomitan adds them via AnkiConnect, and can backfill older notes.
+Enriches **WK Migaku Immersion** notes at mine time (cloze, WK links, hints) and synthesizes **SentenceAudio** only when Migaku did not attach a clip.
 
 ## Install once
 
@@ -149,18 +151,20 @@ Copy `wk_immersion` into Anki's add-ons folder (or run `./scripts/sync_anki_addo
 
 ## At mine time
 
-1. Start **VOICEVOX** — see [docs/voicevox_setup.md](../docs/voicevox_setup.md) (English; no need to use VOICEVOX’s Japanese UI). Or set `"engine": "edge"` in `out/wk_immersion_config.json`.
-2. Mine with Yomitan **+** — **wk_immersion** enriches cloze/WK fields and fills **SentenceAudio** before the note is saved.
+1. Keep **Anki open** on your mining laptop — Migaku sends cards directly.
+2. Migaku fills **SentenceAudio** and **Image** from the source clip when mining video.
+3. **wk_immersion** enriches cloze/WK fields before the note is saved.
 
 ## Backfill / CLI
 
-- **Tools → WK Enrich Mining Notes (cloze + WK links)** — backfill cloze blank, WK ids, hint flags on existing notes
-- **Tools → WK Synthesize Immersion Sentence Audio** — notes missing **SentenceAudio**
+- **Tools → WK Configure Migaku Field Map** — writes Migaku field maps (Expression → Target Word, etc.)
+- **Tools → WK Enrich Mining Notes (cloze + WK links)** — backfill cloze blank, WK ids, hint flags
+- **Tools → WK Synthesize Immersion Sentence Audio** — notes missing **SentenceAudio** (VOICEVOX/edge fallback)
 - `python3 scripts/synthesize_immersion_sentence_audio.py` — via AnkiConnect (Anki must be open)
 
 Hint stages (English → kana-only → full J–J on back) update on **Tools → WK Run Unlock Pass** in **wk_unlock** (no suspend/lock).
 
-See [docs/yomitan_mining.md](../docs/yomitan_mining.md) and [docs/voicevox_setup.md](../docs/voicevox_setup.md).
+See [docs/migaku_mining.md](../docs/migaku_mining.md) and [docs/voicevox_setup.md](../docs/voicevox_setup.md).
 
 ---
 

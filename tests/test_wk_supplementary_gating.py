@@ -154,7 +154,6 @@ class WkSupplementaryGatingTests(unittest.TestCase):
 
     def test_filtered_deck_searches_scope_daily_workload(self) -> None:
         prereq_names = {
-            "WK::N5 · Prereq Kanji",
             "WK::N5 · Prereq Radicals",
         }
         for spec in FILTERED_DECK_DEFINITIONS:
@@ -211,14 +210,19 @@ class WkSupplementaryGatingTests(unittest.TestCase):
                 by_name[name]["search"],
             )
 
-    def test_n5_filtered_decks_split_kanji_and_vocab(self) -> None:
+    def test_core_dual_review_filtered_decks_retired(self) -> None:
         by_name = {spec["name"]: spec for spec in FILTERED_DECK_DEFINITIONS}
-        kanji = by_name["WK::N5 · Kanji"]
-        vocab = by_name["WK::N5 · Vocabulary"]
-        self.assertEqual(kanji["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
-        self.assertEqual(vocab["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
-        self.assertIn("tag:jlpt-n5-vocab tag:kanji", kanji["search"])
-        self.assertIn("tag:jlpt-n5-vocab tag:vocabulary", vocab["search"])
+        self.assertNotIn("WK::Core Kanji", by_name)
+        self.assertNotIn("WK::Core Vocabulary", by_name)
+        self.assertNotIn("WK::N5 · Kanji", by_name)
+        self.assertNotIn("WK::N5 · Vocabulary", by_name)
+        self.assertIn("WK::Kanji Meaning", by_name)
+        self.assertIn("WK::Immersion · Satori", by_name)
+        self.assertNotIn("WK::Vocab Context", by_name)
+        self.assertNotIn("WK::Vocab Sentence Meaning", by_name)
+        self.assertNotIn("WK::Vocab Sentence Reading", by_name)
+        self.assertNotIn("WK::Dictation", by_name)
+        self.assertIn('deck:"Immersion · Satori"', by_name["WK::Immersion · Satori"]["search"])
 
 
 if __name__ == "__main__":

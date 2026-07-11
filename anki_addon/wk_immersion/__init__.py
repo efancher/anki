@@ -1,10 +1,11 @@
 """
-WK Immersion — full-sentence audio for Yomitan-mined notes at add time.
+WK Immersion — Migaku mining enrichment and sentence-audio fallback at add time.
 
-Runs on note_will_be_added (Yomitan / AnkiConnect) and optional batch menu.
-Uses VOICEVOX when the engine is reachable; falls back to edge-tts via system python3.
+Runs on note_will_be_added (Migaku → Anki) and optional batch menu.
+Uses native Migaku SentenceAudio when present; otherwise VOICEVOX / edge-tts.
 
 Tools → WK Synthesize Immersion Sentence Audio
+Tools → WK Enrich Mining Notes
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from .logic import (
     sound_field_value,
     synthesize_sentence_audio,
 )
+from .migaku_field_map import configure_migaku_field_map
 from .mining_enrich import apply_mining_enrichment
 from .model_upgrade import ensure_immersion_model
 
@@ -100,8 +102,8 @@ def _note_type_update_message(missing: List[str]) -> str:
         f"Note type {MINING_NOTE_TYPE!r} is missing field(s): {missing_text}.\n\n"
         "The add-on can synthesize audio but cannot store it until you update the note type:\n"
         "  1. python3 wk_decks.py --deck mining\n"
-        "  2. Anki → File → Import → out/wk_mining.apkg\n"
-        "  3. Choose **Update** for WK Yomitan Immersion\n"
+        "  2. Anki → File → Import → out/wk_migaku.apkg\n"
+        "  3. Choose **Update** for WK Migaku Immersion\n"
         "  4. Run this action again"
     )
 
@@ -247,7 +249,7 @@ def _enrich_mining_note(note) -> None:
 
 
 def on_note_will_be_added(col, note, deck_id) -> None:
-    """Yomitan / AnkiConnect — enrich cloze fields and synthesize before save (Anki 23.10+)."""
+    """Migaku → Anki — enrich cloze fields; synthesize audio only when Migaku did not."""
     try:
         if col is None or note.note_type()["name"] != MINING_NOTE_TYPE:
             return
@@ -297,7 +299,7 @@ def enrich_selected_mining_notes() -> None:
     if mw.col is None:
         showWarning("Open a collection first.")
         return
-    note_ids = mw.col.find_notes('note:"WK Yomitan Immersion" -tag:mining-setup')
+    note_ids = mw.col.find_notes(f'note:"{MINING_NOTE_TYPE}" -tag:mining-setup')
     if not note_ids:
         showInfo("No mining notes found.")
         return
@@ -332,6 +334,18 @@ def synthesize_missing_sentence_audio() -> None:
     synthesize_for_note_ids(note_ids, silent=False)
 
 
+def configure_migaku_map_action() -> None:
+    if mw.col is None:
+        showWarning("Open a collection first.")
+        return
+    try:
+        message = configure_migaku_field_map(mw.col, mw.addonManager)
+    except RuntimeError as exc:
+        showWarning(str(exc))
+        return
+    showInfo(message)
+
+
 def setup_menu() -> None:
     action = QAction("WK Synthesize Immersion Sentence Audio", mw)
     action.triggered.connect(synthesize_missing_sentence_audio)
@@ -339,6 +353,9 @@ def setup_menu() -> None:
     enrich_action = QAction("WK Enrich Mining Notes (cloze + WK links)", mw)
     enrich_action.triggered.connect(enrich_selected_mining_notes)
     mw.form.menuTools.addAction(enrich_action)
+    migaku_action = QAction("WK Configure Migaku Field Map", mw)
+    migaku_action.triggered.connect(configure_migaku_map_action)
+    mw.form.menuTools.addAction(migaku_action)
 
 
 def on_main_window_did_init() -> None:

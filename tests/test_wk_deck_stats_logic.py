@@ -124,7 +124,7 @@ class WkDeckStatsLogicTests(unittest.TestCase):
         self.assertEqual(vocab.locked_count, 1)
 
     def test_standard_deck_uses_card_counts(self) -> None:
-        mining = "Immersion · Yomitan Mining"
+        mining = "Immersion · Migaku Mining"
         cards = [
             _card(
                 card_id=1,
@@ -170,7 +170,7 @@ class WkDeckStatsLogicTests(unittest.TestCase):
 
     def test_sort_deck_names_core_first(self) -> None:
         names = sort_deck_names(
-            ["Immersion · Yomitan Mining", CORE_KANJI_DECK, "Japanese Grammar Context"]
+            ["Immersion · Migaku Mining", CORE_KANJI_DECK, "Japanese Grammar Context"]
         )
         self.assertEqual(names[0], CORE_KANJI_DECK)
         self.assertIn("Japanese Grammar Context", names)

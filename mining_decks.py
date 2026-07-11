@@ -1,10 +1,10 @@
 """
 mining_decks.py
 
-Open Yomitan immersion deck + note type for live sentence/term mining via AnkiConnect.
+Migaku immersion deck + note type for sentence mining via Migaku → Anki.
 
 Front: sentence cloze + progressive hints + type target word in kanji.
-Back: full sentence + VOICEVOX audio; J–J and reference material after vocab is Guru+ in core.
+Back: screenshot + native sentence audio + full sentence; J–J after vocab is Guru+ in core.
 
 Includes one suspended placeholder card so Anki imports the deck and note type.
 """
@@ -29,22 +29,24 @@ from wk_decks import (
 )
 from wk_scheduling import patch_apkg_suspend_notes_with_tag
 
-MINING_DECK_ID = 2059400132
-MINING_MODEL_ID = 1865429029
+MINING_DECK_ID = 2059400133
+MINING_MODEL_ID = 1865429030
 MINING_DECK_NAME = DECK_NAMES["mining"]
 MINING_NOTE_TYPE_NAME = NOTE_TYPE_NAMES["mining"]
 MINING_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["mining"]
 MINING_MODEL_TEMPLATE_KEY = "mining"
-MINING_TAG = "yomitan-mining"
+MINING_TAG = "migaku-mining"
 MINING_SETUP_TAG = "mining-setup"
-MINING_SETUP_KIND = "mining-setup"
-MINING_SETUP_DUPLICATE_KEY = "wk-yomitan-mining-setup"
+MINING_SETUP_KIND = "migaku-mining-setup"
+MINING_SETUP_DUPLICATE_KEY = "wk-migaku-mining-setup"
+MINING_EXPORT_FILENAME = "wk_migaku.apkg"
 MINING_SENTENCE_TTS = "{{tts ja_JP:Sentence}}"
 
 MINING_FIELD_NAMES: Tuple[str, ...] = (
     "DuplicateKey",
     "Expression",
     "Reading",
+    "Translation",
     "Furigana",
     "PitchAccents",
     "PitchPositions",
@@ -52,6 +54,7 @@ MINING_FIELD_NAMES: Tuple[str, ...] = (
     "Glossary",
     "Synonyms",
     "Antonyms",
+    "Image",
     "ClozeSentence",
     "WkSubjectId",
     "PrerequisiteIds",
@@ -82,9 +85,9 @@ MINING_FRONT = """
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
   <div class="hint-block">
     {{#ShowKana}}{{#Reading}}<div class="hint-reading">{{Reading}}</div>{{/Reading}}{{/ShowKana}}
-    {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{/ShowEnglish}}
-    {{#ShowEnglish}}{{^WkMeaning}}{{{DictLinksEn}}}{{/WkMeaning}}{{/ShowEnglish}}
-    {{#ShowEnglish}}{{^WkMeaning}}{{#HintGlossary}}<div class="hint-glossary"><span class="meta">意味</span> {{HintGlossary}}</div>{{/HintGlossary}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{^WkMeaning}}{{#Translation}}<div class="hint-meaning">{{Translation}}</div>{{/Translation}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{^WkMeaning}}{{^Translation}}{{{DictLinksEn}}}{{/Translation}}{{/WkMeaning}}{{/ShowEnglish}}
+    {{#ShowEnglish}}{{^WkMeaning}}{{^Translation}}{{#HintGlossary}}<div class="hint-glossary"><span class="meta">意味</span> {{HintGlossary}}</div>{{/HintGlossary}}{{/Translation}}{{/WkMeaning}}{{/ShowEnglish}}
     {{#ShowEnglish}}
     {{#PitchAccents}}<div class="hint-pitch"><span class="meta">Pitch</span> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>{{/PitchAccents}}
     {{/ShowEnglish}}
@@ -95,6 +98,9 @@ MINING_FRONT = """
 
 MINING_BACK_CONTEXT = (
     """
+{{#Image}}
+<div class="context-image">{{Image}}</div>
+{{/Image}}
 {{#Sentence}}
 <div class="context">
 """
@@ -204,6 +210,8 @@ def make_mining_model() -> WkModel:
 .hint-glossary .meta, .hint-pitch .meta { margin-right: 6px; }
 .type-prompt { margin: 18px auto; max-width: 520px; font-size: 28px; }
 .answer-word { font-size: 36px; margin: 12px auto; }
+.context-image { margin: 12px auto; max-width: 760px; text-align: center; }
+.context-image img { max-width: 100%; height: auto; border-radius: 6px; }
 .context { font-size: 28px; margin: 12px auto; max-width: 760px; line-height: 1.6; }
 .context-furigana { line-height: 1.8; }
 .context-furigana ruby { font-size: 28px; }
@@ -273,18 +281,24 @@ def _empty_mining_fields() -> List[str]:
     return [""] * len(MINING_FIELD_NAMES)
 
 
+def _field_index(name: str) -> int:
+    return MINING_FIELD_NAMES.index(name)
+
+
 def _mining_setup_note(model: WkModel) -> genanki.Note:
     guid = stable_guid(MINING_SETUP_KIND, 1)
-    meta = f"placeholder · template {MINING_TEMPLATE_VERSION} · delete after first Yomitan mine"
+    meta = f"placeholder · template {MINING_TEMPLATE_VERSION} · delete after first Migaku mine"
     fields = _empty_mining_fields()
-    fields[0] = MINING_SETUP_DUPLICATE_KEY
-    fields[1] = "（セットアップ）"
-    fields[10] = html.escape("（セットアップ — Yomitan で単語を追加してください）")
-    fields[7] = html.escape(
-        "Placeholder so Anki imports this deck and note type. "
-        "Mine a word from Yomitan, then delete this suspended card in Browse."
+    fields[_field_index("DuplicateKey")] = MINING_SETUP_DUPLICATE_KEY
+    fields[_field_index("Expression")] = "（セットアップ）"
+    fields[_field_index("ClozeSentence")] = html.escape(
+        "（セットアップ — Migaku で単語を追加してください）"
     )
-    fields[-1] = html.escape(meta)
+    fields[_field_index("Glossary")] = html.escape(
+        "Placeholder so Anki imports this deck and note type. "
+        "Mine from Migaku with Anki open, then delete this suspended card in Browse."
+    )
+    fields[_field_index("Meta")] = html.escape(meta)
     return genanki.Note(
         model=model,
         fields=fields,
@@ -308,7 +322,7 @@ def build_mining_deck(
     model = make_mining_model()
     deck.add_model(model)
     deck.add_note(_mining_setup_note(model))
-    out = output_dir / "wk_mining.apkg"
+    out = output_dir / MINING_EXPORT_FILENAME
     write_apkg(deck, out)
     patch_apkg_suspend_notes_with_tag(out, MINING_SETUP_TAG)
     return out, deck

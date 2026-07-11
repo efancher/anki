@@ -276,7 +276,7 @@ def build_rendaku_deck(
     assignment_index: Dict[int, dict],
     *,
     interval_map=None,
-    reading_audio: bool = True,
+    reading_audio: bool = False,
     tts_config: Optional["SentenceTtsConfig"] = None,
     reading_audio_voice: str = DEFAULT_SENTENCE_AUDIO_VOICE,
 ) -> Tuple[Path, genanki.Deck, List[str]]:

@@ -1,19 +1,17 @@
 # VOICEVOX setup for immersion mining
 
-Use [VOICEVOX](https://voicevox.hiroshiba.jp/) to generate **full-sentence audio** when you mine cards from Yomitan. The **wk_immersion** Anki add-on calls VOICEVOX over HTTP — you do **not** need to use VOICEVOX’s Japanese UI for mining.
+Use [VOICEVOX](https://voicevox.hiroshiba.jp/) as a **fallback** when Migaku did not attach sentence audio. Migaku normally fills **SentenceAudio** from the source clip; **wk_immersion** only calls VOICEVOX when that field is empty.
 
-**Related:** [Yomitan immersion mining](yomitan_mining.md) · [wk_immersion add-on](../anki_addon/README.md#wk_immersion)
+**Related:** [Migaku immersion mining](migaku_mining.md) · [wk_immersion add-on](../anki_addon/README.md#wk-immersion-migaku-mining)
 
 ---
 
 ## What happens automatically
 
-1. You click **+** in Yomitan (Anki + AnkiConnect running).
-2. **wk_immersion** reads the note’s **Sentence** field.
-3. It POSTs to the local VOICEVOX engine (`http://127.0.0.1:50021`).
+1. You mine with **Migaku** (Anki open).
+2. Migaku fills **SentenceAudio** when mining from video; otherwise **wk_immersion** reads **Sentence** and synthesizes.
+3. VOICEVOX engine receives POSTs on `http://127.0.0.1:50021`.
 4. The WAV is stored in Anki media and **SentenceAudio** is set to `[sound:…]`.
-
-Yomitan never maps **SentenceAudio** — the add-on fills it after the note is created.
 
 ---
 
@@ -26,7 +24,7 @@ Yomitan never maps **SentenceAudio** — the add-on fills it after the note is c
    ./scripts/sync_anki_addons.sh
    ```
 4. **Verify** the engine in a browser: [http://127.0.0.1:50021/version](http://127.0.0.1:50021/version) — you should see a version string (e.g. `"0.25.2"`).
-5. Mine a word in Yomitan. After a short pause, open **Browse** → note → **SentenceAudio** should contain `[sound:wk_immersion_sent_….wav]`.
+5. Mine a card from Migaku. If no native audio was attached, open **Browse** → note → **SentenceAudio** should contain `[sound:wk_immersion_sent_….wav]` after synthesis.
 
 That is the entire VOICEVOX “setup” for this workflow.
 
@@ -66,7 +64,7 @@ Optional file: **`out/wk_immersion_config.json`** (created on first use if missi
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `enabled` | `true` | Master switch for sentence TTS |
-| `on_mine` | `true` | Synthesize when Yomitan adds a note |
+| `on_mine` | `true` | Synthesize when Migaku adds a note without **SentenceAudio** |
 | `engine` | `voicevox` | `voicevox`, `edge`, or `auto` (try VOICEVOX, then edge-tts) |
 | `voicevox_engine_url` | `http://127.0.0.1:50021` | VOICEVOX HTTP API base URL |
 | `voicevox_speaker_id` | `2` | Numeric style id (see table below) |
@@ -149,20 +147,20 @@ Notes mined before **wk_immersion** was installed may have an empty **SentenceAu
 1. Confirm add-on is installed: **Tools → Add-ons** → **WK Immersion Sentence TTS**.
 2. Re-sync: `./scripts/sync_anki_addons.sh` → restart Anki.
 3. Check config: `"enabled": true`, `"on_mine": true`, `"engine": "voicevox"`.
-4. Note must use model **WK Yomitan Immersion** and have non-empty **Sentence**.
+4. Note must use model **WK Migaku Immersion** and have non-empty **Sentence**.
 5. Try **Tools → WK Synthesize Immersion Sentence Audio** on one note — if that works, the hook path may need attention; if not, VOICEVOX or config is the issue.
 
 ### Backfill CLI: `missing Sentence or SentenceAudio`
 
-Your **WK Yomitan Immersion** note type is outdated — it was imported before **SentenceAudio** existed.
+Your **WK Migaku Immersion** note type is outdated — it was imported before **SentenceAudio** existed.
 
 **Automatic fix (recommended):** restart Anki after syncing add-ons. **WK Immersion** adds **SentenceAudio** and upgrades the card template on startup.
 
 **Manual fix:** if the field is still missing:
 
 1. Regenerate: `python3 wk_decks.py --deck mining`
-2. **File → Import** → `out/wk_mining.apkg`
-3. Choose **Update** for **WK Yomitan Immersion** (not “Add new”)
+2. **File → Import** → `out/wk_migaku.apkg`
+3. Choose **Update** for **WK Migaku Immersion** (not “Add new”)
 4. Re-run the backfill tool or menu action
 
 ### Backfill CLI: `Connection refused`

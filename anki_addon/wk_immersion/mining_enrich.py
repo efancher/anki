@@ -1,5 +1,5 @@
 """
-Post-mine enrichment for WK Yomitan Immersion notes.
+Post-mine enrichment for WK Migaku Immersion notes.
 """
 
 from __future__ import annotations
@@ -18,8 +18,13 @@ FIELD_READING = "Reading"
 FIELD_SENTENCE = "Sentence"
 FIELD_SENTENCE_FURIGANA = "SentenceFurigana"
 FIELD_GLOSSARY = "Glossary"
+FIELD_TRANSLATION = "Translation"
+FIELD_DUPLICATE_KEY = "DuplicateKey"
 
 ENRICHMENT_FIELD_MAP = {
+    "Expression": "expression",
+    "Reading": "reading",
+    "Sentence": "sentence",
     "ClozeSentence": "cloze_sentence",
     "WkSubjectId": "wk_subject_id",
     "PrerequisiteIds": "prerequisite_ids",
@@ -103,10 +108,22 @@ def apply_mining_enrichment(note, *, field_map: Dict[str, int]) -> bool:
         sentence=sentence,
         sentence_furigana=field_value(FIELD_SENTENCE_FURIGANA),
         glossary=field_value(FIELD_GLOSSARY),
+        translation=field_value(FIELD_TRANSLATION),
         wk_entry=wk_entry,
     )
 
     changed = False
+    duplicate_key = field_value(FIELD_DUPLICATE_KEY).strip()
+    if not duplicate_key:
+        duplicate_key = (
+            f"{enrichment.expression}|{enrichment.sentence}"
+            if enrichment.sentence
+            else enrichment.expression
+        )
+        dup_index = field_map.get(FIELD_DUPLICATE_KEY)
+        if dup_index is not None and note.fields[dup_index] != duplicate_key:
+            note.fields[dup_index] = duplicate_key
+            changed = True
     for field_name, attr in ENRICHMENT_FIELD_MAP.items():
         ord_index = field_map.get(field_name)
         if ord_index is None:

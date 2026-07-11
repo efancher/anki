@@ -188,7 +188,7 @@ def supplementary_unlock_actions_for_notes(
     """Unsuspend supplementary notes when their unlock prereqs are mature.
 
     Phonetic-family notes unlock when any kanji in PrerequisiteIds has been reviewed
-    once (reps > 0) in core kanji or Kanji Meaning Anchor.
+    once (reps > 0) in Kanji Meaning Anchor (or leftover core kanji).
 
     Other notes with PrerequisiteIds unlock when those kanji are Guru+ in Kanji
     Meaning Anchor. Remaining supplementary notes unlock when WkSubjectId is mature

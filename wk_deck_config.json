@@ -2,17 +2,14 @@
   "_comment": "WK deck generator defaults. Keys use snake_case and mirror wk_decks.py CLI flags. Edit this file, then run: python wk_decks.py --from-config. Explicit CLI flags override config.",
   "deck": "all",
   "generate_decks": [
-    "core",
+    "core-radical",
+    "kanji-meaning",
     "phonetic-families",
     "conjugations-verbs",
     "conjugations-adjectives",
     "conjugations-reverse",
     "verb-types",
     "adjective-types",
-    "vocab-cloze",
-    "dictation",
-    "kanji-meaning",
-    "vocab-sentence",
     "grammar",
     "mining"
   ],
@@ -26,7 +23,7 @@
     "max_examples": 5,
     "max_unknown_kanji": 5,
     "no_wk_filter": false,
-    "sentence_audio": true
+    "sentence_audio": false
   },
   "vocab_cloze": {
     "sentence_audio": false
@@ -40,10 +37,10 @@
   },
   "vocab_sentence": {
     "min_srs": 7,
-    "sentence_audio": true
+    "sentence_audio": false
   },
   "sentence_tts": {
-    "engine": "auto",
+    "engine": "edge",
     "voicevox_engine_url": "http://127.0.0.1:50021",
     "voicevox_speaker_id": 2,
     "voicevox_volume_scale": 2.0,
@@ -54,9 +51,9 @@
     "bootstrap_scheduling": false,
     "import_all_subjects": true,
     "suspend_unstarted": true,
-    "reading_audio": true,
+    "reading_audio": false,
     "reading_voice": "Kyoko"
   },
-  "reading_audio": true,
+  "reading_audio": false,
   "reading_voice": "Kyoko"
 }

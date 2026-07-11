@@ -30,14 +30,8 @@ JLPT_N5_PREREQ_TAG = "jlpt-n5-prereq"
 
 EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::Core Radicals",
-    "WK::Core Kanji",
-    "WK::Core Vocabulary",
-    "WK::N5 · Kanji",
-    "WK::N5 · Vocabulary",
-    "WK::N5 · Prereq Kanji",
+    "WK::Kanji Meaning",
     "WK::N5 · Prereq Radicals",
-    "WK::Vocab Context",
-    "WK::Dictation",
     "WK::Conjugations · Verbs",
     "WK::Conjugations · Adjectives",
     "WK::Conjugations · Reverse",
@@ -45,6 +39,8 @@ EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::Conjugations · Adjective Types",
     "WK::Grammar",
     "WK::Phonetic Families",
+    "WK::Immersion · Migaku",
+    "WK::Immersion · Satori",
 )
 
 SEVERITY_OK = "ok"
