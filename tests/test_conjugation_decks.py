@@ -48,6 +48,13 @@ class ConjugationMinSrsTest(unittest.TestCase):
             self.assertIn("PrerequisiteIds", names)
             self.assertLess(names.index("PrerequisiteIds"), names.index("Meta"))
 
+    def test_conjugation_models_include_build_html_on_back(self) -> None:
+        for model in (make_conjugation_model(), make_conjugation_reverse_model()):
+            names = [field["name"] for field in model.fields]
+            self.assertIn("BuildHtml", names)
+            self.assertIn("{{BuildHtml}}", model.templates[0]["afmt"])
+            self.assertNotIn("{{BuildHtml}}", model.templates[0]["qfmt"])
+
     def test_collect_respects_min_srs(self) -> None:
         vocab = mock_vocab_for_conjugation("食べる", "たべる", ["ichidan verb"], vocab_id=42)
         assignment_index = {

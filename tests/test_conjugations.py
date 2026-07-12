@@ -22,6 +22,8 @@ from wk_decks import (
     conjugate_suru,
     adjective_drill_class,
     assignment_by_subject_id,
+    conjugation_build_html,
+    conjugation_build_steps,
     conjugation_fixtures_path,
     conjugation_issues_for_vocab,
     conjugation_word_class,
@@ -195,6 +197,43 @@ class WordClassDrillTests(unittest.TestCase):
         adjs = collect_adjective_type_items(vocab, args)
         self.assertGreater(len(verbs), 0)
         self.assertGreater(len(adjs), 0)
+
+
+class ConjugationBuildTests(unittest.TestCase):
+    def test_ichidan_polite_stacks_masu(self) -> None:
+        steps = conjugation_build_steps(
+            "ichidan", "polite_present", "食べる", "たべる", "食べます", "たべます"
+        )
+        surfaces = [step.surface for step in steps]
+        self.assertEqual(surfaces[:3], ["食べる", "食べ", "食べます"])
+        html = conjugation_build_html(
+            "ichidan", "polite_present", "食べる", "たべる", "食べます", "たべます"
+        )
+        self.assertIn("drop る", html)
+        self.assertIn("食べます", html)
+        self.assertIn("Ichidan", html)
+
+    def test_godan_polite_shows_i_row_shift(self) -> None:
+        steps = conjugation_build_steps(
+            "godan", "polite_present", "話す", "はなす", "話します", "はなします"
+        )
+        surfaces = [step.surface for step in steps]
+        self.assertIn("話", surfaces)
+        self.assertIn("話し", surfaces)
+        self.assertIn("話します", surfaces)
+
+    def test_i_adjective_negative_stacks_ku_nai(self) -> None:
+        steps = conjugation_build_steps(
+            "i_adjective", "plain_negative", "高い", "たかい", "高くない", "たかくない"
+        )
+        surfaces = [step.surface for step in steps]
+        self.assertEqual(surfaces, ["高い", "高", "高く", "高くない"])
+
+    def test_na_adjective_polite_adds_desu(self) -> None:
+        steps = conjugation_build_steps(
+            "na_adjective", "polite", "静か", "しずか", "静かです", "しずかです"
+        )
+        self.assertEqual([s.surface for s in steps], ["静か", "静かです"])
 
 
 if __name__ == "__main__":

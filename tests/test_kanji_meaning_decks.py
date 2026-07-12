@@ -20,7 +20,15 @@ from kanji_meaning_decks import (
 from wk_decks import WK_SRS_STAGE_GURU_1
 
 
-def kanji_subject(subject_id: int, char: str, meanings: list, *, level: int = 5) -> dict:
+def kanji_subject(
+    subject_id: int,
+    char: str,
+    meanings: list,
+    *,
+    level: int = 5,
+    meaning_mnemonic: str = "",
+    component_subject_ids: list | None = None,
+) -> dict:
     return {
         "id": subject_id,
         "object": "kanji",
@@ -28,6 +36,20 @@ def kanji_subject(subject_id: int, char: str, meanings: list, *, level: int = 5)
             "characters": char,
             "level": level,
             "meanings": meanings,
+            "meaning_mnemonic": meaning_mnemonic,
+            "component_subject_ids": component_subject_ids or [],
+        },
+    }
+
+
+def radical_subject(subject_id: int, char: str, meaning: str) -> dict:
+    return {
+        "id": subject_id,
+        "object": "radical",
+        "data": {
+            "characters": char,
+            "slug": meaning.lower().replace(" ", "-"),
+            "meanings": [{"meaning": meaning, "primary": True}],
         },
     }
 
@@ -69,22 +91,42 @@ class KanjiMeaningDeckTests(unittest.TestCase):
         afmt = model.templates[0]["afmt"]
         self.assertIn("{{Expression}}", qfmt)
         self.assertNotIn("{{Meaning}}", qfmt)
+        self.assertNotIn("{{MeaningMnemonic}}", qfmt)
+        self.assertNotIn("{{RadicalsHtml}}", qfmt)
         self.assertIn("{{Meaning}}", afmt)
+        self.assertIn("{{MeaningMnemonic}}", afmt)
+        self.assertIn("{{RadicalsHtml}}", afmt)
 
-    def test_build_deck_has_no_unlock_tags(self) -> None:
-        kanji = kanji_subject(99, "山", [{"meaning": "Mountain", "primary": True}])
+    def test_build_deck_includes_mnemonic_and_radicals(self) -> None:
+        radical = radical_subject(10, "山", "Mountain")
+        kanji = kanji_subject(
+            99,
+            "山",
+            [{"meaning": "Mountain", "primary": True}],
+            meaning_mnemonic="A <radical>mountain</radical> looks like a mountain.",
+            component_subject_ids=[10],
+        )
         item = KanjiMeaningItem(kanji=kanji, expression="山", meaning="Mountain")
         assignment_index = {99: {"data": {"subject_id": 99, "srs_stage": 1}}}
 
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
-            apkg_path, deck = build_kanji_meaning_deck([item], output_dir, assignment_index)
+            apkg_path, deck = build_kanji_meaning_deck(
+                [item],
+                output_dir,
+                assignment_index,
+                radical_index={10: radical},
+            )
             self.assertEqual(apkg_path.name, "wk_kanji_meaning.apkg")
             self.assertEqual(len(deck.notes), 1)
             note = deck.notes[0]
             self.assertEqual(note.fields[1], "99")
             self.assertEqual(note.fields[2], "山")
             self.assertEqual(note.fields[3], "Mountain")
+            self.assertIn("山", note.fields[4])
+            self.assertIn("Mountain", note.fields[4])
+            self.assertIn("wk-mnemonic", note.fields[5])
+            self.assertIn("mountain", note.fields[5].lower())
             self.assertNotIn("wk-locked", note.tags)
             self.assertIn("kanji-meaning", note.tags)
 

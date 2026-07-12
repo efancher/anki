@@ -274,10 +274,10 @@ MODEL_TEMPLATE_VERSIONS = {
     "reading_keyword": "v3",
     "kanji_radical": "v2",
     "phonetic_drill": "v7",
-    "conjugation": "v8",
+    "conjugation": "v9",
     "word_class": "v5",
     "vocab_cloze": "v9",
-    "conjugation_reverse": "v8",
+    "conjugation_reverse": "v9",
     "grammar_cloze": "v4",
     "dictation": "v4",
     "core_radical": "v2",
@@ -285,7 +285,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "rendaku": "v3",
     "mining": "v13",
     "kanji_contrast": "v3",
-    "kanji_meaning": "v1",
+    "kanji_meaning": "v2",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
     "satori": "v3",
@@ -3129,6 +3129,260 @@ def conjugate_na_adjective(expr: str, reading: str, form_key: str) -> Optional[T
     return expr + suffix, reading + reading_suffix
 
 
+class ConjugationBuildStep(NamedTuple):
+    surface: str
+    note: str
+
+
+def _conj_surface(char_stem: str, reading_stem: str, reading_form: str) -> str:
+    return surface_from_reading_stems(char_stem, reading_stem, reading_form)
+
+
+def conjugation_form_rule(word_class: str, form_key: str) -> str:
+    """Short learner-facing rule for this class + form."""
+    class_label = conjugation_class_label(word_class)
+    verb_rules = {
+        "polite_present": "polite present (〜ます)",
+        "polite_negative": "polite negative (〜ません)",
+        "polite_past": "polite past (〜ました)",
+        "plain_negative": "plain negative (〜ない)",
+        "plain_past": "plain past (〜た / 〜だ)",
+        "te_form": "te-form (〜て / 〜で)",
+    }
+    i_adj_rules = {
+        "plain_negative": "drop い → くない",
+        "plain_past": "drop い → かった",
+        "plain_past_negative": "drop い → くなかった",
+        "polite": "keep い + です",
+        "polite_negative": "drop い → くないです",
+        "polite_past": "drop い → かったです",
+    }
+    na_adj_rules = {
+        "plain_negative": "add じゃない",
+        "plain_past": "add だった",
+        "plain_past_negative": "add じゃなかった",
+        "polite": "add です",
+        "polite_negative": "add じゃないです",
+        "polite_past": "add でした",
+    }
+    if word_class == "ichidan":
+        detail = {
+            "polite_present": "drop る, add ます",
+            "polite_negative": "drop る, add ません",
+            "polite_past": "drop る, add ました",
+            "plain_negative": "drop る, add ない",
+            "plain_past": "drop る, add た",
+            "te_form": "drop る, add て",
+        }.get(form_key, verb_rules.get(form_key, form_key))
+        return f"{class_label} · {detail}"
+    if word_class == "godan":
+        detail = {
+            "polite_present": "shift last kana to い-row, add ます",
+            "polite_negative": "shift last kana to い-row, add ません",
+            "polite_past": "shift last kana to い-row, add ました",
+            "plain_negative": "shift last kana to あ-row, add ない",
+            "plain_past": "replace ending with past sound change (った / いた / …)",
+            "te_form": "replace ending with te sound change (って / いて / …)",
+        }.get(form_key, verb_rules.get(form_key, form_key))
+        return f"{class_label} · {detail}"
+    if word_class == "suru_verb":
+        return f"{class_label} · conjugate the する part ({verb_rules.get(form_key, form_key)})"
+    if word_class == "irregular_verb":
+        return f"{class_label} · memorized stem change ({verb_rules.get(form_key, form_key)})"
+    if word_class == "i_adjective":
+        return f"{class_label} · {i_adj_rules.get(form_key, form_key)}"
+    if word_class == "na_adjective":
+        return f"{class_label} · {na_adj_rules.get(form_key, form_key)}"
+    return f"{class_label} · {form_key}"
+
+
+def conjugation_build_steps(
+    word_class: str,
+    form_key: str,
+    expr: str,
+    reading: str,
+    conj_expr: str,
+    conj_reading: str,
+) -> List[ConjugationBuildStep]:
+    """Progressive pieces that stack dictionary form → conjugated form."""
+    steps: List[ConjugationBuildStep] = [
+        ConjugationBuildStep(expr, "dictionary"),
+    ]
+
+    if word_class == "ichidan":
+        stems = split_word_stems(expr, reading)
+        if not stems:
+            return steps + [ConjugationBuildStep(conj_expr, "result")]
+        char_stem, reading_stem, okurigana = stems
+        if okurigana != "る":
+            return steps + [ConjugationBuildStep(conj_expr, "result")]
+        steps.append(ConjugationBuildStep(char_stem, "drop る"))
+        piece_map = {
+            "polite_present": "ます",
+            "polite_negative": "ません",
+            "polite_past": "ました",
+            "plain_negative": "ない",
+            "plain_past": "た",
+            "te_form": "て",
+        }
+        piece = piece_map.get(form_key)
+        if piece:
+            steps.append(ConjugationBuildStep(char_stem + piece, f"+ {piece}"))
+        if steps[-1].surface != conj_expr:
+            steps.append(ConjugationBuildStep(conj_expr, "result"))
+        return steps
+
+    if word_class == "godan":
+        stems = split_word_stems(expr, reading)
+        if not stems:
+            return steps + [ConjugationBuildStep(conj_expr, "result")]
+        char_stem, reading_stem, ending = stems
+        if len(ending) != 1 or ending not in GODAN_POLITE_STEM_SUFFIX:
+            return steps + [ConjugationBuildStep(conj_expr, "result")]
+        steps.append(ConjugationBuildStep(char_stem, f"drop {ending}"))
+        if form_key in {"polite_present", "polite_negative", "polite_past"}:
+            i_kana = GODAN_POLITE_STEM_SUFFIX[ending]
+            i_surface = _conj_surface(char_stem, reading_stem, reading_stem + i_kana)
+            steps.append(ConjugationBuildStep(i_surface, f"{ending} → {i_kana} (い-row)"))
+            piece = {
+                "polite_present": "ます",
+                "polite_negative": "ません",
+                "polite_past": "ました",
+            }[form_key]
+            steps.append(ConjugationBuildStep(i_surface + piece, f"+ {piece}"))
+        elif form_key == "plain_negative":
+            a_kana = GODAN_NEGATIVE_STEM_SUFFIX[ending]
+            a_surface = _conj_surface(char_stem, reading_stem, reading_stem + a_kana)
+            steps.append(ConjugationBuildStep(a_surface, f"{ending} → {a_kana} (あ-row)"))
+            steps.append(ConjugationBuildStep(a_surface + "ない", "+ ない"))
+        elif form_key in {"plain_past", "te_form"}:
+            suffix = GODAN_PAST_SUFFIX[ending] if form_key == "plain_past" else GODAN_TE_SUFFIX[ending]
+            stacked = _conj_surface(char_stem, reading_stem, reading_stem + suffix)
+            steps.append(ConjugationBuildStep(stacked, f"{ending} → {suffix}"))
+        if steps[-1].surface != conj_expr:
+            steps.append(ConjugationBuildStep(conj_expr, "result"))
+        return steps
+
+    if word_class == "suru_verb":
+        if reading.endswith("する"):
+            char_stem = expr[:-2] if expr.endswith("する") else expr
+            suru_piece = {
+                "polite_present": "します",
+                "polite_negative": "しません",
+                "polite_past": "しました",
+                "plain_negative": "しない",
+                "plain_past": "した",
+                "te_form": "して",
+            }.get(form_key)
+            if char_stem:
+                steps.append(ConjugationBuildStep(char_stem, "keep noun / stem"))
+            if suru_piece:
+                steps.append(
+                    ConjugationBuildStep(
+                        (char_stem + suru_piece) if char_stem else suru_piece,
+                        f"する → {suru_piece}",
+                    )
+                )
+        if steps[-1].surface != conj_expr:
+            steps.append(ConjugationBuildStep(conj_expr, "result"))
+        return steps
+
+    if word_class == "irregular_verb":
+        steps.append(ConjugationBuildStep(conj_expr, "irregular result"))
+        return steps
+
+    if word_class == "i_adjective":
+        if reading in {"いい", "よい"}:
+            steps.append(ConjugationBuildStep(conj_expr, "いい irregular"))
+            return steps
+        if not expr.endswith("い"):
+            return steps + [ConjugationBuildStep(conj_expr, "result")]
+        char_stem = expr[:-1]
+        if form_key == "polite":
+            steps.append(ConjugationBuildStep(expr + "です", "+ です"))
+        elif form_key == "plain_past":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "かった", "+ かった"))
+        elif form_key == "plain_negative":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "く", "+ く"))
+            steps.append(ConjugationBuildStep(char_stem + "くない", "+ ない"))
+        elif form_key == "plain_past_negative":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "く", "+ く"))
+            steps.append(ConjugationBuildStep(char_stem + "くなかった", "+ なかった"))
+        elif form_key == "polite_negative":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "くない", "+ くない"))
+            steps.append(ConjugationBuildStep(char_stem + "くないです", "+ です"))
+        elif form_key == "polite_past":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "かった", "+ かった"))
+            steps.append(ConjugationBuildStep(char_stem + "かったです", "+ です"))
+        if steps[-1].surface != conj_expr:
+            steps.append(ConjugationBuildStep(conj_expr, "result"))
+        return steps
+
+    if word_class == "na_adjective":
+        piece = {
+            "plain_negative": "じゃない",
+            "plain_past": "だった",
+            "plain_past_negative": "じゃなかった",
+            "polite": "です",
+            "polite_negative": "じゃないです",
+            "polite_past": "でした",
+        }.get(form_key)
+        if piece:
+            steps.append(ConjugationBuildStep(expr + piece, f"+ {piece}"))
+        if steps[-1].surface != conj_expr:
+            steps.append(ConjugationBuildStep(conj_expr, "result"))
+        return steps
+
+    return steps + [ConjugationBuildStep(conj_expr, "result")]
+
+
+def conjugation_build_html(
+    word_class: str,
+    form_key: str,
+    expr: str,
+    reading: str,
+    conj_expr: str,
+    conj_reading: str,
+) -> str:
+    """HTML for card backs: rule + stacked build steps."""
+    steps = conjugation_build_steps(
+        word_class, form_key, expr, reading, conj_expr, conj_reading
+    )
+    if len(steps) <= 1:
+        return ""
+    rule = html.escape(conjugation_form_rule(word_class, form_key))
+    rows: List[str] = []
+    for index, step in enumerate(steps):
+        klass = "conj-step"
+        if index == len(steps) - 1:
+            klass += " conj-step-final"
+        rows.append(
+            "<div class='"
+            + klass
+            + "'>"
+            f"<span class='conj-step-jp jp'>{html.escape(step.surface)}</span>"
+            f"<span class='conj-step-note'>{html.escape(step.note)}</span>"
+            "</div>"
+        )
+    reading_line = (
+        f"<div class='conj-build-reading reading'>{html.escape(conj_reading)}</div>"
+        if conj_reading and conj_reading != conj_expr
+        else ""
+    )
+    return (
+        "<div class='conj-build'>"
+        f"<div class='conj-build-rule'>{rule}</div>"
+        f"<div class='conj-build-steps'>{''.join(rows)}</div>"
+        f"{reading_line}"
+        "</div>"
+    )
+
+
 def conjugate_vocab_form(vocab: dict, word_class: str, form_key: str) -> Optional[Tuple[str, str]]:
     expr = vocab["data"].get("characters") or ""
     reading = first_reading(vocab)
@@ -3874,6 +4128,37 @@ def make_phonetic_drill_model() -> WkModel:
     )
 
 
+CONJUGATION_BUILD_CSS = """
+.conj-build {
+  margin: 18px auto 8px;
+  max-width: 560px;
+  text-align: left;
+}
+.conj-build-rule {
+  font-size: 15px;
+  color: #aaa;
+  margin-bottom: 10px;
+}
+.conj-build-steps { margin: 0; }
+.conj-step {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid #333;
+}
+.conj-step-jp { font-size: 28px; margin: 0; }
+.conj-step-note {
+  font-size: 13px;
+  color: #999;
+  white-space: nowrap;
+}
+.conj-step-final .conj-step-jp { font-size: 34px; font-weight: 600; }
+.conj-build-reading { margin-top: 8px; font-size: 18px; }
+"""
+
+
 def make_conjugation_model() -> WkModel:
     return WkModel(
         MODEL_IDS["conjugation"],
@@ -3893,6 +4178,7 @@ def make_conjugation_model() -> WkModel:
             {"name": "ConjReading"},
             {"name": "PromptAudio"},
             {"name": "AnswerAudio"},
+            {"name": "BuildHtml"},
             {"name": "Meta"},
         ],
         templates=[
@@ -3912,6 +4198,7 @@ def make_conjugation_model() -> WkModel:
                 <div class="jp answer">{{ConjExpression}}</div>
                 <div class="reading answer">{{ConjReading}}</div>
                 {{#AnswerAudio}}<div class="reading-audio">{{AnswerAudio}}</div>{{/AnswerAudio}}
+                {{#BuildHtml}}{{BuildHtml}}{{/BuildHtml}}
                 <div class="meta">{{Meta}}</div>
                 """,
             },
@@ -3919,6 +4206,7 @@ def make_conjugation_model() -> WkModel:
         css=versioned_css(
             COMMON_CSS
             + DRILL_READING_AUDIO_CSS
+            + CONJUGATION_BUILD_CSS
             + """
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .answer { margin-top: 8px; }
@@ -3947,6 +4235,7 @@ def make_conjugation_reverse_model() -> WkModel:
             {"name": "ConjReading"},
             {"name": "PromptAudio"},
             {"name": "AnswerAudio"},
+            {"name": "BuildHtml"},
             {"name": "Meta"},
         ],
         templates=[
@@ -3966,6 +4255,7 @@ def make_conjugation_reverse_model() -> WkModel:
                 <div class="reading answer">{{DictReading}}</div>
                 {{#AnswerAudio}}<div class="reading-audio">{{AnswerAudio}}</div>{{/AnswerAudio}}
                 <div class="meaning">{{Meaning}}</div>
+                {{#BuildHtml}}{{BuildHtml}}{{/BuildHtml}}
                 <div class="meta">{{Meta}}</div>
                 """,
             },
@@ -3973,6 +4263,7 @@ def make_conjugation_reverse_model() -> WkModel:
         css=versioned_css(
             COMMON_CSS
             + DRILL_READING_AUDIO_CSS
+            + CONJUGATION_BUILD_CSS
             + """
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
 .answer { margin-top: 8px; }
@@ -5441,6 +5732,14 @@ def build_conjugation_deck(
             f"wk-level-{level}",
         ]
         note_tags.extend(vocab_supplementary_import_tags(vocab))
+        build_html = conjugation_build_html(
+            drill.word_class,
+            drill.form_key,
+            drill.dict_expr,
+            drill.dict_reading,
+            drill.conj_expr,
+            drill.conj_reading,
+        )
         note = genanki.Note(
             model=model,
             fields=[
@@ -5457,6 +5756,7 @@ def build_conjugation_deck(
                 html.escape(drill.conj_reading),
                 prompt_audio,
                 answer_audio,
+                build_html,
                 html.escape(meta),
             ],
             tags=note_tags,
@@ -5573,6 +5873,14 @@ def build_conjugation_reverse_deck(
             f"wk-level-{level}",
         ]
         note_tags.extend(vocab_supplementary_import_tags(vocab))
+        build_html = conjugation_build_html(
+            drill.word_class,
+            drill.form_key,
+            drill.dict_expr,
+            drill.dict_reading,
+            drill.conj_expr,
+            drill.conj_reading,
+        )
         note = genanki.Note(
             model=model,
             fields=[
@@ -5588,6 +5896,7 @@ def build_conjugation_reverse_deck(
                 html.escape(drill.conj_reading),
                 prompt_audio,
                 answer_audio,
+                build_html,
                 html.escape(meta),
             ],
             tags=note_tags,
@@ -7766,10 +8075,12 @@ def main() -> None:
             kanji_meaning_items,
             output_dir,
             indexes["assignments"],
+            radical_index=radical_index_by_id(subjects),
             interval_map=srs_interval_map,
         )
         created.append(path)
         built_decks.append(deck)
+        bundled_media_files.extend(getattr(deck, "wk_media_files", []) or [])
     if vocab_sentence_items and args.vocab_sentence_sentence_audio and (
         "vocab-sentence-meaning" in wanted or "vocab-sentence-reading" in wanted
     ):

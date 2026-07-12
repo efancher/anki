@@ -7,7 +7,7 @@ supplementary decks (dictation, vocab cloze) unlock when their kanji components
 are Guru+ here.
 
 Front: kanji character only (no reading, no vocabulary context).
-Back: primary WK meaning(s).
+Back: primary WK meaning(s), small radical building blocks, meaning mnemonic.
 """
 
 from __future__ import annotations
@@ -25,8 +25,12 @@ from wk_decks import (
     MODEL_IDS,
     MODEL_TEMPLATE_VERSIONS,
     NOTE_TYPE_NAMES,
+    WK_MNEMONIC_CSS,
     WK_SRS_STAGE_GURU_1,
     WkModel,
+    ensure_radical_media_files,
+    kanji_radicals_front_html,
+    meaning_mnemonic_html,
     primary_meanings,
     srs_stage,
     stable_guid,
@@ -50,6 +54,27 @@ KANJI_MEANING_MODEL_TEMPLATE_KEY = "kanji_meaning"
 
 KANJI_MEANING_CSS = """
 .kanji-meaning-jp { font-size: 76px; margin: 32px 0 8px; }
+.kanji-meaning-radicals {
+  margin: 16px auto 8px;
+  max-width: 760px;
+}
+.kanji-meaning-radicals .radicals-front-piece {
+  font-size: 22px;
+  margin: 4px 10px;
+}
+.kanji-meaning-radicals .radicals-front-piece .jp { font-size: 28px; }
+.kanji-meaning-radicals .radical-img {
+  max-height: 36px;
+  max-width: 36px;
+  vertical-align: middle;
+}
+.kanji-meaning-radicals .radicals-front-meaning {
+  font-size: 12px;
+  color: #aaa;
+  margin-top: 2px;
+}
+.kanji-meaning-mnemonic { margin-top: 16px; text-align: left; max-width: 640px; margin-left: auto; margin-right: auto; }
+.kanji-meaning-mnemonic h3 { font-size: 15px; margin: 0 0 8px; color: #bbb; }
 """
 
 
@@ -96,6 +121,8 @@ def make_kanji_meaning_model() -> WkModel:
             {"name": "WkSubjectId"},
             {"name": "Expression"},
             {"name": "Meaning"},
+            {"name": "RadicalsHtml"},
+            {"name": "MeaningMnemonic"},
             {"name": "Meta"},
         ],
         templates=[
@@ -109,12 +136,21 @@ def make_kanji_meaning_model() -> WkModel:
                 {{FrontSide}}
                 <hr>
                 <div class="meaning answer">{{Meaning}}</div>
+                {{#RadicalsHtml}}
+                <div class="kanji-meaning-radicals">{{RadicalsHtml}}</div>
+                {{/RadicalsHtml}}
+                {{#MeaningMnemonic}}
+                <div class="kanji-meaning-mnemonic">
+                  <h3>Meaning mnemonic</h3>
+                  <div class="notes">{{MeaningMnemonic}}</div>
+                </div>
+                {{/MeaningMnemonic}}
                 <div class="meta">{{Meta}}</div>
                 """,
             },
         ],
         css=versioned_css(
-            COMMON_CSS + KANJI_MEANING_CSS,
+            COMMON_CSS + WK_MNEMONIC_CSS + KANJI_MEANING_CSS,
             KANJI_MEANING_MODEL_TEMPLATE_KEY,
         ),
     )
@@ -125,11 +161,22 @@ def build_kanji_meaning_deck(
     output_dir: Path,
     assignment_index: Dict[int, dict],
     *,
+    radical_index: Optional[Dict[int, dict]] = None,
     interval_map: Optional[Dict[int, int]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(KANJI_MEANING_DECK_ID, KANJI_MEANING_DECK_NAME)
     model = make_kanji_meaning_model()
     template_label = KANJI_MEANING_TEMPLATE_VERSION
+    radicals_by_id = radical_index or {}
+
+    component_radicals = [
+        radicals_by_id[component_id]
+        for item in items
+        for component_id in item.kanji["data"].get("component_subject_ids") or []
+        if component_id in radicals_by_id
+    ]
+    media_names, media_paths = ensure_radical_media_files(component_radicals)
+    deck.wk_media_files = media_paths
 
     for item in items:
         kanji = item.kanji
@@ -138,6 +185,9 @@ def build_kanji_meaning_deck(
         srs = srs_stage(kanji, assignment_index)
         guid = stable_guid(KANJI_MEANING_KIND, kanji["id"])
         meta = f"WK L{level} · SRS {srs} · template {template_label}"
+        radicals_html = (
+            kanji_radicals_front_html(kanji, radicals_by_id, media_names) if radicals_by_id else ""
+        )
 
         note_tags = [
             "wanikani",
@@ -152,6 +202,8 @@ def build_kanji_meaning_deck(
                 str(kanji["id"]),
                 html.escape(item.expression),
                 html.escape(item.meaning),
+                radicals_html,
+                meaning_mnemonic_html(kanji),
                 html.escape(meta),
             ],
             tags=note_tags,
