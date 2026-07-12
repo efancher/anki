@@ -1,4 +1,4 @@
-"""Tests for same-as-kanji radical mnemonic substitution."""
+"""Tests for same-as-kanji / same-as-radical mnemonic substitution."""
 
 from __future__ import annotations
 
@@ -13,7 +13,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from wk_decks import (
     kanji_index_by_characters,
+    kanji_is_same_as_radical,
+    kanji_meaning_mnemonic_raw,
+    matching_same_radical_for_kanji,
     radical_description_html,
+    radical_index_by_id,
     radical_is_same_as_kanji,
     radical_meaning_mnemonic_raw,
 )
@@ -90,6 +94,45 @@ class RadicalMnemonicTests(unittest.TestCase):
         self.assertIn("wk-mnemonic-kanji", html_out)
         self.assertIn("mouth", html_out)
         self.assertNotIn("Kyoto", html_out)
+
+    def test_kanji_same_as_radical_uses_radical_mnemonic(self) -> None:
+        items = _load_subjects()
+        kanji = next(s for s in items if s.get("object") == "kanji" and s["id"] == 517)
+        radical = next(s for s in items if s.get("object") == "radical" and s["id"] == 327)
+        radical_index = radical_index_by_id([radical])
+
+        self.assertTrue(kanji_is_same_as_radical(kanji))
+        self.assertEqual(matching_same_radical_for_kanji(kanji, radical_index), radical)
+        raw = kanji_meaning_mnemonic_raw(kanji, radical_index)
+        self.assertEqual(raw, radical["data"]["meaning_mnemonic"].strip())
+        self.assertIn("ice", raw.lower())
+        self.assertNotIn("same as the radical", raw.lower())
+
+    def test_kanji_radical_for_x_are_the_same_phrasing(self) -> None:
+        items = _load_subjects()
+        kanji = next(s for s in items if s.get("object") == "kanji" and s["id"] == 644)  # 食
+        radical = next(s for s in items if s.get("object") == "radical" and s["id"] == 139)
+        radical_index = radical_index_by_id([radical])
+        self.assertTrue(kanji_is_same_as_radical(kanji))
+        raw = kanji_meaning_mnemonic_raw(kanji, radical_index)
+        self.assertEqual(raw, radical["data"]["meaning_mnemonic"].strip())
+        self.assertIn("goose", raw.lower())
+        self.assertNotIn("lucky you", raw.lower())
+
+    def test_composition_story_with_same_is_not_treated_as_deferral(self) -> None:
+        items = _load_subjects()
+        town = next(s for s in items if s.get("object") == "kanji" and s["id"] == 556)
+        self.assertFalse(kanji_is_same_as_radical(town))
+
+    def test_kanji_with_own_story_keeps_kanji_mnemonic(self) -> None:
+        items = _load_subjects()
+        kanji = next(s for s in items if s.get("object") == "kanji" and s["id"] == 440)  # 一
+        radical_index = radical_index_by_id(
+            [s for s in items if s.get("object") == "radical"]
+        )
+        self.assertFalse(kanji_is_same_as_radical(kanji))
+        raw = kanji_meaning_mnemonic_raw(kanji, radical_index)
+        self.assertEqual(raw, kanji["data"]["meaning_mnemonic"].strip())
 
 
 if __name__ == "__main__":

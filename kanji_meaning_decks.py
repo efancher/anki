@@ -203,7 +203,7 @@ def build_kanji_meaning_deck(
                 html.escape(item.expression),
                 html.escape(item.meaning),
                 radicals_html,
-                meaning_mnemonic_html(kanji),
+                meaning_mnemonic_html(kanji, radicals_by_id),
                 html.escape(meta),
             ],
             tags=note_tags,

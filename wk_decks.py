@@ -285,7 +285,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "rendaku": "v3",
     "mining": "v13",
     "kanji_contrast": "v3",
-    "kanji_meaning": "v2",
+    "kanji_meaning": "v3",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
     "satori": "v3",
@@ -1591,6 +1591,42 @@ WK_MNEMONIC_SEMANTIC_CLASS = {
 
 # WK marks radicals that share a glyph with a kanji in meaning_mnemonic copy.
 RADICAL_SAME_AS_KANJI_RE = re.compile(r"same\s+as\s+the\s+kanji", re.IGNORECASE)
+# Kanji meaning mnemonics that defer to the matching radical story (many WK phrasings).
+_WK_MNEMONIC_INLINE_TAG_RE = re.compile(
+    r"</?(?:radical|kanji|reading|ja|vocabulary)[^>]*>",
+    re.IGNORECASE,
+)
+KANJI_SAME_AS_RADICAL_RES: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"same\s+as\s+the\s+radical", re.IGNORECASE),
+    re.compile(
+        r"\bradical\b.{0,100}\bkanji\b.{0,50}\b(?:are|is)\b.{0,25}\b(?:exactly\s+)?"
+        r"(?:the\s+)?same\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bkanji\b.{0,100}\bradical\b.{0,50}\b(?:are|is)\b.{0,25}\b(?:exactly\s+)?"
+        r"(?:the\s+)?same\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bradical\b.{0,80}\band\b.{0,80}\bkanji\b.{0,50}\b(?:are|is)\b.{0,25}\bsame\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"\bidentical\b.{0,40}\b(?:looks|meaning)", re.IGNORECASE),
+    re.compile(r"\bsame in looks\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:the\s+)?kanji and (?:the\s+)?radical are the same\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bradical\b.{0,40}\bis the same as (?:the\s+)?(?:this\s+)?kanji\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bkanji and the radical that look like this are exactly the same\b",
+        re.IGNORECASE,
+    ),
+)
 
 
 def _wk_mnemonic_fragment(text: str) -> str:
@@ -4663,10 +4699,53 @@ def radical_display_html(radical: dict, media_names: Optional[Dict[int, str]] = 
     return f"<span class='radical-text'>{html.escape(slug)}</span>"
 
 
+def strip_wk_mnemonic_tags(text: str) -> str:
+    """Remove WK inline mnemonic tags so prose patterns can match cleanly."""
+    return _WK_MNEMONIC_INLINE_TAG_RE.sub("", text or "")
+
+
 def radical_is_same_as_kanji(radical: dict) -> bool:
     """True when WK's radical mnemonic says this glyph is the same as its kanji."""
     mnemonic = (radical.get("data") or {}).get("meaning_mnemonic") or ""
     return bool(RADICAL_SAME_AS_KANJI_RE.search(mnemonic))
+
+
+def kanji_is_same_as_radical(kanji: dict) -> bool:
+    """True when WK's kanji meaning mnemonic defers to the radical story."""
+    mnemonic = (kanji.get("data") or {}).get("meaning_mnemonic") or ""
+    plain = strip_wk_mnemonic_tags(mnemonic)
+    return any(pattern.search(plain) for pattern in KANJI_SAME_AS_RADICAL_RES)
+
+
+def matching_same_radical_for_kanji(
+    kanji: dict,
+    radical_index: Mapping[int, dict],
+) -> Optional[dict]:
+    """Pick the component radical this kanji is 'the same as' (usually same glyph)."""
+    component_ids = kanji["data"].get("component_subject_ids") or []
+    radicals = [
+        radical_index[component_id]
+        for component_id in component_ids
+        if component_id in radical_index
+    ]
+    if not radicals:
+        return None
+    characters = kanji["data"].get("characters")
+    same_glyph = [
+        radical
+        for radical in radicals
+        if (radical.get("data") or {}).get("characters") == characters
+    ]
+    if same_glyph:
+        return same_glyph[0]
+    if len(radicals) == 1:
+        return radicals[0]
+    kanji_meanings = {meaning.lower() for meaning in primary_meanings(kanji)}
+    for radical in radicals:
+        radical_meanings = {meaning.lower() for meaning in primary_meanings(radical)}
+        if kanji_meanings & radical_meanings:
+            return radical
+    return radicals[0]
 
 
 def kanji_index_by_characters(kanji_items: Sequence[dict]) -> Dict[str, dict]:
@@ -4694,6 +4773,23 @@ def radical_meaning_mnemonic_raw(
                 if kanji_mnemonic and str(kanji_mnemonic).strip():
                     return str(kanji_mnemonic).strip()
     mnemonic = (radical.get("data") or {}).get("meaning_mnemonic")
+    if not mnemonic or not str(mnemonic).strip():
+        return None
+    return str(mnemonic).strip()
+
+
+def kanji_meaning_mnemonic_raw(
+    kanji: dict,
+    radical_index: Optional[Mapping[int, dict]] = None,
+) -> Optional[str]:
+    """Kanji meaning mnemonic; borrows radical story when WK says same-as-radical."""
+    if radical_index and kanji_is_same_as_radical(kanji):
+        radical = matching_same_radical_for_kanji(kanji, radical_index)
+        if radical is not None and not radical_is_same_as_kanji(radical):
+            radical_mnemonic = (radical.get("data") or {}).get("meaning_mnemonic")
+            if radical_mnemonic and str(radical_mnemonic).strip():
+                return str(radical_mnemonic).strip()
+    mnemonic = (kanji.get("data") or {}).get("meaning_mnemonic")
     if not mnemonic or not str(mnemonic).strip():
         return None
     return str(mnemonic).strip()
@@ -4759,7 +4855,12 @@ def kanji_radicals_front_html(
     return f"<div class='radicals-front'>{''.join(pieces)}</div>"
 
 
-def meaning_mnemonic_html(subject: dict) -> str:
+def meaning_mnemonic_html(
+    subject: dict,
+    radical_index: Optional[Mapping[int, dict]] = None,
+) -> str:
+    if subject.get("object") == "kanji":
+        return wk_mnemonic_html(kanji_meaning_mnemonic_raw(subject, radical_index))
     return wk_mnemonic_html(subject["data"].get("meaning_mnemonic"))
 
 
@@ -5650,7 +5751,7 @@ def build_kanji_radical_deck(
                 html.escape(data.get("characters") or ""),
                 kanji_radicals_front_html(kanji, radical_index, media_names),
                 radicals_back,
-                meaning_mnemonic_html(kanji),
+                meaning_mnemonic_html(kanji, radical_index),
                 html.escape(meta),
             ],
             tags=[

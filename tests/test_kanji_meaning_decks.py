@@ -130,6 +130,30 @@ class KanjiMeaningDeckTests(unittest.TestCase):
             self.assertNotIn("wk-locked", note.tags)
             self.assertIn("kanji-meaning", note.tags)
 
+    def test_build_deck_substitutes_radical_mnemonic_when_same_as_radical(self) -> None:
+        radical = radical_subject(327, "北", "North")
+        radical["data"]["meaning_mnemonic"] = (
+            "You only have some ice and a stick — that's the <radical>north</radical>."
+        )
+        kanji = kanji_subject(
+            517,
+            "北",
+            [{"meaning": "North", "primary": True}],
+            meaning_mnemonic="The kanji is the same as the radical — it means <kanji>north</kanji>.",
+            component_subject_ids=[327],
+        )
+        item = KanjiMeaningItem(kanji=kanji, expression="北", meaning="North")
+        with tempfile.TemporaryDirectory() as tmp:
+            _, deck = build_kanji_meaning_deck(
+                [item],
+                Path(tmp),
+                {},
+                radical_index={327: radical},
+            )
+            mnemonic_field = deck.notes[0].fields[5]
+            self.assertIn("ice", mnemonic_field.lower())
+            self.assertNotIn("same as the radical", mnemonic_field.lower())
+
     def test_build_deck_never_adds_locked_tag(self) -> None:
         kanji = kanji_subject(100, "川", [{"meaning": "River", "primary": True}])
         item = KanjiMeaningItem(kanji=kanji, expression="川", meaning="River")
