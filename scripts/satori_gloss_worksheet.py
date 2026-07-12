@@ -5,6 +5,9 @@ Print Cure Dolly–style gloss worksheets for Satori immersion sentences.
 Practice mapping Japanese order → sticky English. Satori's fluent translation
 stays on the EN line; CHUNK / ROLE / LIT are blanks for you to fill.
 
+Duplicate sentences (same JP from different target words) are collapsed.
+By default an answer key is appended after the blanks (heuristic CHUNK/ROLE/LIT).
+
 Requires Anki + AnkiConnect (default http://127.0.0.1:8765), or pass a sentence
 directly:
 
@@ -15,6 +18,8 @@ directly:
   python3 scripts/satori_gloss_worksheet.py --sentence '暖かい春がやって来ました。' \\
       --translation 'The warm spring came along.'
   python3 scripts/satori_gloss_worksheet.py -o /tmp/gloss.txt
+  python3 scripts/satori_gloss_worksheet.py -o /tmp/gloss.txt --answers-file /tmp/gloss-answers.txt
+  python3 scripts/satori_gloss_worksheet.py --no-answers
 """
 
 from __future__ import annotations
@@ -36,12 +41,17 @@ from satori_gloss import (  # noqa: E402
     DEFAULT_DECK,
     DEFAULT_NOTE_TYPE,
     GlossSentence,
+    dedupe_gloss_items,
+    format_answer_key,
     format_worksheets,
     gloss_items_from_notes,
 )
 
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
 DEFAULT_LIMIT = 10
+# Pull extra notes before dedupe so --limit counts unique sentences.
+NOTE_FETCH_MULTIPLIER = 5
+NOTE_FETCH_CAP = 200
 
 
 def anki_connect(base_url: str, action: str, **params: object) -> object:
@@ -70,7 +80,7 @@ def resolve_note_ids(
     selected: bool,
     note_ids: Sequence[int],
     query: str,
-    limit: int,
+    fetch_limit: int,
 ) -> List[int]:
     if note_ids:
         return [int(nid) for nid in note_ids]
@@ -80,7 +90,7 @@ def resolve_note_ids(
             raise SystemExit("No notes selected in the Anki browser.")
         return [int(nid) for nid in ids]
     ids = anki_connect(base_url, "findNotes", query=query) or []
-    return [int(nid) for nid in ids][:limit]
+    return [int(nid) for nid in ids][:fetch_limit]
 
 
 def load_from_anki(
@@ -91,19 +101,24 @@ def load_from_anki(
     query: str,
     limit: int,
 ) -> List[GlossSentence]:
+    fetch_limit = limit
+    if not note_ids and not selected:
+        fetch_limit = min(max(limit * NOTE_FETCH_MULTIPLIER, limit), NOTE_FETCH_CAP)
     ids = resolve_note_ids(
         base_url,
         selected=selected,
         note_ids=note_ids,
         query=query,
-        limit=limit,
+        fetch_limit=fetch_limit,
     )
     if not ids:
         raise SystemExit(f"No notes matched query: {query!r}")
     notes = anki_connect(base_url, "notesInfo", notes=ids) or []
-    items = gloss_items_from_notes(notes)
+    items = dedupe_gloss_items(gloss_items_from_notes(notes))
     if not items:
         raise SystemExit("Matched notes had no Sentence / ClozeSentence field.")
+    if not note_ids and not selected:
+        items = items[:limit]
     return items
 
 
@@ -126,7 +141,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--limit",
         type=int,
         default=DEFAULT_LIMIT,
-        help=f"Max notes from --query (default: {DEFAULT_LIMIT})",
+        help=f"Max unique sentences from --query (default: {DEFAULT_LIMIT})",
     )
     parser.add_argument(
         "--note-id",
@@ -163,6 +178,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=None,
         help="Write worksheet text to this path (also prints to stdout)",
     )
+    parser.add_argument(
+        "--answers-file",
+        type=Path,
+        default=None,
+        help="Write answer key only to this path (blanks still print/save via -o)",
+    )
+    parser.add_argument(
+        "--no-answers",
+        action="store_true",
+        help="Omit the appended answer key from the main output",
+    )
     return parser.parse_args(argv)
 
 
@@ -185,12 +211,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             limit=args.limit,
         )
 
-    text = format_worksheets(items)
+    include_answers = not args.no_answers and args.answers_file is None
+    text = format_worksheets(items, include_answers=include_answers)
     print(text)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
         print(f"\nWrote {args.output}", file=sys.stderr)
+    if args.answers_file is not None:
+        answers = format_answer_key(items)
+        args.answers_file.parent.mkdir(parents=True, exist_ok=True)
+        args.answers_file.write_text(answers + "\n", encoding="utf-8")
+        print(f"Wrote answers {args.answers_file}", file=sys.stderr)
     return 0
 
 

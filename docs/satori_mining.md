@@ -40,7 +40,7 @@ Import the `.apkg` in Anki (**Add** first time, **Update** for note-type templat
 
 ## Gloss worksheet (Cure Dolly–style mapping practice)
 
-Not an Anki card — a practice sheet so you map **Japanese order → sticky English** before looking at fluent English. CHUNK / ROLE / LIT are blanks; Satori’s translation stays on the EN line.
+Not an Anki card — a practice sheet so you map **Japanese order → sticky English** before looking at fluent English. CHUNK / ROLE / LIT are blanks; Satori’s translation stays on the EN line. Duplicate sentences (same JP mined for different target words) are collapsed.
 
 Anki open with AnkiConnect:
 
@@ -49,7 +49,11 @@ python3 scripts/satori_gloss_worksheet.py
 python3 scripts/satori_gloss_worksheet.py --limit 3
 python3 scripts/satori_gloss_worksheet.py --selected
 python3 scripts/satori_gloss_worksheet.py --note-id 2031086401000 -o /tmp/gloss.txt
+python3 scripts/satori_gloss_worksheet.py -o /tmp/gloss.txt --answers-file /tmp/gloss-answers.txt
+python3 scripts/satori_gloss_worksheet.py --no-answers
 ```
+
+By default the blank worksheets are followed by an **answer key** (heuristic CHUNK/ROLE; LIT is Japanese-order sticky English via MT on each full chunk so particles/engines disambiguate senses — e.g. `空は` → sky-as-for, not empty). Use `--answers-file` for a separate answers-only file, or `--no-answers` to skip.
 
 Ad-hoc (no Anki):
 
