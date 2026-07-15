@@ -14,6 +14,9 @@ LOGIC_PATH = REPO_ROOT / "anki_addon" / "wk_immersion" / "logic.py"
 def _load_logic_module():
     import importlib.util
 
+    addon_dir = LOGIC_PATH.parent
+    if str(addon_dir) not in sys.path:
+        sys.path.insert(0, str(addon_dir))
     spec = importlib.util.spec_from_file_location("wk_immersion_logic", LOGIC_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -24,12 +27,18 @@ def _load_logic_module():
 
 _logic = _load_logic_module()
 ImmersionTtsConfig = _logic.ImmersionTtsConfig
+immersion_audio_cache_path = _logic.immersion_audio_cache_path
+kanji_plain_from_furigana_html = _logic.kanji_plain_from_furigana_html
 ruby_html_to_plain = _logic.ruby_html_to_plain
 sentence_media_basename = _logic.sentence_media_basename
 sentence_plain_text = _logic.sentence_plain_text
 sentence_text_for_tts = _logic.sentence_text_for_tts
 should_synthesize_note = _logic.should_synthesize_note
 sound_field_value = _logic.sound_field_value
+audio_field_value = _logic.audio_field_value
+sentence_audio_autoplay = _logic.sentence_audio_autoplay
+unwrap_sound_tag = _logic.unwrap_sound_tag
+synthesize_sentence_audio = _logic.synthesize_sentence_audio
 synthesize_voicevox_wav = _logic.synthesize_voicevox_wav
 
 
@@ -63,23 +72,79 @@ class ImmersionTtsLogicTests(unittest.TestCase):
     def test_sentence_text_for_tts_falls_back_to_sentence(self) -> None:
         self.assertEqual(sentence_text_for_tts("今日は少し頭痛がする。", ""), "今日は少し頭痛がする。")
 
+    def test_sentence_text_for_tts_strips_anki_bracket_furigana(self) -> None:
+        sentence = "親鳥がえさを運んできました。"
+        furigana = "親鳥[おやどり]がえさを運[はこ]んで来[き]ました。"
+        self.assertEqual(sentence_text_for_tts(sentence, furigana), sentence)
+
+    def test_sentence_text_for_tts_satori_spaced_brackets(self) -> None:
+        sentence = "暖かい春がやって来ました。"
+        furigana = " 暖[あたた]かい 春[はる]がやって 来[き]ました。"
+        self.assertEqual(sentence_text_for_tts(sentence, furigana), sentence)
+
+    def test_kanji_plain_from_anki_brackets(self) -> None:
+        self.assertEqual(
+            kanji_plain_from_furigana_html("親鳥[おやどり]がえさを運[はこ]んで来[き]ました。"),
+            "親鳥がえさを運んで来ました。",
+        )
+
     def test_should_synthesize_when_sentence_present(self) -> None:
-        self.assertTrue(
+        for note_type in (
+            "WK Yomitan Immersion",
+            "WK Migaku Immersion",
+            "WK Satori Immersion",
+        ):
+            with self.subTest(note_type=note_type):
+                self.assertTrue(
+                    should_synthesize_note(
+                        note_type_name=note_type,
+                        sentence="頭が痛い。",
+                        sentence_audio="",
+                        config=ImmersionTtsConfig(),
+                        on_mine=True,
+                    )
+                )
+
+    def test_should_not_resynthesize_existing_audio(self) -> None:
+        self.assertFalse(
             should_synthesize_note(
-                note_type_name="WK Migaku Immersion",
+                note_type_name="WK Yomitan Immersion",
                 sentence="頭が痛い。",
-                sentence_audio="",
+                sentence_audio="[sound:foo.wav]",
+                sentence_audio_easy="[sound:bar.wav]",
                 config=ImmersionTtsConfig(),
                 on_mine=True,
             )
         )
 
-    def test_should_not_resynthesize_existing_audio(self) -> None:
-        self.assertFalse(
+    def test_media_basename_differs_by_speed(self) -> None:
+        normal = sentence_media_basename(
+            "テスト", engine="voicevox", speaker_id=3, speed_scale=1.0, ext=".wav"
+        )
+        easy = sentence_media_basename(
+            "テスト", engine="voicevox", speaker_id=3, speed_scale=0.75, ext=".wav"
+        )
+        self.assertNotEqual(normal, easy)
+
+    def test_should_synthesize_when_easy_missing(self) -> None:
+        self.assertTrue(
             should_synthesize_note(
-                note_type_name="WK Migaku Immersion",
+                note_type_name="WK Satori Immersion",
                 sentence="頭が痛い。",
                 sentence_audio="[sound:foo.wav]",
+                sentence_audio_easy="",
+                config=ImmersionTtsConfig(),
+                on_mine=True,
+            )
+        )
+
+    def test_should_not_resynthesize_when_both_audio_set(self) -> None:
+        self.assertFalse(
+            should_synthesize_note(
+                note_type_name="WK Satori Immersion",
+                sentence="頭が痛い。",
+                sentence_audio="[sound:foo.wav]",
+                sentence_audio_easy="[sound:bar.wav]",
                 config=ImmersionTtsConfig(),
                 on_mine=True,
             )
@@ -93,6 +158,102 @@ class ImmersionTtsLogicTests(unittest.TestCase):
 
     def test_sound_field_value(self) -> None:
         self.assertEqual(sound_field_value("foo.wav"), "[sound:foo.wav]")
+
+    def test_audio_field_value_autoplay_and_manual(self) -> None:
+        self.assertEqual(audio_field_value("foo.wav", autoplay=True), "[sound:foo.wav]")
+        self.assertEqual(audio_field_value("foo.wav", autoplay=False), "foo.wav")
+        self.assertEqual(
+            audio_field_value("[sound:foo.wav]", autoplay=False), "foo.wav"
+        )
+        self.assertEqual(unwrap_sound_tag("[sound:bar.mp3]"), "bar.mp3")
+
+    def test_satori_normal_does_not_autoplay(self) -> None:
+        self.assertFalse(
+            sentence_audio_autoplay(
+                note_type_name="WK Satori Immersion", field_name="SentenceAudio"
+            )
+        )
+        self.assertTrue(
+            sentence_audio_autoplay(
+                note_type_name="WK Satori Immersion", field_name="SentenceAudioEasy"
+            )
+        )
+        self.assertTrue(
+            sentence_audio_autoplay(
+                note_type_name="WK Yomitan Immersion", field_name="SentenceAudio"
+            )
+        )
+
+    def test_synthesize_uses_disk_cache(self) -> None:
+        import tempfile
+        import unittest.mock
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            config = ImmersionTtsConfig(engine="voicevox", cache_enabled=True)
+            cache_path = immersion_audio_cache_path(
+                "頭が痛い。",
+                engine="voicevox",
+                speaker_id=config.voicevox_speaker_id,
+                volume_scale=config.voicevox_volume_scale,
+                speed_scale=1.0,
+                ext=".wav",
+                cache_dir=cache_dir,
+            )
+            cache_dir.mkdir(parents=True)
+            cache_path.write_bytes(b"RIFF-CACHED")
+
+            with unittest.mock.patch.object(_logic, "synthesize_voicevox_wav") as synth:
+                audio, ext, engine = synthesize_sentence_audio(
+                    "頭が痛い。",
+                    config=config,
+                    temp_dir=Path(tmp),
+                    edge_tts_script=Path(tmp) / "missing.py",
+                    speed_scale=1.0,
+                    force=False,
+                    cache_dir=cache_dir,
+                )
+            synth.assert_not_called()
+            self.assertEqual(audio, b"RIFF-CACHED")
+            self.assertEqual(ext, ".wav")
+            self.assertEqual(engine, "voicevox")
+
+    def test_synthesize_force_bypasses_cache(self) -> None:
+        import tempfile
+        import unittest.mock
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            config = ImmersionTtsConfig(engine="voicevox", cache_enabled=True)
+            cache_path = immersion_audio_cache_path(
+                "頭が痛い。",
+                engine="voicevox",
+                speaker_id=config.voicevox_speaker_id,
+                volume_scale=config.voicevox_volume_scale,
+                speed_scale=1.0,
+                ext=".wav",
+                cache_dir=cache_dir,
+            )
+            cache_dir.mkdir(parents=True)
+            cache_path.write_bytes(b"RIFF-OLD")
+
+            with unittest.mock.patch.object(
+                _logic, "synthesize_voicevox_wav", return_value=b"RIFF-NEW"
+            ) as synth:
+                audio, ext, engine = synthesize_sentence_audio(
+                    "頭が痛い。",
+                    config=config,
+                    temp_dir=Path(tmp),
+                    edge_tts_script=Path(tmp) / "missing.py",
+                    speed_scale=1.0,
+                    force=True,
+                    cache_dir=cache_dir,
+                )
+            synth.assert_called_once()
+            self.assertEqual(audio, b"RIFF-NEW")
+            self.assertEqual(cache_path.read_bytes(), b"RIFF-NEW")
 
     def test_synthesize_voicevox_wav(self) -> None:
         import unittest.mock

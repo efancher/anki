@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from satori_gloss import (
+    GLOSS_ANSWER_CACHE_VERSION,
     GlossSentence,
     _TRANSLATE_CACHE,
     analyze_gloss_sentence,
@@ -12,8 +15,11 @@ from satori_gloss import (
     format_answer_worksheet,
     format_worksheet,
     format_worksheets,
+    gloss_answer_cache_key,
     gloss_from_anki_fields,
     ichi_moe_url,
+    load_gloss_answer_cache,
+    save_gloss_answer_cache,
     strip_anki_html,
 )
 
@@ -274,6 +280,59 @@ class SatoriGlossTests(unittest.TestCase):
         blank, answers = text.split("ANSWER KEY", 1)
         self.assertIn("CHUNK:\n", blank)
         self.assertIn("CHUNK: ", answers)
+
+
+class SatoriGlossCacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _TRANSLATE_CACHE.clear()
+
+    def test_answer_cache_reused_without_retranslating(self) -> None:
+        item = GlossSentence(japanese="日本ではありません。", english="It’s not Japan.")
+        calls: list[str] = []
+
+        def translator(japanese: str) -> str:
+            calls.append(japanese)
+            return _fake_translate(japanese)
+
+        cache: dict = {}
+        first = analyze_gloss_sentence(item, translator=translator, answer_cache=cache)
+        self.assertTrue(calls)
+        self.assertEqual(len(cache), 1)
+
+        calls.clear()
+        _TRANSLATE_CACHE.clear()
+        second = analyze_gloss_sentence(item, translator=translator, answer_cache=cache)
+        self.assertEqual(calls, [])  # served from cache, no MT
+        self.assertEqual(first, second)
+
+    def test_cache_key_depends_on_sentence_and_english(self) -> None:
+        base = GlossSentence(japanese="日本ではありません。", english="It’s not Japan.")
+        same = GlossSentence(japanese="日本では ありません。", english="It’s   not Japan.")
+        other_en = GlossSentence(japanese="日本ではありません。", english="Different.")
+        self.assertEqual(gloss_answer_cache_key(base), gloss_answer_cache_key(same))
+        self.assertNotEqual(gloss_answer_cache_key(base), gloss_answer_cache_key(other_en))
+
+    def test_cache_round_trips_to_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sub" / "answers.json"
+            answers = {"abc123": {"chunk": "c", "role": "r", "lit": "l"}}
+            save_gloss_answer_cache(path, answers)
+            self.assertTrue(path.is_file())
+            self.assertEqual(load_gloss_answer_cache(path), answers)
+
+    def test_cache_version_mismatch_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "answers.json"
+            path.write_text(
+                '{"version": %d, "answers": {"k": {"chunk": "c"}}}'
+                % (GLOSS_ANSWER_CACHE_VERSION + 1),
+                encoding="utf-8",
+            )
+            self.assertEqual(load_gloss_answer_cache(path), {})
+
+    def test_missing_cache_file_returns_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(load_gloss_answer_cache(Path(tmp) / "nope.json"), {})
 
 
 if __name__ == "__main__":

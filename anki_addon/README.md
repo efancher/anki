@@ -141,9 +141,9 @@ Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
 
 ---
 
-# WK Immersion (Migaku mining)
+# WK Immersion (Yomitan mining)
 
-Enriches **WK Migaku Immersion** notes at mine time (cloze, WK links, hints) and synthesizes **SentenceAudio** only when Migaku did not attach a clip.
+Enriches **WK Yomitan Immersion** notes at mine time (cloze, WK links, hints, SentenceKana) and synthesizes **SentenceAudio** when empty (VOICEVOX / edge-tts). Also still supports legacy **WK Migaku Immersion** notes.
 
 ## Install once
 
@@ -151,20 +151,31 @@ Copy `wk_immersion` into Anki's add-ons folder (or run `./scripts/sync_anki_addo
 
 ## At mine time
 
-1. Keep **Anki open** on your mining laptop — Migaku sends cards directly.
-2. Migaku fills **SentenceAudio** and **Image** from the source clip when mining video.
-3. **wk_immersion** enriches cloze/WK fields before the note is saved.
+1. Keep **Anki open** — Yomitan sends notes via AnkiConnect.
+2. Map pitch + glossary fields in Yomitan (see [docs/yomitan_mining.md](../docs/yomitan_mining.md)).
+3. **wk_immersion** enriches cloze/WK fields and fills missing sentence audio.
+
+## Cards
+
+1. **Sentence cloze → word** — progressive hints; type Reading (kana).
+2. **Shadow → pitch** — listen and speak; pitch graphs on the back.
+
+## Native clips
+
+```bash
+python3 scripts/extract_immersion_clip.py --url '…' --start 1:20 --end 1:24 --selected
+```
 
 ## Backfill / CLI
 
-- **Tools → WK Configure Migaku Field Map** — writes Migaku field maps (Expression → Target Word, etc.)
-- **Tools → WK Enrich Mining Notes (cloze + WK links)** — backfill cloze blank, WK ids, hint flags
-- **Tools → WK Synthesize Immersion Sentence Audio** — notes missing **SentenceAudio** (VOICEVOX/edge fallback)
-- `python3 scripts/synthesize_immersion_sentence_audio.py` — via AnkiConnect (Anki must be open)
+- **Tools → WK Enrich Mining Notes (cloze + WK links)**
+- **Tools → WK Synthesize Immersion Sentence Audio**
+- **Tools → WK Configure Migaku Field Map** (legacy Migaku only)
+- `python3 scripts/synthesize_immersion_sentence_audio.py`
 
-Hint stages (English → kana-only → full J–J on back) update on **Tools → WK Run Unlock Pass** in **wk_unlock** (no suspend/lock).
+Hint stages update on **Tools → WK Run Unlock Pass**.
 
-See [docs/migaku_mining.md](../docs/migaku_mining.md) and [docs/voicevox_setup.md](../docs/voicevox_setup.md).
+See [docs/yomitan_mining.md](../docs/yomitan_mining.md) and [docs/voicevox_setup.md](../docs/voicevox_setup.md).
 
 ---
 

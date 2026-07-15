@@ -12,12 +12,16 @@ particles/engines pick the right sense (sky-as-for, not empty-as-for).
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
+import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import quote
 
@@ -249,6 +253,52 @@ class GlossAnswer:
     chunk: str
     role: str
     lit: str
+
+
+# Bump when chunking / role / LIT heuristics change so stale answers are dropped.
+GLOSS_ANSWER_CACHE_VERSION = 1
+GLOSS_ANSWER_CACHE_SUBDIR = "satori_gloss"
+GLOSS_ANSWER_CACHE_FILENAME = "answers.json"
+
+
+def gloss_answer_cache_key(item: "GlossSentence") -> str:
+    """Stable key for one exercise: normalized sentence + English hint.
+
+    The LIT line depends on the card's English, so both feed the key.
+    """
+    sentence = normalize_sentence_key(item.japanese)
+    english = re.sub(r"\s+", " ", (item.english or "").strip()).lower()
+    raw = f"{GLOSS_ANSWER_CACHE_VERSION}\x1f{sentence}\x1f{english}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def load_gloss_answer_cache(path: Path) -> Dict[str, dict]:
+    """Load cached answers; return {} on missing/corrupt/version-mismatch."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get("version") != GLOSS_ANSWER_CACHE_VERSION:
+        return {}
+    answers = payload.get("answers")
+    return answers if isinstance(answers, dict) else {}
+
+
+def save_gloss_answer_cache(path: Path, answers: Dict[str, dict]) -> None:
+    """Atomically write the answer cache next to other .wk_cache data."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": GLOSS_ANSWER_CACHE_VERSION, "answers": answers}
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=0)
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
 
 
 def strip_anki_html(value: str) -> str:
@@ -715,8 +765,24 @@ def analyze_gloss_sentence(
     item: GlossSentence,
     *,
     translator: Optional[Translator] = None,
+    answer_cache: Optional[Dict[str, dict]] = None,
 ) -> GlossAnswer:
-    """Build a checkable heuristic answer for one worksheet."""
+    """Build a checkable heuristic answer for one worksheet.
+
+    When ``answer_cache`` is provided, a previously generated answer for the
+    same sentence + English is reused (avoids re-running MT); new answers are
+    written back into the dict so the caller can persist it.
+    """
+    key = ""
+    if answer_cache is not None:
+        key = gloss_answer_cache_key(item)
+        cached = answer_cache.get(key)
+        if isinstance(cached, dict):
+            return GlossAnswer(
+                chunk=str(cached.get("chunk", "")),
+                role=str(cached.get("role", "")),
+                lit=str(cached.get("lit", "")),
+            )
     chunks = chunk_japanese_sentence(item.japanese)
     roles = [
         _role_for_chunk(chunk, is_final=(index == len(chunks) - 1))
@@ -731,11 +797,14 @@ def analyze_gloss_sentence(
         )
         for chunk, role in zip(chunks, roles)
     ]
-    return GlossAnswer(
+    answer = GlossAnswer(
         chunk="  ".join(chunks),
         role="  |  ".join(roles),
         lit=" · ".join(part for part in lits if part),
     )
+    if answer_cache is not None:
+        answer_cache[key] = {"chunk": answer.chunk, "role": answer.role, "lit": answer.lit}
+    return answer
 
 
 def _worksheet_header(item: GlossSentence, *, index: Optional[int], kind: str) -> List[str]:
@@ -787,9 +856,10 @@ def format_answer_worksheet(
     *,
     index: Optional[int] = None,
     translator: Optional[Translator] = None,
+    answer_cache: Optional[Dict[str, dict]] = None,
 ) -> str:
     """Same structure as the blank worksheet, filled with a heuristic answer."""
-    answer = analyze_gloss_sentence(item, translator=translator)
+    answer = analyze_gloss_sentence(item, translator=translator, answer_cache=answer_cache)
     english = item.english or "(no English on this note)"
     lines = _worksheet_header(item, index=index, kind="Satori gloss answers")
     lines.extend(
@@ -820,6 +890,7 @@ def format_worksheets(
     *,
     include_answers: bool = False,
     translator: Optional[Translator] = None,
+    answer_cache: Optional[Dict[str, dict]] = None,
 ) -> str:
     blank_blocks = [
         format_worksheet(item, index=i if len(items) > 1 else None)
@@ -833,6 +904,7 @@ def format_worksheets(
             item,
             index=i if len(items) > 1 else None,
             translator=translator,
+            answer_cache=answer_cache,
         )
         for i, item in enumerate(items, start=1)
     ]
@@ -850,12 +922,14 @@ def format_answer_key(
     items: Sequence[GlossSentence],
     *,
     translator: Optional[Translator] = None,
+    answer_cache: Optional[Dict[str, dict]] = None,
 ) -> str:
     blocks = [
         format_answer_worksheet(
             item,
             index=i if len(items) > 1 else None,
             translator=translator,
+            answer_cache=answer_cache,
         )
         for i, item in enumerate(items, start=1)
     ]

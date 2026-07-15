@@ -16,18 +16,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
-MINING_NOTE_TYPE = "WK Migaku Immersion"
+try:
+    from .mining_note_types import MINING_NOTE_TYPE, is_mining_note_type
+except ImportError:  # loaded as a loose module in unit tests
+    from mining_note_types import MINING_NOTE_TYPE, is_mining_note_type
+
 FIELD_SENTENCE = "Sentence"
 FIELD_SENTENCE_FURIGANA = "SentenceFurigana"
 FIELD_SENTENCE_AUDIO = "SentenceAudio"
+FIELD_SENTENCE_AUDIO_EASY = "SentenceAudioEasy"
 FIELD_SPEAKER = "VoicevoxSpeakerId"
 
 DEFAULT_VOICEVOX_ENGINE_URL = "http://127.0.0.1:50021"
 DEFAULT_VOICEVOX_SPEAKER_ID = 2  # 四国めたん (Shikoku Metan), normal style
 DEFAULT_VOICEVOX_VOLUME_SCALE = 1.5
+DEFAULT_VOICEVOX_SPEED_SCALE = 1.0
+DEFAULT_VOICEVOX_EASY_SPEED_SCALE = 0.75
 DEFAULT_EDGE_TTS_VOICE = "ja-JP-NanamiNeural"
 DEFAULT_SYNTH_ENGINE = "voicevox"
 SENTENCE_AUDIO_FILENAME_PREFIX = "wk_immersion_sent_"
+IMMERSION_AUDIO_CACHE_SUBDIR = "immersion_sentence_audio"
 VOICEVOX_SYNTH_TIMEOUT_SECONDS = 45
 EDGE_TTS_SUBPROCESS_TIMEOUT_SECONDS = 60
 
@@ -40,8 +48,12 @@ class ImmersionTtsConfig:
     voicevox_engine_url: str = DEFAULT_VOICEVOX_ENGINE_URL
     voicevox_speaker_id: int = DEFAULT_VOICEVOX_SPEAKER_ID
     voicevox_volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE
+    voicevox_speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE
+    voicevox_easy_speed_scale: float = DEFAULT_VOICEVOX_EASY_SPEED_SCALE
     edge_tts_voice: str = DEFAULT_EDGE_TTS_VOICE
     python_executable: str = ""
+    cache_enabled: bool = True
+    cache_dir: str = ""  # empty → resolve_immersion_audio_cache_dir()
 
     @classmethod
     def from_mapping(cls, payload: dict) -> "ImmersionTtsConfig":
@@ -56,8 +68,16 @@ class ImmersionTtsConfig:
             voicevox_volume_scale=float(
                 payload.get("voicevox_volume_scale", DEFAULT_VOICEVOX_VOLUME_SCALE)
             ),
+            voicevox_speed_scale=float(
+                payload.get("voicevox_speed_scale", DEFAULT_VOICEVOX_SPEED_SCALE)
+            ),
+            voicevox_easy_speed_scale=float(
+                payload.get("voicevox_easy_speed_scale", DEFAULT_VOICEVOX_EASY_SPEED_SCALE)
+            ),
             edge_tts_voice=str(payload.get("edge_tts_voice", DEFAULT_EDGE_TTS_VOICE)),
             python_executable=str(payload.get("python_executable", "")),
+            cache_enabled=bool(payload.get("cache_enabled", True)),
+            cache_dir=str(payload.get("cache_dir", "")),
         )
 
 
@@ -70,6 +90,8 @@ def sentence_plain_text(sentence_field: str) -> str:
 
 
 _RUBY_WITH_RT = re.compile(r"<ruby>(.*?)<rt>(.*?)</rt></ruby>", re.DOTALL | re.IGNORECASE)
+# Anki / Satori ReadingsInline: 漢字[かんじ] (VOICEVOX must not hear the bracket reading).
+_ANKI_FURIGANA_BRACKET_RE = re.compile(r"(\S+?)\[([^\]]+)\]")
 
 
 def ruby_html_to_plain(value: str) -> str:
@@ -88,10 +110,18 @@ def ruby_html_to_plain(value: str) -> str:
     return strip_html(text).strip()
 
 
+def strip_anki_furigana_brackets(value: str) -> str:
+    """Keep surface text from Anki ``漢字[かんじ]`` markup; drop bracket readings."""
+    if not (value or "").strip():
+        return ""
+    return _ANKI_FURIGANA_BRACKET_RE.sub(r"\1", value)
+
+
 def kanji_plain_from_furigana_html(value: str) -> str:
-    """Kanji surface string from furigana HTML (drop rt readings, then strip tags)."""
+    """Kanji surface string from furigana HTML or Anki bracket markup (drop readings)."""
     without_readings = re.sub(r"<rt>.*?</rt>", "", value or "", flags=re.DOTALL | re.IGNORECASE)
-    return strip_html(without_readings).strip()
+    without_brackets = strip_anki_furigana_brackets(without_readings)
+    return strip_html(without_brackets).strip()
 
 
 def _same_japanese_text(left: str, right: str) -> bool:
@@ -102,9 +132,9 @@ def sentence_text_for_tts(sentence: str, sentence_furigana: str = "") -> str:
     """
     Text to synthesize for the sentence player.
 
-    Prefer plain **Sentence** (kanji) when furigana is the same line with ruby markup.
+    Prefer plain **Sentence** (kanji) when furigana is the same line with ruby/bracket markup.
     Use furigana-derived kanji only when it contains more text (page context).
-    VOICEVOX reads kanji; avoid substituting compact kana like ずつう for 頭痛.
+    VOICEVOX reads kanji; never feed ``漢字[かんじ]`` or ruby readings as spoken text.
     """
     plain = sentence_plain_text(sentence)
     if not (sentence_furigana or "").strip():
@@ -114,10 +144,10 @@ def sentence_text_for_tts(sentence: str, sentence_furigana: str = "") -> str:
     if plain and furi_kanji:
         if _same_japanese_text(plain, furi_kanji):
             return plain
-        if len(furi_kanji) > len(plain):
+        if len(furi_kanji.replace(" ", "")) > len(plain.replace(" ", "")):
             return furi_kanji
 
-    return plain or ruby_html_to_plain(sentence_furigana) or furi_kanji
+    return plain or furi_kanji or ruby_html_to_plain(sentence_furigana)
 
 
 def sentence_audio_already_set(sentence_audio_field: str) -> bool:
@@ -139,19 +169,70 @@ def sentence_media_basename(
     engine: str,
     speaker_id: int,
     volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
+    speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
     ext: str,
 ) -> str:
-    raw = f"{engine}\0{speaker_id}\0{volume_scale:g}\0{text}".encode("utf-8")
+    raw = (
+        f"{engine}\0{speaker_id}\0{volume_scale:g}\0{speed_scale:g}\0{text}".encode("utf-8")
+    )
     digest = hashlib.sha256(raw).hexdigest()[:24]
     return f"{SENTENCE_AUDIO_FILENAME_PREFIX}{digest}{ext}"
 
 
-def apply_voicevox_volume(audio_query: dict, volume_scale: float) -> dict:
-    if volume_scale == 1.0:
-        return audio_query
+def resolve_immersion_audio_cache_dir(configured: str = "") -> Path:
+    """Disk cache for immersion TTS (same role as .wk_cache/sentence_audio for deck builds)."""
+    if configured.strip():
+        return Path(configured).expanduser()
+    cwd_cache = Path.cwd() / ".wk_cache" / IMMERSION_AUDIO_CACHE_SUBDIR
+    home_cache = Path.home() / "anki" / ".wk_cache" / IMMERSION_AUDIO_CACHE_SUBDIR
+    if (Path.cwd() / ".wk_cache").is_dir() or (Path.cwd() / "anki_addon").is_dir():
+        return cwd_cache
+    if (Path.home() / "anki").is_dir():
+        return home_cache
+    return cwd_cache
+
+
+def immersion_audio_cache_path(
+    text: str,
+    *,
+    engine: str,
+    speaker_id: int,
+    volume_scale: float,
+    speed_scale: float,
+    ext: str,
+    cache_dir: Path,
+) -> Path:
+    return cache_dir / sentence_media_basename(
+        text,
+        engine=engine,
+        speaker_id=speaker_id,
+        volume_scale=volume_scale,
+        speed_scale=speed_scale,
+        ext=ext,
+    )
+
+
+def audio_cache_is_usable(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
+def apply_voicevox_query_scales(
+    audio_query: dict,
+    *,
+    volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
+    speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
+) -> dict:
     updated = dict(audio_query)
-    updated["volumeScale"] = float(volume_scale)
+    if volume_scale != 1.0:
+        updated["volumeScale"] = float(volume_scale)
+    if speed_scale != 1.0:
+        updated["speedScale"] = float(speed_scale)
     return updated
+
+
+def apply_voicevox_volume(audio_query: dict, volume_scale: float) -> dict:
+    """Backward-compatible wrapper; prefer apply_voicevox_query_scales."""
+    return apply_voicevox_query_scales(audio_query, volume_scale=volume_scale)
 
 
 def synthesize_voicevox_wav(
@@ -160,6 +241,7 @@ def synthesize_voicevox_wav(
     engine_url: str,
     speaker_id: int,
     volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
+    speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
     timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     if not text.strip():
@@ -172,9 +254,10 @@ def synthesize_voicevox_wav(
     try:
         query_req = urllib.request.Request(query_url, data=b"", method="POST")
         with urllib.request.urlopen(query_req, timeout=timeout_seconds) as resp:
-            audio_query = apply_voicevox_volume(
+            audio_query = apply_voicevox_query_scales(
                 json.loads(resp.read().decode("utf-8")),
-                volume_scale,
+                volume_scale=volume_scale,
+                speed_scale=speed_scale,
             )
         synth_url = f"{base}/synthesis?{urllib.parse.urlencode({'speaker': str(speaker_id)})}"
         body = json.dumps(audio_query).encode("utf-8")
@@ -221,10 +304,16 @@ def synthesize_sentence_audio(
     config: ImmersionTtsConfig,
     temp_dir: Path,
     edge_tts_script: Path,
+    speed_scale: Optional[float] = None,
+    force: bool = False,
+    cache_dir: Optional[Path] = None,
 ) -> Tuple[Optional[bytes], str, str]:
     """
     Return (audio_bytes, media_ext_including_dot, engine_label).
     engine_label is voicevox or edge.
+    speed_scale overrides config.voicevox_speed_scale for VOICEVOX only.
+    When cache_enabled, reads/writes .wk_cache/immersion_sentence_audio (or config.cache_dir).
+    force=True regenerates even when a cache file exists.
     """
     plain = sentence_plain_text(text)
     if not plain:
@@ -236,26 +325,60 @@ def synthesize_sentence_audio(
     else:
         engines = [config.engine]
 
+    voicevox_speed = (
+        float(speed_scale) if speed_scale is not None else float(config.voicevox_speed_scale)
+    )
+    resolved_cache: Optional[Path] = None
+    if config.cache_enabled:
+        resolved_cache = cache_dir or resolve_immersion_audio_cache_dir(config.cache_dir)
+        resolved_cache.mkdir(parents=True, exist_ok=True)
+
     for engine in engines:
         if engine == "voicevox":
+            cache_path = None
+            if resolved_cache is not None:
+                cache_path = immersion_audio_cache_path(
+                    plain,
+                    engine="voicevox",
+                    speaker_id=config.voicevox_speaker_id,
+                    volume_scale=config.voicevox_volume_scale,
+                    speed_scale=voicevox_speed,
+                    ext=".wav",
+                    cache_dir=resolved_cache,
+                )
+                if not force and audio_cache_is_usable(cache_path):
+                    return cache_path.read_bytes(), ".wav", "voicevox"
+
             wav = synthesize_voicevox_wav(
                 plain,
                 engine_url=config.voicevox_engine_url,
                 speaker_id=config.voicevox_speaker_id,
                 volume_scale=config.voicevox_volume_scale,
+                speed_scale=voicevox_speed,
             )
             if wav:
+                if cache_path is not None:
+                    cache_path.write_bytes(wav)
                 return wav, ".wav", "voicevox"
         elif engine == "edge":
             python_exe = resolve_python_executable(config.python_executable)
             if not python_exe:
                 continue
-            dest = temp_dir / sentence_media_basename(
+            basename = sentence_media_basename(
                 plain,
                 engine="edge",
                 speaker_id=0,
+                speed_scale=voicevox_speed,
                 ext=".mp3",
             )
+            cache_path = None
+            if resolved_cache is not None:
+                cache_path = resolved_cache / basename
+                if not force and audio_cache_is_usable(cache_path):
+                    return cache_path.read_bytes(), ".mp3", "edge"
+
+            dest = (cache_path if cache_path is not None else temp_dir / basename)
+            dest.parent.mkdir(parents=True, exist_ok=True)
             if synthesize_edge_tts_mp3(
                 plain,
                 voice=config.edge_tts_voice,
@@ -271,6 +394,56 @@ def sound_field_value(stored_filename: str) -> str:
     return f"[sound:{stored_filename}]"
 
 
+def unwrap_sound_tag(field_value: str) -> str:
+    """Return media filename from `[sound:name]` or the trimmed value as-is."""
+    name = (field_value or "").strip()
+    if name.startswith("[sound:") and name.endswith("]"):
+        return name[len("[sound:") : -1]
+    return name
+
+
+def audio_field_value(stored_filename: str, *, autoplay: bool) -> str:
+    """
+    autoplay=True → Anki `[sound:]` (card autoplay).
+    autoplay=False → bare filename for HTML5 `<audio controls>` (no autoplay).
+    """
+    name = unwrap_sound_tag(stored_filename)
+    if autoplay:
+        return sound_field_value(name)
+    return name
+
+
+def sentence_audio_autoplay(*, note_type_name: str, field_name: str) -> bool:
+    """
+    Satori: Easy autoplays; Normal is manual.
+    Yomitan/Migaku: SentenceAudio autoplays (they have no Easy-first layout).
+    """
+    if field_name == FIELD_SENTENCE_AUDIO_EASY:
+        return True
+    if field_name == FIELD_SENTENCE_AUDIO:
+        try:
+            from .mining_note_types import SATORI_NOTE_TYPE
+        except ImportError:
+            from mining_note_types import SATORI_NOTE_TYPE
+
+        return note_type_name != SATORI_NOTE_TYPE
+    return True
+
+
+def sentence_audio_fields_needing_synth(
+    *,
+    sentence_audio: str,
+    sentence_audio_easy: str,
+    force: bool = False,
+) -> Tuple[str, ...]:
+    needed: list[str] = []
+    if force or not sentence_audio_already_set(sentence_audio):
+        needed.append(FIELD_SENTENCE_AUDIO)
+    if force or not sentence_audio_already_set(sentence_audio_easy):
+        needed.append(FIELD_SENTENCE_AUDIO_EASY)
+    return tuple(needed)
+
+
 def should_synthesize_note(
     *,
     note_type_name: str,
@@ -279,13 +452,17 @@ def should_synthesize_note(
     config: ImmersionTtsConfig,
     on_mine: bool,
     sentence_furigana: str = "",
+    sentence_audio_easy: str = "",
 ) -> bool:
     if not config.enabled:
         return False
     if on_mine and not config.on_mine:
         return False
-    if note_type_name != MINING_NOTE_TYPE:
+    if not is_mining_note_type(note_type_name):
         return False
-    if sentence_audio_already_set(sentence_audio):
+    if not sentence_audio_fields_needing_synth(
+        sentence_audio=sentence_audio,
+        sentence_audio_easy=sentence_audio_easy,
+    ):
         return False
     return bool(sentence_text_for_tts(sentence, sentence_furigana))

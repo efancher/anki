@@ -8,6 +8,10 @@ stays on the EN line; CHUNK / ROLE / LIT are blanks for you to fill.
 Duplicate sentences (same JP from different target words) are collapsed.
 By default an answer key is appended after the blanks (heuristic CHUNK/ROLE/LIT).
 
+Generated answers are cached under .wk_cache/satori_gloss/answers.json so re-runs
+reuse prior output (and skip the MyMemory MT calls). Use --refresh-cache to
+regenerate, or --no-cache to bypass the cache entirely.
+
 Requires Anki + AnkiConnect (default http://127.0.0.1:8765), or pass a sentence
 directly:
 
@@ -40,11 +44,15 @@ if str(REPO_ROOT) not in sys.path:
 from satori_gloss import (  # noqa: E402
     DEFAULT_DECK,
     DEFAULT_NOTE_TYPE,
+    GLOSS_ANSWER_CACHE_FILENAME,
+    GLOSS_ANSWER_CACHE_SUBDIR,
     GlossSentence,
     dedupe_gloss_items,
     format_answer_key,
     format_worksheets,
     gloss_items_from_notes,
+    load_gloss_answer_cache,
+    save_gloss_answer_cache,
 )
 
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
@@ -52,6 +60,9 @@ DEFAULT_LIMIT = 10
 # Pull extra notes before dedupe so --limit counts unique sentences.
 NOTE_FETCH_MULTIPLIER = 5
 NOTE_FETCH_CAP = 200
+DEFAULT_CACHE_PATH = (
+    REPO_ROOT / ".wk_cache" / GLOSS_ANSWER_CACHE_SUBDIR / GLOSS_ANSWER_CACHE_FILENAME
+)
 
 
 def anki_connect(base_url: str, action: str, **params: object) -> object:
@@ -189,6 +200,22 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Omit the appended answer key from the main output",
     )
+    parser.add_argument(
+        "--cache-file",
+        type=Path,
+        default=DEFAULT_CACHE_PATH,
+        help=f"Answer cache path (default: {DEFAULT_CACHE_PATH})",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Do not read or write the answer cache (always regenerate)",
+    )
+    parser.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="Ignore existing cached answers and overwrite them with fresh output",
+    )
     return parser.parse_args(argv)
 
 
@@ -212,17 +239,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     include_answers = not args.no_answers and args.answers_file is None
-    text = format_worksheets(items, include_answers=include_answers)
+    generating_answers = include_answers or args.answers_file is not None
+
+    answer_cache: Optional[dict] = None
+    if generating_answers and not args.no_cache:
+        answer_cache = {} if args.refresh_cache else load_gloss_answer_cache(args.cache_file)
+
+    text = format_worksheets(
+        items, include_answers=include_answers, answer_cache=answer_cache
+    )
     print(text)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
         print(f"\nWrote {args.output}", file=sys.stderr)
     if args.answers_file is not None:
-        answers = format_answer_key(items)
+        answers = format_answer_key(items, answer_cache=answer_cache)
         args.answers_file.parent.mkdir(parents=True, exist_ok=True)
         args.answers_file.write_text(answers + "\n", encoding="utf-8")
         print(f"Wrote answers {args.answers_file}", file=sys.stderr)
+    if answer_cache is not None:
+        save_gloss_answer_cache(args.cache_file, answer_cache)
+        print(
+            f"Cached {len(answer_cache)} answer(s) → {args.cache_file}",
+            file=sys.stderr,
+        )
     return 0
 
 

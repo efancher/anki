@@ -1,17 +1,31 @@
 # VOICEVOX setup for immersion mining
 
-Use [VOICEVOX](https://voicevox.hiroshiba.jp/) as a **fallback** when Migaku did not attach sentence audio. Migaku normally fills **SentenceAudio** from the source clip; **wk_immersion** only calls VOICEVOX when that field is empty.
+Use [VOICEVOX](https://voicevox.hiroshiba.jp/) as a **fallback** when no native clip is attached. For **video**, use [ASB Player](yomitan_mining.md#video-mining-with-asb-player-recommended) (Yomitan **+** → **Ctrl+Shift+U**) instead of Migaku or VOICEVOX. For **Satori** CSV imports (no audio in the export), use the same **wk_immersion** synthesis → **Tools → WK Synthesize Immersion Sentence Audio** or `--note-type "WK Satori Immersion"`.
 
-**Related:** [Migaku immersion mining](migaku_mining.md) · [wk_immersion add-on](../anki_addon/README.md#wk-immersion-migaku-mining)
+**Related:** [Yomitan immersion mining](yomitan_mining.md) · [Satori mining](satori_mining.md) · [wk_immersion add-on](../anki_addon/README.md#wk-immersion-migaku-mining)
 
 ---
 
 ## What happens automatically
 
-1. You mine with **Migaku** (Anki open).
-2. Migaku fills **SentenceAudio** when mining from video; otherwise **wk_immersion** reads **Sentence** and synthesizes.
+1. You mine with **Yomitan** / **Migaku**, or import **Satori** notes (Anki open).
+2. Native video clips fill **SentenceAudio** when available (ASB); otherwise **wk_immersion** reads **Sentence** and synthesizes.
 3. VOICEVOX engine receives POSTs on `http://127.0.0.1:50021`.
 4. The WAV is stored in Anki media and **SentenceAudio** is set to `[sound:…]`.
+
+Satori CSV imports leave **SentenceAudio** empty until you run the Tools backfill (or the CLI) once VOICEVOX is running.
+
+**Satori / Anki furigana:** if audio sounds like doubled words (`親鳥おやどり…`) or odd pauses mid-word, the synthesizer was reading `漢字[かんじ]` bracket readings. Sync add-ons, then re-run with `--force`:
+
+```bash
+./scripts/sync_anki_addons.sh
+# restart Anki + start VOICEVOX
+python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion" --force
+```
+
+Or **Tools → WK Synthesize Immersion Sentence Audio** after deleting **SentenceAudio** / **SentenceAudioEasy** on those notes.
+
+**Two speeds (Satori):** Easy (`voicevox_easy_speed_scale`, default `0.75`) autoplays on the card back; Normal (`voicevox_speed_scale`, default `1.0`) is a manual control only. Template **v6** stores Normal as a bare media filename so Anki does not autoplay both.
 
 ---
 
@@ -56,8 +70,12 @@ Optional file: **`out/wk_immersion_config.json`** (created on first use if missi
   "voicevox_engine_url": "http://127.0.0.1:50021",
   "voicevox_speaker_id": 2,
   "voicevox_volume_scale": 1.5,
+  "voicevox_speed_scale": 1.0,
+  "voicevox_easy_speed_scale": 0.75,
   "edge_tts_voice": "ja-JP-NanamiNeural",
-  "python_executable": ""
+  "python_executable": "",
+  "cache_enabled": true,
+  "cache_dir": ""
 }
 ```
 
@@ -69,11 +87,16 @@ Optional file: **`out/wk_immersion_config.json`** (created on first use if missi
 | `voicevox_engine_url` | `http://127.0.0.1:50021` | VOICEVOX HTTP API base URL |
 | `voicevox_speaker_id` | `2` | Numeric style id (see table below) |
 | `voicevox_volume_scale` | `1.5` | VOICEVOX `volumeScale` (1.0 = engine default; try 1.25–2.0) |
+| `voicevox_speed_scale` | `1.0` | Normal button speed (`speedScale`) |
+| `voicevox_easy_speed_scale` | `0.75` | Easy button speed |
 | `edge_tts_voice` | `ja-JP-NanamiNeural` | Used when `engine` is `edge` or `auto` fallback |
 | `python_executable` | `""` | Path to Python for edge-tts; empty = `python3` on PATH |
+| `cache_enabled` | `true` | Reuse WAVs under `.wk_cache/immersion_sentence_audio/` |
+| `cache_dir` | `""` | Override cache directory; empty = auto (repo or `~/anki/.wk_cache/…`) |
 
 After editing config, restart Anki (or use **Tools → WK Synthesize Immersion Sentence Audio** to test without re-mining).
 
+**Disk cache:** identical sentence + voice + speed hits the cache and skips VOICEVOX. CLI `--force` (and forced note re-synth) regenerates the cache file and re-attaches media.
 ---
 
 ## Choosing a voice (speaker id)

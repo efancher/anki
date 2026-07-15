@@ -1,8 +1,19 @@
-# YouTube Immersion Mining — Design Plan (deferred)
+# YouTube Immersion Mining — Design Plan
 
-**Status:** Planned — pick up after core SRS migration is stable in daily use  
-**Last updated:** 2026-06-28  
+**Status:** Partial — clip extract CLI shipped (`scripts/extract_immersion_clip.py`); full auto-note builder still deferred  
+**Last updated:** 2026-07-12  
 **Scope:** YouTube only (no Netflix DRM pipeline in v1)
+
+Use with **WK Yomitan Immersion** notes: mine the sentence in Yomitan, then attach native audio:
+
+```bash
+python3 scripts/extract_immersion_clip.py \
+  --url 'https://www.youtube.com/watch?v=…' \
+  --start 1:23.5 --end 1:26.8 \
+  --selected
+```
+
+See [yomitan_mining.md](yomitan_mining.md).
 
 > **Prerequisite:** [wk_core_srs_design.md](wk_core_srs_design.md) Phase 1–2 complete — core decks, `wk_unlock`, supplementary `WkSubjectId` gating, filtered daily queues.
 

@@ -218,12 +218,17 @@ class WkSupplementaryGatingTests(unittest.TestCase):
         self.assertNotIn("WK::N5 · Vocabulary", by_name)
         self.assertIn("WK::Kanji Meaning", by_name)
         self.assertIn("WK::Immersion · Satori", by_name)
+        self.assertIn("WK::Immersion · Satori Conj", by_name)
         self.assertNotIn("WK::Vocab Context", by_name)
         self.assertNotIn("WK::Vocab Sentence Meaning", by_name)
         self.assertNotIn("WK::Vocab Sentence Reading", by_name)
         self.assertNotIn("WK::Dictation", by_name)
         self.assertIn('deck:"Immersion · Satori"', by_name["WK::Immersion · Satori"]["search"])
-
+        self.assertEqual(by_name["WK::Immersion · Satori Conj"]["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
+        self.assertIn(
+            'deck:"Immersion · Satori Conjugations"',
+            by_name["WK::Immersion · Satori Conj"]["search"],
+        )
 
 if __name__ == "__main__":
     unittest.main()

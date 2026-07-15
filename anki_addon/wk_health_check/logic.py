@@ -39,7 +39,9 @@ EXPECTED_WK_FILTERED_DECK_NAMES = (
     "WK::Conjugations · Adjective Types",
     "WK::Grammar",
     "WK::Phonetic Families",
+    "WK::Immersion · Yomitan",
     "WK::Immersion · Migaku",
+    "WK::Immersion · Satori",
     "WK::Immersion · Satori",
 )
 

@@ -1,11 +1,12 @@
 """
-WK Immersion — Migaku mining enrichment and sentence-audio fallback at add time.
+WK Immersion — Yomitan (primary) / Migaku (legacy) mining enrichment + sentence TTS.
 
-Runs on note_will_be_added (Migaku → Anki) and optional batch menu.
-Uses native Migaku SentenceAudio when present; otherwise VOICEVOX / edge-tts.
+Runs on note_will_be_added (Yomitan/Migaku → Anki) and optional batch menus.
+Uses existing SentenceAudio when present; otherwise VOICEVOX / edge-tts.
 
-Tools → WK Synthesize Immersion Sentence Audio
 Tools → WK Enrich Mining Notes
+Tools → WK Synthesize Immersion Sentence Audio
+Tools → WK Configure Migaku Field Map (legacy)
 """
 
 from __future__ import annotations
@@ -24,18 +25,23 @@ from aqt.utils import showInfo, showWarning, tooltip
 from .logic import (
     FIELD_SENTENCE,
     FIELD_SENTENCE_AUDIO,
+    FIELD_SENTENCE_AUDIO_EASY,
     FIELD_SENTENCE_FURIGANA,
     FIELD_SPEAKER,
     MINING_NOTE_TYPE,
     ImmersionTtsConfig,
+    audio_field_value,
+    sentence_audio_autoplay,
+    sentence_audio_fields_needing_synth,
     sentence_media_basename,
     sentence_text_for_tts,
     should_synthesize_note,
-    sound_field_value,
     synthesize_sentence_audio,
+    unwrap_sound_tag,
 )
 from .migaku_field_map import configure_migaku_field_map
 from .mining_enrich import apply_mining_enrichment
+from .mining_note_types import MINING_NOTE_TYPES, SATORI_NOTE_TYPE, is_mining_note_type
 from .model_upgrade import ensure_immersion_model
 
 ADDON_NAME = "WK Immersion"
@@ -82,16 +88,17 @@ def _field_map(note) -> Dict[str, int]:
 def _model_field_names() -> List[str]:
     if mw.col is None:
         return []
-    model = mw.col.models.by_name(MINING_NOTE_TYPE)
-    if model is None:
-        return []
-    return [field["name"] for field in model["flds"]]
+    for name in (MINING_NOTE_TYPE, *sorted(MINING_NOTE_TYPES - {MINING_NOTE_TYPE})):
+        model = mw.col.models.by_name(name)
+        if model is not None:
+            return [field["name"] for field in model["flds"]]
+    return []
 
 
 def _missing_required_field_names(field_names: List[str]) -> List[str]:
     return [
         name
-        for name in (FIELD_SENTENCE, FIELD_SENTENCE_AUDIO)
+        for name in (FIELD_SENTENCE, FIELD_SENTENCE_AUDIO, FIELD_SENTENCE_AUDIO_EASY)
         if name not in field_names
     ]
 
@@ -99,12 +106,11 @@ def _missing_required_field_names(field_names: List[str]) -> List[str]:
 def _note_type_update_message(missing: List[str]) -> str:
     missing_text = ", ".join(missing)
     return (
-        f"Note type {MINING_NOTE_TYPE!r} is missing field(s): {missing_text}.\n\n"
-        "The add-on can synthesize audio but cannot store it until you update the note type:\n"
-        "  1. python3 wk_decks.py --deck mining\n"
-        "  2. Anki → File → Import → out/wk_migaku.apkg\n"
-        "  3. Choose **Update** for WK Migaku Immersion\n"
-        "  4. Run this action again"
+        f"Mining note type is missing field(s): {missing_text}.\n\n"
+        "Update the note type:\n"
+        "  For Satori: python3 scripts/import_satori.py … → Import → Update WK Satori Immersion\n"
+        "  For Yomitan: python3 wk_decks.py --deck mining → Import out/wk_mining.apkg → Update\n"
+        "  Then run this action again"
     )
 
 
@@ -125,27 +131,30 @@ def _set_field(note, name: str, value: str) -> bool:
     return True
 
 
-def _store_sentence_audio(
+def _add_media_bytes(col, audio_bytes: bytes, basename: str, ext: str) -> str:
+    if col.media.have(basename):
+        return basename
+    suffix = ext if ext.startswith(".") else f".{ext}"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+        handle.write(audio_bytes)
+        temp_path = Path(handle.name)
+    try:
+        return col.media.add_file(str(temp_path))
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _store_one_sentence_audio(
     note,
     *,
     col,
     config: ImmersionTtsConfig,
+    tts_text: str,
+    field_name: str,
+    speed_scale: float,
     silent: bool,
+    force: bool = False,
 ) -> bool:
-    sentence = _field_value(note, FIELD_SENTENCE)
-    sentence_furigana = _field_value(note, FIELD_SENTENCE_FURIGANA)
-    existing_audio = _field_value(note, FIELD_SENTENCE_AUDIO)
-    if not should_synthesize_note(
-        note_type_name=note.note_type()["name"],
-        sentence=sentence,
-        sentence_furigana=sentence_furigana,
-        sentence_audio=existing_audio,
-        config=config,
-        on_mine=True,
-    ):
-        return False
-
-    tts_text = sentence_text_for_tts(sentence, sentence_furigana)
     with tempfile.TemporaryDirectory(prefix="wk_immersion_tts_") as tmp:
         temp_dir = Path(tmp)
         audio_bytes, ext, engine_label = synthesize_sentence_audio(
@@ -153,6 +162,8 @@ def _store_sentence_audio(
             config=config,
             temp_dir=temp_dir,
             edge_tts_script=EDGE_TTS_SCRIPT,
+            speed_scale=speed_scale,
+            force=force,
         )
         if not audio_bytes or not ext:
             if not silent:
@@ -169,32 +180,102 @@ def _store_sentence_audio(
             engine=engine_label,
             speaker_id=speaker_id,
             volume_scale=volume_scale,
+            speed_scale=speed_scale if engine_label == "voicevox" else 1.0,
             ext=ext,
         )
-        if col.media.have(basename):
-            stored_name = basename
-        else:
-            suffix = ext if ext.startswith(".") else f".{ext}"
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
-                handle.write(audio_bytes)
-                temp_path = Path(handle.name)
-            try:
-                stored_name = col.media.add_file(str(temp_path))
-            finally:
-                temp_path.unlink(missing_ok=True)
-
-        changed = _set_field(note, FIELD_SENTENCE_AUDIO, sound_field_value(stored_name))
+        stored_name = _add_media_bytes(col, audio_bytes, basename, ext)
+        note_type_name = note.note_type()["name"]
+        autoplay = sentence_audio_autoplay(
+            note_type_name=note_type_name, field_name=field_name
+        )
+        changed = _set_field(
+            note, field_name, audio_field_value(stored_name, autoplay=autoplay)
+        )
         if not changed:
-            if FIELD_SENTENCE_AUDIO not in _field_map(note):
+            if field_name not in _field_map(note):
                 if not silent:
-                    showWarning(_note_type_update_message([FIELD_SENTENCE_AUDIO]))
-            return False
+                    showWarning(_note_type_update_message([field_name]))
+                return False
+            return True
         if engine_label == "voicevox":
             _set_field(note, FIELD_SPEAKER, str(config.voicevox_speaker_id))
         return True
 
 
-def synthesize_for_note_ids(note_ids: List[int], *, silent: bool) -> None:
+def _unwrap_satori_normal_audio(note) -> bool:
+    """Satori Normal must be a bare filename so Anki does not autoplay it."""
+    if note.note_type()["name"] != SATORI_NOTE_TYPE:
+        return False
+    raw = _field_value(note, FIELD_SENTENCE_AUDIO)
+    bare = unwrap_sound_tag(raw)
+    if not bare or bare == (raw or "").strip():
+        return False
+    return _set_field(note, FIELD_SENTENCE_AUDIO, bare)
+
+
+def _store_sentence_audio(
+    note,
+    *,
+    col,
+    config: ImmersionTtsConfig,
+    silent: bool,
+    force: bool = False,
+) -> bool:
+    sentence = _field_value(note, FIELD_SENTENCE)
+    sentence_furigana = _field_value(note, FIELD_SENTENCE_FURIGANA)
+    existing_audio = _field_value(note, FIELD_SENTENCE_AUDIO)
+    existing_easy = _field_value(note, FIELD_SENTENCE_AUDIO_EASY)
+    note_type_name = note.note_type()["name"]
+    unwrapped = _unwrap_satori_normal_audio(note)
+    if unwrapped:
+        existing_audio = _field_value(note, FIELD_SENTENCE_AUDIO)
+    if not should_synthesize_note(
+        note_type_name=note_type_name,
+        sentence=sentence,
+        sentence_furigana=sentence_furigana,
+        sentence_audio=existing_audio,
+        sentence_audio_easy=existing_easy,
+        config=config,
+        on_mine=True,
+    ) and not force:
+        return unwrapped
+
+    tts_text = sentence_text_for_tts(sentence, sentence_furigana)
+    if not tts_text:
+        return unwrapped
+
+    needed = sentence_audio_fields_needing_synth(
+        sentence_audio=existing_audio,
+        sentence_audio_easy=existing_easy,
+        force=force,
+    )
+    if not needed:
+        return unwrapped
+
+    any_ok = unwrapped
+    for field_name in needed:
+        speed = (
+            config.voicevox_easy_speed_scale
+            if field_name == FIELD_SENTENCE_AUDIO_EASY
+            else config.voicevox_speed_scale
+        )
+        if _store_one_sentence_audio(
+            note,
+            col=col,
+            config=config,
+            tts_text=tts_text,
+            field_name=field_name,
+            speed_scale=speed,
+            silent=silent,
+            force=force,
+        ):
+            any_ok = True
+        elif not silent and field_name == FIELD_SENTENCE_AUDIO:
+            return False
+    return any_ok
+
+
+def synthesize_for_note_ids(note_ids: List[int], *, silent: bool, force: bool = False) -> None:
     if mw.col is None:
         showWarning("Open a collection first.")
         return
@@ -208,10 +289,10 @@ def synthesize_for_note_ids(note_ids: List[int], *, silent: bool) -> None:
     failed = 0
     for note_id in note_ids:
         note = mw.col.get_note(note_id)
-        if note.note_type()["name"] != MINING_NOTE_TYPE:
+        if not is_mining_note_type(note.note_type()["name"]):
             skipped += 1
             continue
-        if _store_sentence_audio(note, col=mw.col, config=config, silent=silent):
+        if _store_sentence_audio(note, col=mw.col, config=config, silent=silent, force=force):
             note.flush()
             ok += 1
         elif should_synthesize_note(
@@ -219,6 +300,7 @@ def synthesize_for_note_ids(note_ids: List[int], *, silent: bool) -> None:
             sentence=_field_value(note, FIELD_SENTENCE),
             sentence_furigana=_field_value(note, FIELD_SENTENCE_FURIGANA),
             sentence_audio=_field_value(note, FIELD_SENTENCE_AUDIO),
+            sentence_audio_easy=_field_value(note, FIELD_SENTENCE_AUDIO_EASY),
             config=config,
             on_mine=True,
         ):
@@ -249,9 +331,9 @@ def _enrich_mining_note(note) -> None:
 
 
 def on_note_will_be_added(col, note, deck_id) -> None:
-    """Migaku → Anki — enrich cloze fields; synthesize audio only when Migaku did not."""
+    """Yomitan/Migaku → Anki — enrich cloze; synthesize only when SentenceAudio empty."""
     try:
-        if col is None or note.note_type()["name"] != MINING_NOTE_TYPE:
+        if col is None or not is_mining_note_type(note.note_type()["name"]):
             return
         ensure_immersion_model(col)
         _enrich_mining_note(note)
@@ -279,7 +361,7 @@ def enrich_mining_notes(note_ids: List[int], *, silent: bool) -> None:
     skipped = 0
     for note_id in note_ids:
         note = mw.col.get_note(note_id)
-        if note.note_type()["name"] != MINING_NOTE_TYPE:
+        if not is_mining_note_type(note.note_type()["name"]):
             skipped += 1
             continue
         if apply_mining_enrichment(note, field_map=_field_map(note)):
@@ -295,11 +377,19 @@ def enrich_mining_notes(note_ids: List[int], *, silent: bool) -> None:
         showInfo(message)
 
 
+def _mining_notes_query(extra: str = "") -> str:
+    note_clause = " OR ".join(f'note:"{name}"' for name in sorted(MINING_NOTE_TYPES))
+    query = f"({note_clause})"
+    if extra:
+        query = f"{query} {extra}"
+    return query
+
+
 def enrich_selected_mining_notes() -> None:
     if mw.col is None:
         showWarning("Open a collection first.")
         return
-    note_ids = mw.col.find_notes(f'note:"{MINING_NOTE_TYPE}" -tag:mining-setup')
+    note_ids = mw.col.find_notes(_mining_notes_query("-tag:mining-setup"))
     if not note_ids:
         showInfo("No mining notes found.")
         return
@@ -318,14 +408,14 @@ def synthesize_missing_sentence_audio() -> None:
         return
     config = load_immersion_config()
     note_ids = []
-    for note_id in mw.col.find_notes(f'note:"{MINING_NOTE_TYPE}"'):
+    for note_id in mw.col.find_notes(_mining_notes_query()):
         note = mw.col.get_note(note_id)
-        if (
-            sentence_text_for_tts(
-                _field_value(note, FIELD_SENTENCE),
-                _field_value(note, FIELD_SENTENCE_FURIGANA),
-            )
-            and not _field_value(note, FIELD_SENTENCE_AUDIO)
+        if sentence_text_for_tts(
+            _field_value(note, FIELD_SENTENCE),
+            _field_value(note, FIELD_SENTENCE_FURIGANA),
+        ) and sentence_audio_fields_needing_synth(
+            sentence_audio=_field_value(note, FIELD_SENTENCE_AUDIO),
+            sentence_audio_easy=_field_value(note, FIELD_SENTENCE_AUDIO_EASY),
         ):
             note_ids.append(int(note_id))
     if not note_ids:

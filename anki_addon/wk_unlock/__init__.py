@@ -146,7 +146,14 @@ def collect_kanji_meaning_unlock_notes() -> List[NoteUnlockState]:
     return notes
 
 
-MINING_NOTE_TYPE = "WK Migaku Immersion"
+MINING_NOTE_TYPES = frozenset(
+    {
+        "WK Yomitan Immersion",
+        "WK Migaku Immersion",
+        "WK Migaku Immersion+",
+        "WK Satori Immersion",
+    }
+)
 FIELD_HINT_STAGE = "HintStage"
 FIELD_SHOW_ENGLISH = "ShowEnglish"
 FIELD_SHOW_KANA = "ShowKana"
@@ -157,7 +164,7 @@ FIELD_PREREQUISITE_IDS = "PrerequisiteIds"
 
 def _mining_hint_state(note) -> Optional[MiningHintState]:
     model = note.note_type()
-    if model["name"] != MINING_NOTE_TYPE:
+    if model["name"] not in MINING_NOTE_TYPES:
         return None
     name_to_ord = {field["name"]: index for index, field in enumerate(model["flds"])}
     if FIELD_HINT_STAGE not in name_to_ord:
@@ -191,8 +198,9 @@ def _mining_hint_state(note) -> Optional[MiningHintState]:
 
 def collect_mining_hint_notes() -> List[MiningHintState]:
     notes: List[MiningHintState] = []
+    # Satori keeps English on the front always — do not progress its hint flags.
     for note_id in mw.col.find_notes(
-        "(tag:migaku-mining OR tag:satori-mining) -tag:mining-setup"
+        "(tag:yomitan-mining OR tag:migaku-mining) -tag:mining-setup"
     ):
         model_note = mw.col.get_note(note_id)
         state = _mining_hint_state(model_note)

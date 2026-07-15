@@ -1,6 +1,10 @@
 # Migaku immersion mining
 
-Mine vocabulary from video and reading with **Migaku** into Anki: sentence cloze on the front (type the word in kanji), native **audio + screenshot** on the back, progressive WK hints via **wk_unlock**.
+> **Deprecated as primary path.** Prefer [yomitan_mining.md](yomitan_mining.md).
+> Existing **WK Migaku Immersion** notes still enrich/unlock/synthesize via `wk_immersion`.
+> For native YouTube clips without Migaku, use `scripts/extract_immersion_clip.py`.
+
+Mine vocabulary from video and reading with **Migaku** into Anki: sentence cloze on the front, native **audio + screenshot** on the back when Migaku cooperates, progressive WK hints via **wk_unlock**.
 
 **Mine on your laptop only** — other devices review via AnkiWeb sync.
 

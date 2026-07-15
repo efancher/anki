@@ -1,6 +1,6 @@
 # WaniKani + Grammar → Anki Runbook
 
-Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar from [Hanabira](https://hanabira.org/) open data) + immersion mining (Migaku / Satori).
+Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar from [Hanabira](https://hanabira.org/) open data) + immersion mining (Yomitan / Satori).
 
 **Recommended import:** `out/wk_all.apkg` — one file updates every active deck.
 
@@ -12,10 +12,10 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 - **Core · Radicals** — still generated; dual meaning/reading Core · Kanji / Vocabulary retired from default
 - `wk_unlock` **add-on** — conjugations / verb·adj types unlock when kanji components are Guru+ in the meaning anchor; phonetic families unlock on reviewed-once
 - `no_wk_progress_filter` — import full supplementary catalog; gate with `wk-locked` in Anki
-- **Immersion** — Migaku mining + Satori Reader CSV (`scripts/import_satori.py`)
+- **Immersion** — Yomitan mining + Satori Reader CSV (`scripts/import_satori.py`)
 - **TTS off by default** — `reading_audio: false`, grammar `sentence_audio: false`
 
-Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md). Migaku: [docs/migaku_mining.md](docs/migaku_mining.md). Satori: [docs/satori_mining.md](docs/satori_mining.md).
+Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md). Yomitan: [docs/yomitan_mining.md](docs/yomitan_mining.md). Satori: [docs/satori_mining.md](docs/satori_mining.md).
 
 **Off by default** (suspended / not in `generate_decks`): Core · Kanji, Core · Vocabulary, vocab-cloze, vocab-sentence, dictation, leeches.
 
@@ -224,7 +224,7 @@ Review in **Japanese Grammar Context** when useful — Hanabira pattern clozes f
 1. **WK::Kanji Meaning** — primary kanji jumpstart.
 2. **WK::Core Radicals** if due.
 3. **WK::Conjugations ·** filtered decks (verbs → adjectives → reverse/types as you like).
-4. **WK::Immersion · Migaku** / **WK::Immersion · Satori** for cloze reading practice.
+4. **WK::Immersion · Yomitan** / **WK::Immersion · Satori** for cloze reading practice.
 5. **WK::Grammar** / **WK::Phonetic Families** when you have energy.
 
 Grammar is **not** gated by kanji maturity today (see [§12](#12-tips--tuning)); use `grammar.max_jlpt` and `max_unknown_kanji` at generate time instead.
@@ -298,7 +298,7 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 | Kanji Meaning Anchor | `WkSubjectId` only — no `wk-locked` |
 | Phonetic Families | `PrerequisiteIds` (family kanji) + `wk-locked` until any family kanji reviewed once |
 | Grammar Context                                                          | JLPT cap only at generate time; sentence TTS off                               |
-| Immersion · Migaku / Immersion · Satori | Cloze production; progressive hints via unlock pass |
+| Immersion · Yomitan / Immersion · Satori | Cloze production; progressive hints via unlock pass |
 
 Off by default (not in `generate_decks`): vocab-cloze, vocab-sentence, dictation, core-kanji, core-vocabulary, leeches. TTS/`reading_audio` false.
 
@@ -323,8 +323,9 @@ From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered D
 | **WK::Conjugations · Verbs / Adjectives / Reverse / Verb Types / Adjective Types** | Conjugation drills (5-card batches; TTS off by default)                    |
 | **WK::Grammar**                                                                    | Hanabira pattern clozes (**Japanese Grammar Context**; no sentence TTS)    |
 | **WK::Phonetic Families**                                                          | Phonetic on'yomi drills                                                    |
-| **WK::Immersion · Migaku**                                                        | Migaku-mined sentence cloze → type word (progressive hints via unlock pass) |
+| **WK::Immersion · Yomitan**                                                        | Yomitan-mined sentence cloze → type reading; shadow card for pitch |
 | **WK::Immersion · Satori**                                                        | Satori Reader CSV cloze → type word (English always on back) |
+| **WK::Immersion · Satori Conj**                                                   | Satori verb/adj conjugation drills (5-card batches) |
 
 Retired from default queues (cards suspended; opt-in rebuild only): Vocab Context, Vocab Sentence Meaning/Reading, Dictation, Core Kanji/Vocabulary, leeches.
 
@@ -345,9 +346,9 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 
 **Kanji meaning anchor:** kanji character on front, primary WK meaning(s) on back — no reading required, **no import lock**. Primary kanji path. Guru a kanji here (≥ 7 day interval) to unlock conjugations / verb·adj types whose `PrerequisiteIds` include that kanji. `--deck kanji-meaning` to build standalone.
 
-**Migaku immersion:** Sentence cloze on front — type the mined word in kanji; screenshot + native audio on back. Mine on laptop only; review elsewhere via AnkiWeb. Setup: [docs/migaku_mining.md](docs/migaku_mining.md).
+**Yomitan immersion:** Sentence cloze on front — type the reading in kana; sentence audio + pitch on back; second **Shadow → pitch** card for speaking practice. Native YouTube clips via `scripts/extract_immersion_clip.py`. Setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
 
-**Satori immersion:** Import a Satori Reader CSV with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. English word + sentence translation always on the back. Setup: [docs/satori_mining.md](docs/satori_mining.md).
+**Satori immersion:** Import a Satori Reader CSV with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. English word + sentence translation always on the back. Conjugations: `python3 scripts/import_satori.py export.csv --conjugations` → `out/wk_satori_conjugations.apkg` / **WK::Immersion · Satori Conj**. Setup: [docs/satori_mining.md](docs/satori_mining.md).
 
 **Off by default:** vocab-cloze, vocab-sentence, dictation, core-kanji/vocabulary, leeches (opt-in `--deck …`). TTS/`reading_audio` false in config.
 
@@ -378,7 +379,7 @@ Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs a
 
 **wk_unlock failed to load on Anki 25+:** Update add-on files in `addons21/wk_unlock/` (or refresh symlink), then restart. Anki 25 removed `reviewer_did_end`; use `reviewer_will_end` (called with **no arguments** in 25.09). `main_window_did_init` no longer passes arguments to menu setup hooks.
 
-**Templates not updating:** Always update note types on re-import. Current: conjugation v7, word class v5, kanji meaning v1, grammar cloze v4+, mining v12. If Anki reports thousands of notes could not be imported, live cards are on `NoteType+++` variants — see `scripts/patch_kanji_prereqs_ankiconnect.py`.
+**Templates not updating:** Always update note types on re-import. Current: conjugation v7, word class v5, kanji meaning v1, grammar cloze v4+, mining v14. If Anki reports thousands of notes could not be imported, live cards are on `NoteType+++` variants — see `scripts/patch_kanji_prereqs_ankiconnect.py`.
 
 **Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; check kanji meaning maturity (≥ **7** day interval, Guru I equivalent) for conjugations/types.
 
@@ -551,7 +552,7 @@ Dedicated leech decks are optional (legacy). Anki’s **Browse →** `tag:leech`
 | Idea                                                       | When it’s worth it                                                                                               |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading                                                                          |
-| **Migaku immersion deck**                                  | [docs/migaku_mining.md](docs/migaku_mining.md) — sentence cloze + progressive hints                              |
+| **Yomitan immersion deck**                                 | [docs/yomitan_mining.md](docs/yomitan_mining.md) — cloze + shadow/pitch + clip audio |
 | **Satori immersion import**                                | [docs/satori_mining.md](docs/satori_mining.md) — CSV → Immersion · Satori                                        |
 | YouTube immersion deck                                     | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) (deferred)                            |
 

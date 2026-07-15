@@ -15,7 +15,7 @@ Decks (default --deck all):
   - kanji-meaning: kanji → English meaning only, lighter anchor alongside core kanji reading (see kanji_meaning_decks.py)
   - vocab-sentence: WK context sentences with highlighted vocab — meaning recall and reading type-in (see vocab_sentence_decks.py)
   - rendaku: two-kanji compounds where the second morpheme voices (連濁) (see rendaku_decks.py)
-  - mining: Migaku immersion deck (see docs/migaku_mining.md)
+  - mining: Yomitan immersion deck (see docs/yomitan_mining.md)
   - all: all of the above
 
 Legacy decks (removed from --deck all; code retained for one-off --deck leeches etc.):
@@ -232,12 +232,13 @@ DECK_IDS = {
     "core-kanji": 2059400129,
     "core-vocabulary": 2059400130,
     "rendaku": 2059400131,
-    "mining": 2059400133,
+    "mining": 2059400132,
     "kanji-contrast": 2059400133,
     "kanji-meaning": 2059400134,
     "vocab-sentence-meaning": 2059400135,
     "vocab-sentence-reading": 2059400136,
     "satori": 2059400137,
+    "satori-conjugations": 2059400138,
 }
 
 MODEL_IDS = {
@@ -256,7 +257,7 @@ MODEL_IDS = {
     "core_radical": 1865429025,
     "core_item": 1865429026,
     "rendaku": 1865429027,
-    "mining": 1865429030,
+    "mining": 1865429029,
     "kanji_contrast": 1865429030,
     "kanji_meaning": 1865429031,
     "vocab_sentence_meaning": 1865429032,
@@ -283,12 +284,12 @@ MODEL_TEMPLATE_VERSIONS = {
     "core_radical": "v2",
     "core_item": "v5",
     "rendaku": "v3",
-    "mining": "v13",
+    "mining": "v14",
     "kanji_contrast": "v3",
     "kanji_meaning": "v3",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
-    "satori": "v3",
+    "satori": "v8",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -342,7 +343,7 @@ NOTE_TYPE_NAMES = {
     "core_radical": "WK Core Radical",
     "core_item": "WK Core Item",
     "rendaku": "WK Update-Safe Rendaku",
-    "mining": "WK Migaku Immersion",
+    "mining": "WK Yomitan Immersion",
     "kanji_contrast": "WK Update-Safe Kanji Contrast",
     "kanji_meaning": "WK Update-Safe Kanji Meaning",
     "vocab_sentence_meaning": "WK Update-Safe Vocab Sentence Meaning",
@@ -517,9 +518,9 @@ FILTERED_DECK_DEFINITIONS = [
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
-        "name": "WK::Immersion · Migaku",
+        "name": "WK::Immersion · Yomitan",
         "search": daily_filtered_deck_search(
-            'deck:"Immersion · Migaku Mining" tag:migaku-mining -tag:mining-setup',
+            'deck:"Immersion · Yomitan Mining" tag:yomitan-mining -tag:mining-setup',
         ),
         "limit": 25,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
@@ -530,6 +531,14 @@ FILTERED_DECK_DEFINITIONS = [
             'deck:"Immersion · Satori" tag:satori-mining',
         ),
         "limit": 25,
+        "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
+    },
+    {
+        "name": "WK::Immersion · Satori Conj",
+        "search": daily_filtered_deck_search(
+            'deck:"Immersion · Satori Conjugations" tag:satori-conjugation',
+        ),
+        "limit": CORE_FILTERED_DECK_CARD_LIMIT,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
     },
     {
@@ -563,12 +572,13 @@ DECK_NAMES = {
     "core-radical": "WaniKani Core · Radicals",
     "core-kanji": "WaniKani Core · Kanji",
     "core-vocabulary": "WaniKani Core · Vocabulary",
-    "mining": "Immersion · Migaku Mining",
+    "mining": "Immersion · Yomitan Mining",
     "kanji-contrast": "WaniKani Kanji Contrast",
     "kanji-meaning": "WaniKani Kanji Meaning Anchor",
     "vocab-sentence-meaning": "WaniKani Vocabulary Sentence Meaning",
     "vocab-sentence-reading": "WaniKani Vocabulary Sentence Reading",
     "satori": "Immersion · Satori",
+    "satori-conjugations": "Immersion · Satori Conjugations",
 }
 
 PAIR_RULES = [
@@ -6946,7 +6956,7 @@ def print_preview_report(
     if "rendaku" in wanted:
         print(f"Rendaku filter: min_srs={args.rendaku_min_srs} (Master+ when 7)")
     if "mining" in wanted:
-        print(f"Migaku immersion: {DECK_NAMES['mining']} (see docs/migaku_mining.md)")
+        print(f"Yomitan immersion: {DECK_NAMES['mining']} (see docs/yomitan_mining.md)")
     if args.sentence_audio:
         print("Vocab cloze sentence audio: on (plays on card back)")
     else:
@@ -7405,12 +7415,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> None:
-    """Build Migaku immersion deck without WaniKani API (mining-only runs)."""
+    """Build Yomitan immersion deck without WaniKani API (mining-only runs)."""
     from mining_decks import MINING_EXPORT_FILENAME, MINING_SETUP_TAG, build_mining_deck
 
     if args.dry_run:
-        print(f"Migaku immersion: {DECK_NAMES['mining']} + note type {NOTE_TYPE_NAMES['mining']}")
-        print("  See docs/migaku_mining.md for Migaku Map Fields setup.")
+        print(f"Yomitan immersion: {DECK_NAMES['mining']} + note type {NOTE_TYPE_NAMES['mining']}")
+        print("  See docs/yomitan_mining.md for Yomitan AnkiConnect field mapping.")
         print(f"\nRe-run without --dry-run to write {MINING_EXPORT_FILENAME}.")
         return
     vocab_items: Optional[List[dict]] = None
@@ -7440,7 +7450,7 @@ def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> No
     print(f"  {path}")
     write_filtered_deck_suggestions(output_dir)
     write_filtered_decks_json(output_dir)
-    print("Migaku setup: docs/migaku_mining.md")
+    print("Yomitan setup: docs/yomitan_mining.md")
     print_import_verification_help(bundle_path)
     maybe_sync_anki_addons(args)
 
@@ -7844,7 +7854,7 @@ def main() -> None:
     if rendaku_items:
         print(f"Rendaku: {len(rendaku_items)} (min SRS {args.rendaku_min_srs})")
     if "mining" in wanted:
-        print(f"Yomitan immersion: note type + deck (see docs/migaku_mining.md)")
+        print(f"Yomitan immersion: note type + deck (see docs/yomitan_mining.md)")
     if core_radical_items:
         print(f"Core radicals: {len(core_radical_items)} (full catalog ≤ level {args.max_level})")
     if core_kanji_items:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import html
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,10 +38,61 @@ if str(IMMERSION_LOGIC) not in sys.path:
     sys.path.insert(0, str(IMMERSION_LOGIC))
 
 from mining_logic import (  # noqa: E402
+    CLOZE_BLANK_DISPLAY,
     blank_targets_for_expression,
-    build_cloze_sentence,
     enrich_mining_note_fields,
+    plain_mining_text,
 )
+
+# Kanji ranges (CJK unified + extension A + compatibility ideographs).
+_KANJI_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def kanji_stem(text: str) -> str:
+    """Contiguous substring from the first kanji to the last kanji (inclusive).
+
+    Kanji do not change when a word conjugates, so this stem is a stable anchor
+    for a target word even when it appears inflected in the sentence.
+    Returns '' when the text has no kanji.
+    """
+    indices = [index for index, ch in enumerate(text) if _KANJI_RE.match(ch)]
+    if not indices:
+        return ""
+    return text[indices[0] : indices[-1] + 1]
+
+
+def build_satori_cloze_sentence(
+    sentence: str, expression: str, reading: str
+) -> Tuple[str, str]:
+    """Satori front cloze. Returns (cloze_html, plain_sentence).
+
+    - Target word contains kanji → highlight the kanji stem (learn readings in
+      context). Works for conjugated verbs/adjectives because kanji are invariant.
+    - Hiragana-only word → blank it with underscores.
+    """
+    plain = plain_mining_text(sentence)
+    if not plain:
+        return "", ""
+    stem = kanji_stem(plain_mining_text(expression))
+    if stem:
+        idx = plain.find(stem)
+        if idx >= 0:
+            before = html.escape(plain[:idx])
+            target = html.escape(stem)
+            after = html.escape(plain[idx + len(stem) :])
+            highlight = f'<span class="cloze-target">{target}</span>'
+            return f"{before}{highlight}{after}", plain
+    for target in blank_targets_for_expression(expression, reading):
+        clean = plain_mining_text(target)
+        if not clean:
+            continue
+        idx = plain.find(clean)
+        if idx >= 0:
+            before = html.escape(plain[:idx])
+            after = html.escape(plain[idx + len(clean) :])
+            blank = f'<span class="cloze-blank">{CLOZE_BLANK_DISPLAY}</span>'
+            return f"{before}{blank}{after}", plain
+    return html.escape(plain), plain
 
 SATORI_KIND = "satori-mining"
 SATORI_TAG = "satori-mining"
@@ -82,6 +134,7 @@ SATORI_FIELD_NAMES: Tuple[str, ...] = (
     "SentenceFurigana",
     "Audio",
     "SentenceAudio",
+    "SentenceAudioEasy",
     "VoicevoxAudio",
     "VoicevoxSpeakerId",
     "UserNotes",
@@ -95,11 +148,13 @@ SATORI_FRONT = """
   {{#ClozeSentence}}<div class="cloze-sentence jp">{{ClozeSentence}}</div>{{/ClozeSentence}}
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
   <div class="hint-block">
-    {{#ShowEnglish}}{{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}{{/ShowEnglish}}
+    {{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}
   </div>
   <div class="type-prompt">{{type:Reading}}</div>
 </div>
 """
+
+SATORI_SENTENCE_TTS = "{{tts ja_JP:Sentence}}"
 
 SATORI_BACK = """
 {{FrontSide}}
@@ -111,6 +166,28 @@ SATORI_BACK = """
 {{#WkMeaning}}<div class="meaning answer">{{WkMeaning}}</div>{{/WkMeaning}}
 {{#Sentence}}
 <div class="context">
+  <div class="sentence-audio-block">
+  {{#SentenceAudioEasy}}
+  <div class="audio-row">
+    <div class="audio-label meta">Easy</div>
+    <div class="sentence-audio sentence-tts-file">{{SentenceAudioEasy}}</div>
+  </div>
+  {{/SentenceAudioEasy}}
+  {{#SentenceAudio}}
+  <div class="audio-row">
+    <div class="audio-label meta">Normal</div>
+    <audio class="sentence-audio-manual" controls preload="none" src="{{SentenceAudio}}"></audio>
+  </div>
+  {{/SentenceAudio}}
+  {{^SentenceAudioEasy}}
+  {{^SentenceAudio}}
+  {{#VoicevoxAudio}}<div class="sentence-audio voicevox-audio">{{VoicevoxAudio}}</div>{{/VoicevoxAudio}}
+  {{^VoicevoxAudio}}
+  <div class="sentence-tts">""" + SATORI_SENTENCE_TTS + """</div>
+  {{/VoicevoxAudio}}
+  {{/SentenceAudio}}
+  {{/SentenceAudioEasy}}
+  </div>
   {{#SentenceFurigana}}<div class="jp context-furigana">{{furigana:SentenceFurigana}}</div>{{/SentenceFurigana}}
   {{^SentenceFurigana}}<div class="jp">{{Sentence}}</div>{{/SentenceFurigana}}
   {{#Translation}}<div class="sentence-en">{{Translation}}</div>{{/Translation}}
@@ -130,6 +207,17 @@ SATORI_BACK = """
 {{/UserNotes}}
 {{#SourceTitle}}<div class="source">{{SourceTitle}}</div>{{/SourceTitle}}
 <div class="meta">{{Meta}}</div>
+<script>
+(function () {
+  document.querySelectorAll("audio.sentence-audio-manual").forEach(function (audio) {
+    var src = (audio.getAttribute("src") || "").trim();
+    var match = src.match(/\\[sound:([^\\]]+)\\]/);
+    if (match) {
+      audio.setAttribute("src", match[1]);
+    }
+  });
+})();
+</script>
 """
 
 SATORI_CSS = """
@@ -143,6 +231,12 @@ SATORI_CSS = """
   letter-spacing: 0.08em;
   padding: 0 4px;
 }
+.cloze-target {
+  color: #4fc3f7;
+  border-bottom: 3px solid #4fc3f7;
+  padding: 0 2px;
+  font-weight: 600;
+}
 .hint-block { margin: 12px auto; max-width: 640px; font-size: 20px; line-height: 1.5; }
 .hint-meaning { color: #c8e6c9; margin-bottom: 6px; }
 .type-prompt { margin: 18px auto; max-width: 520px; font-size: 28px; }
@@ -151,6 +245,17 @@ SATORI_CSS = """
 .context { font-size: 28px; margin: 12px auto; max-width: 760px; line-height: 1.6; }
 .context-furigana { line-height: 2.1; }
 .context-furigana ruby rt { font-size: 14px; color: #d8d8d8; }
+.sentence-audio-block { margin: 8px 0 12px; }
+.audio-row { margin: 6px 0; }
+.audio-label { font-size: 13px; margin-bottom: 2px; }
+.sentence-audio, .sentence-tts { margin: 2px 0 6px; }
+.sentence-audio-manual {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin: 2px 0 6px;
+  height: 32px;
+}
 .sentence-en { font-size: 18px; color: #c8e6c9; margin-top: 10px; }
 .word-def {
   text-align: left;
@@ -244,8 +349,9 @@ def parse_satori_csv(
 
 
 def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> List[str]:
-    targets = blank_targets_for_expression(card.expression, card.reading)
-    cloze_html, plain_sentence = build_cloze_sentence(card.sentence, targets)
+    cloze_html, plain_sentence = build_satori_cloze_sentence(
+        card.sentence, card.expression, card.reading
+    )
     enrichment = enrich_mining_note_fields(
         expression=card.expression,
         reading=card.reading,
@@ -289,10 +395,11 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         "PrerequisiteIds": enrichment.prerequisite_ids,
         "WkMeaning": wk_meaning,
         "HintGlossary": enrichment.hint_glossary,
-        "HintStage": enrichment.hint_stage,
-        "ShowEnglish": enrichment.show_english,
+        "HintStage": "0",
+        # Satori always shows English on the front; unlock must not clear these.
+        "ShowEnglish": "1",
         "ShowKana": "",
-        "ShowJjBack": enrichment.show_jj_back,
+        "ShowJjBack": "",
         "SentenceKana": enrichment.sentence_kana,
         "DictLinksJa": enrichment.dict_links_ja,
         "DictLinksEn": enrichment.dict_links_en,
@@ -300,6 +407,7 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         "SentenceFurigana": sentence_furigana,
         "Audio": "",
         "SentenceAudio": "",
+        "SentenceAudioEasy": "",
         "VoicevoxAudio": "",
         "VoicevoxSpeakerId": "",
         "UserNotes": card.user_notes,

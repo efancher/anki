@@ -1,4 +1,4 @@
-"""Tests for Migaku immersion deck note type."""
+"""Tests for Yomitan immersion deck note type."""
 
 from __future__ import annotations
 
@@ -32,9 +32,22 @@ class MiningDeckTests(unittest.TestCase):
         fields = [field["name"] for field in make_mining_model().fields]
         self.assertEqual(fields[0], "DuplicateKey")
 
-    def test_migaku_media_fields_exist(self) -> None:
+    def test_yomitan_identity(self) -> None:
+        self.assertEqual(MINING_NOTE_TYPE_NAME, "WK Yomitan Immersion")
+        self.assertEqual(MINING_TAG, "yomitan-mining")
+        self.assertEqual(MINING_EXPORT_FILENAME, "wk_mining.apkg")
+
+    def test_media_and_pitch_fields_exist(self) -> None:
         fields = [field["name"] for field in make_mining_model().fields]
-        for name in ("Image", "Translation", "SentenceAudio"):
+        for name in (
+            "Image",
+            "Translation",
+            "SentenceAudio",
+            "PitchAccents",
+            "PitchPositions",
+            "PitchGraphs",
+            "Audio",
+        ):
             self.assertIn(name, fields)
 
     def test_mining_cloze_fields_exist(self) -> None:
@@ -60,6 +73,17 @@ class MiningDeckTests(unittest.TestCase):
         self.assertIn("Translation", template["qfmt"])
         self.assertNotIn("word-block", template["qfmt"])
 
+    def test_shadow_card_template(self) -> None:
+        templates = make_mining_model().templates
+        self.assertEqual(len(templates), 2)
+        shadow = templates[1]
+        self.assertEqual(shadow["name"], "Shadow → pitch")
+        self.assertIn("shadow-card", shadow["qfmt"])
+        self.assertIn("{{SentenceAudio}}", shadow["qfmt"])
+        self.assertIn("{{PitchAccents}}", shadow["afmt"])
+        self.assertIn("{{PitchGraphs}}", shadow["afmt"])
+        self.assertIn("{{SentenceKana}}", shadow["afmt"])
+
     def test_back_shows_image_and_audio(self) -> None:
         template = make_mining_model().templates[0]
         afmt = template["afmt"]
@@ -77,42 +101,28 @@ class MiningDeckTests(unittest.TestCase):
         self.assertLess(show_pos, glossary_pos)
 
     def test_mining_template_version(self) -> None:
-        self.assertEqual(MINING_TEMPLATE_VERSION, "v13")
+        self.assertEqual(MINING_TEMPLATE_VERSION, "v14")
+        self.assertEqual(len(MINING_FIELD_NAMES), len(make_mining_model().fields))
 
-    def test_note_type_name(self) -> None:
-        model = make_mining_model()
-        self.assertEqual(model.name, MINING_NOTE_TYPE_NAME)
-        self.assertEqual(model.name, "WK Migaku Immersion")
-
-    def test_migaku_tag(self) -> None:
-        self.assertEqual(MINING_TAG, "migaku-mining")
-
-    def test_field_count_matches_setup_note(self) -> None:
-        self.assertEqual(len(MINING_FIELD_NAMES), 34)
-
-    def test_export_filename(self) -> None:
-        self.assertEqual(MINING_EXPORT_FILENAME, "wk_migaku.apkg")
-
-    def test_build_mining_deck_includes_suspended_setup_card(self) -> None:
+    def test_build_exports_suspended_setup_card(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            apkg_path, _deck = build_mining_deck(Path(tmp))
-            self.assertEqual(apkg_path.name, MINING_EXPORT_FILENAME)
-            with zipfile.ZipFile(apkg_path) as archive:
-                db_path = Path(tmp) / "collection.anki2"
-                archive.extract("collection.anki2", tmp)
-            conn = sqlite3.connect(db_path)
-            note_count = conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
-            card_count = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
-            suspended = conn.execute(
-                "SELECT COUNT(*) FROM cards WHERE queue = ?",
-                (ANKI_QUEUE_SUSPENDED,),
-            ).fetchone()[0]
-            tags = conn.execute("SELECT tags FROM notes").fetchone()[0]
-            conn.close()
-            self.assertEqual(note_count, 1)
-            self.assertEqual(card_count, 1)
-            self.assertEqual(suspended, 1)
-            self.assertIn(MINING_SETUP_TAG, tags)
+            out_dir = Path(tmp)
+            path, _deck = build_mining_deck(out_dir)
+            self.assertEqual(path.name, MINING_EXPORT_FILENAME)
+            self.assertTrue(path.is_file())
+            with zipfile.ZipFile(path) as archive:
+                archive.extract("collection.anki2", path=tmp)
+            conn = sqlite3.connect(Path(tmp) / "collection.anki2")
+            try:
+                row = conn.execute(
+                    "SELECT queue FROM cards LIMIT 1"
+                ).fetchone()
+                self.assertEqual(row[0], ANKI_QUEUE_SUSPENDED)
+                tags = conn.execute("SELECT tags FROM notes LIMIT 1").fetchone()[0]
+                self.assertIn(MINING_SETUP_TAG, tags)
+                self.assertIn(MINING_TAG, tags)
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":
