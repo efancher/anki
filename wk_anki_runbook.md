@@ -446,7 +446,7 @@ Automatically scales **new cards/day** based on how many **due reviews** you hav
 
 1. **Radicals** → **Kanji** → **Vocabulary** → **Supplementary**
 
-Runs on collection load; manual pass: **Tools → WK Adjust New Limits**. Requires **WK Apply Deck Options** first (clones per-tier presets from **WK FSRS**).
+Runs on collection load, right after apkg **import**, and after **sync**; manual pass: **Tools → WK Adjust New Limits**. Requires **WK Apply Deck Options** first (clones per-tier presets from **WK FSRS**).
 
 Optional config at `out/wk_adaptive_new_config.json` (or `WK_ADAPTIVE_NEW_CONFIG`):
 
@@ -456,7 +456,9 @@ Optional config at `out/wk_adaptive_new_config.json` (or `WK_ADAPTIVE_NEW_CONFIG
   "max_new_total": 15,
   "supplementary_max_new": 5,
   "review_count_scope": "tag:wk-core",
-  "auto_run_on_load": true
+  "auto_run_on_load": true,
+  "immersion_priority_enabled": true,
+  "immersion_tag": "satori-mining"
 }
 ```
 
@@ -474,6 +476,8 @@ Study core via **WK::Core**  filtered decks as usual; Anki’s per-deck **new/da
 
 
 **WK Adjust New Limits** reorders new cards in all three core decks when that file is present.
+
+**Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab you mine from **Satori** (`tag:satori-mining`) plus its full prerequisite tree (vocab → kanji → radicals) jump to the **front** of the core new queues, ahead of the JLPT/level baseline. The set is read live from the collection, so **re-importing** the Satori `.apkg` (even with many existing notes) re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
 
 ### New cards: protect core (manual alternative)
 

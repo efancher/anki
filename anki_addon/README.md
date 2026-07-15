@@ -113,6 +113,13 @@ Migration playbook (one-time WK → Anki core SRS): [wk_anki_runbook.md](../wk_a
 Scales daily **new cards/day** per deck tier based on due review load. Priority:
 radicals → kanji → vocabulary → supplementary.
 
+**Immersion-driven new order:** within each core deck, vocabulary mined from
+immersion (Satori, tag `satori-mining`) and its full prerequisite tree
+(vocab → kanji → radicals) lead the new-card queue, ahead of the JLPT/WK-level
+baseline. The set is read **live from the collection** on load, after apkg
+import, and after sync — so re-importing or newly mining Satori cards
+reprioritizes automatically (no generator re-run).
+
 ## Install once
 
 Copy the `wk_adaptive_new` folder into Anki's add-ons folder (same path as above),
@@ -123,9 +130,16 @@ then restart Anki.
 1. **Tools → WK Apply Deck Options** (creates the base **WK FSRS** preset).
 2. **Tools → WK Adjust New Limits** — creates per-tier presets and assigns decks.
 
-Runs automatically on collection load when `auto_run_on_load` is true (default).
+Runs automatically on collection load, after apkg import, and after sync when
+`auto_run_on_load` is true (default). The Tools menu is always a manual backstop.
 
 ## Optional config
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `immersion_priority_enabled` | `true` | Float immersion-mined subjects + prereqs to the front of the core new queue |
+| `immersion_tag` | `satori-mining` | Tag identifying immersion notes whose `WkSubjectId`/`PrerequisiteIds` seed the boost |
+
 
 Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
 
@@ -135,7 +149,9 @@ Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
   "max_new_total": 15,
   "supplementary_max_new": 5,
   "review_count_scope": "tag:wk-core",
-  "auto_run_on_load": true
+  "auto_run_on_load": true,
+  "immersion_priority_enabled": true,
+  "immersion_tag": "satori-mining"
 }
 ```
 

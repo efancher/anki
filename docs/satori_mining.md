@@ -125,6 +125,20 @@ Fill in:
 3. **LIT** — Japanese-order sticky English (not fluent EN)  
 4. Compare to **EN**, then optionally open the printed ichi.moe link
 
+## Drives core new-card priority
+
+Mined Satori vocab steers **which WK core cards you learn next**. The
+**wk_adaptive_new** add-on reads every `satori-mining` note's `WkSubjectId` +
+`PrerequisiteIds`, expands the prerequisite tree (vocab → kanji → radicals) over
+the core deck graph, and floats those subjects to the **front of the core
+new-card queues** (ahead of the JLPT/WK-level baseline). So a word you mine from
+Satori — and every kanji/radical it needs — becomes your highest-priority new
+cards in **WaniKani Core · Kanji / Vocabulary / Radicals**.
+
+This is recomputed live: on collection load, right after you **re-import** the
+Satori `.apkg`, and after sync — no generator re-run needed. Toggle with
+`immersion_priority_enabled` in `out/wk_adaptive_new_config.json`.
+
 ## Related
 
 - [migaku_mining.md](migaku_mining.md) — video/browser mining (same Immersion family)

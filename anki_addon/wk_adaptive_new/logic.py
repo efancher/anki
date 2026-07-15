@@ -8,7 +8,7 @@ radicals → kanji → vocabulary → supplementary.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from typing import List, Mapping, Optional, Sequence, Set, Tuple
 
 
 DEFAULT_DAILY_WORKLOAD_TARGET = 200
@@ -16,6 +16,18 @@ DEFAULT_MAX_NEW_TOTAL = 15
 DEFAULT_SUPPLEMENTARY_MAX_NEW = 5
 DEFAULT_BASE_PRESET_NAME = "WK FSRS"
 PRESET_NAME_PREFIX = "WK FSRS · New ·"
+
+# Immersion-driven new-card priority: subjects mined from immersion (Satori)
+# and their prerequisite closure lead the new queue, ahead of the JLPT/level
+# baseline ordering. Tag applied to Satori notes by satori_decks.py.
+DEFAULT_IMMERSION_PRIORITY_ENABLED = True
+DEFAULT_IMMERSION_TAG = "satori-mining"
+
+# Sort rank for the immersion-first grouping (lower = introduced earlier).
+IMMERSION_RANK_LEAD = 0
+IMMERSION_RANK_REST = 1
+# Fallback baseline score when a subject is absent from wk_study_priority.json.
+UNRANKED_BASELINE_SCORE = 999_999_999
 
 CORE_RADICALS_DECK = "WaniKani Core · Radicals"
 CORE_KANJI_DECK = "WaniKani Core · Kanji"
@@ -37,6 +49,8 @@ class WkAdaptiveNewConfig:
     review_count_scope: str = "tag:wk-core"
     core_tiers: Sequence[str] = field(default_factory=lambda: DEFAULT_CORE_TIERS)
     auto_run_on_load: bool = True
+    immersion_priority_enabled: bool = DEFAULT_IMMERSION_PRIORITY_ENABLED
+    immersion_tag: str = DEFAULT_IMMERSION_TAG
 
 
 @dataclass(frozen=True)
@@ -103,3 +117,68 @@ def build_tier_plan(
         supplementary_max_new=config.supplementary_max_new,
     )
     return budget, allocations
+
+
+def parse_subject_ids(text: str) -> List[int]:
+    """Parse a comma/space-separated WkSubjectId or PrerequisiteIds field into ints."""
+    if not text:
+        return []
+    ids: List[int] = []
+    for token in text.replace(",", " ").split():
+        try:
+            ids.append(int(token))
+        except ValueError:
+            continue
+    return ids
+
+
+def expand_immersion_closure(
+    seed_ids: Set[int],
+    prereq_map: Mapping[int, Sequence[int]],
+) -> Set[int]:
+    """Expand a seed of subject ids over prerequisite edges (vocab → kanji → radicals).
+
+    ``prereq_map`` maps a subject id to its direct prerequisite ids (from each core
+    note's ``PrerequisiteIds``). Returns the transitive closure including the seed.
+    """
+    closure: Set[int] = set(seed_ids)
+    frontier: List[int] = list(seed_ids)
+    while frontier:
+        subject_id = frontier.pop()
+        for prereq_id in prereq_map.get(subject_id, ()):  # type: ignore[arg-type]
+            if prereq_id not in closure:
+                closure.add(prereq_id)
+                frontier.append(prereq_id)
+    return closure
+
+
+def new_card_sort_key(
+    subject_id: Optional[int],
+    baseline_score: int,
+    card_id: int,
+    immersion_ids: Set[int],
+) -> Tuple[int, int, int]:
+    """Immersion subjects (and prereqs) lead, then baseline JLPT/level score, then id."""
+    is_immersion = (
+        IMMERSION_RANK_LEAD
+        if subject_id is not None and subject_id in immersion_ids
+        else IMMERSION_RANK_REST
+    )
+    return (is_immersion, baseline_score, card_id)
+
+
+def sorted_new_card_ids(
+    entries: Sequence[Tuple[Optional[int], int, int]],
+    immersion_ids: Set[int],
+) -> List[int]:
+    """Order new-card entries ``(subject_id, baseline_score, card_id)`` for the queue.
+
+    Immersion-linked subjects and their prerequisites come first (ordered by the
+    baseline score, so radical→kanji→vocab and JLPT/level order is preserved within
+    each group), followed by everything else by baseline score.
+    """
+    ordered = sorted(
+        entries,
+        key=lambda item: new_card_sort_key(item[0], item[1], item[2], immersion_ids),
+    )
+    return [card_id for _subject_id, _score, card_id in ordered]

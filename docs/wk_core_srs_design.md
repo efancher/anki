@@ -1,15 +1,16 @@
 # WaniKani → Anki Core SRS — Design & Implementation Tracker
 
-**Status:** Meaning-anchor curriculum — core dual Review retired from default; conjugations unlock via kanji meaning  
-**Last updated:** 2026-07-10  
+**Status:** Core kanji/vocab Review re-enabled; new-card order driven by immersion (Satori) mining + prerequisite closure via `wk_adaptive_new`  
+**Last updated:** 2026-07-15  
 **Owner intent:** Replace WaniKani’s review queue with Anki + FSRS. One-time WK schedule import. All unlock/availability logic runs **inside Anki** (no weekly Python script for progress).
 
 ### Current snapshot (2026-07-10)
 
 | Area | State |
 |------|--------|
-| **Generator** | `python wk_decks.py --from-config` — default `generate_decks` uses `core-radical` + `kanji-meaning` (not core kanji/vocab Review) |
+| **Generator** | `python wk_decks.py --from-config` — default `generate_decks` includes `core-radical`, `core-kanji`, `core-vocabulary`, `kanji-meaning` |
 | **Kanji path** | **Kanji Meaning Anchor** (kanji → English); readings via cloze / phonetic / immersion |
+| **New-card order** | `wk_adaptive_new` reorders core new queues: **immersion (Satori) mined vocab + prereq closure lead**, then JLPT/WK-level baseline (`wk_study_priority.json`) |
 | **Unlock** | `wk_unlock` — conjugations, verb/adj types, vocab cloze/dictation/sentence via kanji meaning `PrerequisiteIds` (Guru+); phonetic = reviewed once |
 | **Immersion** | Migaku + Satori (`scripts/import_satori.py`) cloze decks |
 | **User docs** | [wk_anki_runbook.md](../wk_anki_runbook.md), [satori_mining.md](satori_mining.md) |
@@ -368,6 +369,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 20 | YouTube immersion mining | **Planned** | [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md) — after core stable |
 | 21 | Migaku immersion (open deck) | **Done** | [migaku_mining.md](migaku_mining.md) — template v12+ |
 | 22 | VOICEVOX TTS for immersion | **Planned** | [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md) — fields reserved; synthesis deferred |
+| 23 | Immersion-driven core new-card priority | **Done** | `wk_adaptive_new`: Satori `tag:satori-mining` `WkSubjectId`+`PrerequisiteIds` → closure over core `PrerequisiteIds` graph → lead new queue; re-runs on load / import (`operation_did_execute`) / sync |
 
 ---
 
@@ -417,6 +419,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | O7 | Filtered decks for core daily review? | **Done** — `WK::Core Radicals/Kanji/Vocabulary` |
 | O8 | YouTube immersion sentence mining? | **Planned** — [wk_immersion_youtube_design.md](wk_immersion_youtube_design.md); YouTube-only v1 |
 | O9 | VOICEVOX TTS + Kanjium pitch on immersion cards? | **Planned** — [wk_voicevox_tts_design.md](wk_voicevox_tts_design.md); **VoicevoxAudio** field reserved (v5) |
+| O10 | New-card order by JLPT/level vs immersion demand? | **Settled** — immersion (Satori) mined vocab + prereq closure lead; JLPT/WK-level is the within-group tiebreak (`wk_adaptive_new`, Satori-only) |
 
 ---
 
@@ -447,6 +450,7 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | 2026-06-28 | Doc sync: migration-ready status, deck-linking section, Phase 3 gaps (root radicals, core filtered decks, grammar gating). |
 | 2026-06-28 | Phase 3: root radical auto-unlock (`prerequisites_met` empty→True), core filtered decks, phonetic/verb-type/conjugation-reverse on wk-locked gating + `WkSubjectId`. |
 | 2026-07-10 | Retire default core kanji/vocab dual Review; conjugations + verb/adj types unlock via kanji meaning `PrerequisiteIds`; add Immersion · Satori CSV import. |
+| 2026-07-15 | Re-enable `core-kanji` + `core-vocabulary` in config. `wk_adaptive_new` now floats immersion (Satori) mined vocab + its prerequisite closure to the front of core new queues ahead of the JLPT/level baseline; computed live from the collection and refreshed on collection load, apkg import (`operation_did_execute`), and sync. Config keys `immersion_priority_enabled` / `immersion_tag`. New pure-logic tests. |
 
 ## Related docs
 

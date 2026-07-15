@@ -3,6 +3,8 @@
   "deck": "all",
   "generate_decks": [
     "core-radical",
+    "core-kanji",
+    "core-vocabulary",
     "kanji-meaning",
     "phonetic-families",
     "conjugations-verbs",

@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from anki.decks import DeckConfigId
 from aqt import gui_hooks, mw
@@ -24,10 +25,16 @@ from .logic import (
     CORE_RADICALS_DECK,
     CORE_VOCABULARY_DECK,
     DEFAULT_BASE_PRESET_NAME,
+    DEFAULT_IMMERSION_PRIORITY_ENABLED,
+    DEFAULT_IMMERSION_TAG,
     TierAvailability,
+    UNRANKED_BASELINE_SCORE,
     WkAdaptiveNewConfig,
     build_tier_plan,
+    expand_immersion_closure,
+    parse_subject_ids,
     preset_name_for_suffix,
+    sorted_new_card_ids,
 )
 
 ADDON_NAME = "WK Adaptive New"
@@ -36,6 +43,11 @@ DEFAULT_DECK_OPTIONS_JSON = "anki_deck_options.json"
 ANKI_CARD_TYPE_NEW = 0
 STUDY_PRIORITY_JSON = "wk_study_priority.json"
 SUPPLEMENTARY_PRESET_SUFFIX = "Supplementary"
+CORE_NOTE_SCOPE = "tag:wk-core"
+
+# Debounce auto-refresh triggered by note-changing ops (imports) so a single
+# import that emits several operations only repositions once.
+AUTO_REFRESH_MIN_INTERVAL_SECONDS = 3.0
 
 TIER_SUFFIX_BY_DECK = {
     CORE_RADICALS_DECK: "Radicals",
@@ -106,6 +118,10 @@ def load_adaptive_config() -> WkAdaptiveNewConfig:
             review_count_scope=str(payload.get("review_count_scope", "tag:wk-core")),
             core_tiers=tuple(core_tiers) if core_tiers else WkAdaptiveNewConfig().core_tiers,
             auto_run_on_load=bool(payload.get("auto_run_on_load", True)),
+            immersion_priority_enabled=bool(
+                payload.get("immersion_priority_enabled", DEFAULT_IMMERSION_PRIORITY_ENABLED)
+            ),
+            immersion_tag=str(payload.get("immersion_tag", DEFAULT_IMMERSION_TAG)),
         )
     return WkAdaptiveNewConfig()
 
@@ -245,14 +261,17 @@ def load_priority_scores() -> Dict[int, int]:
     return {}
 
 
-def _wk_subject_id_from_note(note: Any) -> Optional[int]:
+def _note_field_value(note: Any, field_name: str) -> str:
     model = note.note_type()
-    field_names = model["flds"]
-    name_to_ord = {field["name"]: index for index, field in enumerate(field_names)}
-    ord_index = name_to_ord.get("WkSubjectId")
+    name_to_ord = {field["name"]: index for index, field in enumerate(model["flds"])}
+    ord_index = name_to_ord.get(field_name)
     if ord_index is None:
-        return None
-    text = (note.fields[ord_index] or "").strip()
+        return ""
+    return (note.fields[ord_index] or "").strip()
+
+
+def _wk_subject_id_from_note(note: Any) -> Optional[int]:
+    text = _note_field_value(note, "WkSubjectId")
     if not text:
         return None
     try:
@@ -261,19 +280,65 @@ def _wk_subject_id_from_note(note: Any) -> Optional[int]:
         return None
 
 
-def reposition_new_cards_by_priority(col: Any, deck_name: str, priority_scores: Mapping[int, int]) -> int:
+def collect_immersion_seed_ids(col: Any, immersion_tag: str) -> Set[int]:
+    """WkSubjectId + PrerequisiteIds from every immersion (Satori) note.
+
+    Read live from the collection, so re-imported or newly mined immersion cards
+    are always reflected on the next refresh.
+    """
+    seed: Set[int] = set()
+    if not immersion_tag:
+        return seed
+    for note_id in col.find_notes(f"tag:{immersion_tag}"):
+        note = col.get_note(note_id)
+        subject_id = _wk_subject_id_from_note(note)
+        if subject_id is not None:
+            seed.add(subject_id)
+        seed.update(parse_subject_ids(_note_field_value(note, "PrerequisiteIds")))
+    return seed
+
+
+def build_core_prereq_map(col: Any) -> Dict[int, List[int]]:
+    """Map each core subject id → its direct PrerequisiteIds (kanji→radicals, vocab→kanji)."""
+    prereq_map: Dict[int, List[int]] = {}
+    for note_id in col.find_notes(CORE_NOTE_SCOPE):
+        note = col.get_note(note_id)
+        subject_id = _wk_subject_id_from_note(note)
+        if subject_id is None:
+            continue
+        prereq_map[subject_id] = parse_subject_ids(_note_field_value(note, "PrerequisiteIds"))
+    return prereq_map
+
+
+def build_immersion_priority_ids(col: Any, config: WkAdaptiveNewConfig) -> Set[int]:
+    """Immersion-mined subjects plus their full prerequisite closure."""
+    if not config.immersion_priority_enabled:
+        return set()
+    seed = collect_immersion_seed_ids(col, config.immersion_tag)
+    if not seed:
+        return set()
+    return expand_immersion_closure(seed, build_core_prereq_map(col))
+
+
+def reposition_new_cards_by_priority(
+    col: Any,
+    deck_name: str,
+    priority_scores: Mapping[int, int],
+    immersion_ids: Optional[Set[int]] = None,
+) -> int:
+    immersion = immersion_ids or set()
     card_ids = col.find_cards(f'deck:"{deck_name}" is:new -is:suspended')
     if not card_ids:
         return 0
-    entries: List[Tuple[int, int]] = []
+    entries: List[Tuple[Optional[int], int, int]] = []
     for card_id in card_ids:
         card = col.get_card(card_id)
         note = col.get_note(card.nid)
         subject_id = _wk_subject_id_from_note(note)
-        score = priority_scores.get(subject_id, 999_999_999) if subject_id is not None else 999_999_999
-        entries.append((score, int(card_id)))
-    entries.sort(key=lambda item: (item[0], item[1]))
-    for position, (_, card_id) in enumerate(entries, start=1):
+        score = priority_scores.get(subject_id, UNRANKED_BASELINE_SCORE) if subject_id is not None else UNRANKED_BASELINE_SCORE
+        entries.append((subject_id, score, int(card_id)))
+    ordered_card_ids = sorted_new_card_ids(entries, immersion)
+    for position, card_id in enumerate(ordered_card_ids, start=1):
         card = col.get_card(card_id)
         if int(card.type) != ANKI_CARD_TYPE_NEW:
             continue
@@ -369,11 +434,19 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
     supplementary_decks = load_supplementary_deck_names()
     lines = apply_allocations(col, config, allocations, supplementary_decks)
     priority_scores = load_priority_scores()
-    if priority_scores:
+    immersion_ids = build_immersion_priority_ids(col, config)
+    if immersion_ids:
+        lines.append(
+            f"Immersion priority: {len(immersion_ids)} subjects (mined {config.immersion_tag} + prereqs)"
+        )
+    if priority_scores or immersion_ids:
+        order_label = "immersion-first" if immersion_ids else "JLPT priority"
         for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK, CORE_VOCABULARY_DECK):
-            reordered = reposition_new_cards_by_priority(col, deck_name, priority_scores)
+            reordered = reposition_new_cards_by_priority(
+                col, deck_name, priority_scores, immersion_ids
+            )
             if reordered:
-                lines.append(f"{deck_name}: reordered {reordered} new by JLPT priority")
+                lines.append(f"{deck_name}: reordered {reordered} new ({order_label})")
     summary_lines = [
         f"Review load ({config.review_count_scope}): {review_load}",
         f"New budget: {budget}",
@@ -398,6 +471,45 @@ def on_collection_did_load(col) -> None:
         print(f"WK adaptive new: skipped on load ({exc})")
 
 
+# Guard against the reposition/reset ops re-triggering our own auto-refresh, and
+# debounce bursts of operations emitted by a single import.
+_auto_refresh_running = False
+_last_auto_refresh_monotonic = 0.0
+
+
+def _maybe_auto_refresh(reason: str) -> None:
+    global _auto_refresh_running, _last_auto_refresh_monotonic
+    if _auto_refresh_running or mw is None or mw.col is None:
+        return
+    config = load_adaptive_config()
+    if not config.auto_run_on_load:
+        return
+    now = time.monotonic()
+    if now - _last_auto_refresh_monotonic < AUTO_REFRESH_MIN_INTERVAL_SECONDS:
+        return
+    _auto_refresh_running = True
+    try:
+        adjust_new_limits(quiet=True)
+        _last_auto_refresh_monotonic = time.monotonic()
+    except Exception as exc:  # noqa: BLE001 — never block the triggering op
+        print(f"WK adaptive new: auto refresh skipped after {reason} ({exc})")
+    finally:
+        _auto_refresh_running = False
+
+
+def on_operation_did_execute(changes, handler) -> None:
+    # Only react to note-changing ops (apkg import updates note types + notes).
+    # Reviews change cards/study_queues but not notes/note types, and our own
+    # repositioning changes cards/deck configs — so neither re-triggers a refresh.
+    if not (getattr(changes, "notetype", False) or getattr(changes, "note", False)):
+        return
+    _maybe_auto_refresh("import")
+
+
+def on_sync_did_finish() -> None:
+    _maybe_auto_refresh("sync")
+
+
 def setup_menu() -> None:
     action = QAction("WK Adjust New Limits", mw)
     action.triggered.connect(_menu_adjust)
@@ -418,3 +530,5 @@ def _menu_adjust() -> None:
 
 gui_hooks.collection_did_load.append(on_collection_did_load)
 gui_hooks.main_window_did_init.append(setup_menu)
+gui_hooks.operation_did_execute.append(on_operation_did_execute)
+gui_hooks.sync_did_finish.append(on_sync_did_finish)
