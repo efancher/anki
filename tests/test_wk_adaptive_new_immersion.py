@@ -23,6 +23,7 @@ def _load_logic_module():
 logic = _load_logic_module()
 WkAdaptiveNewConfig = logic.WkAdaptiveNewConfig
 expand_immersion_closure = logic.expand_immersion_closure
+immersion_cards_to_unsuspend = logic.immersion_cards_to_unsuspend
 parse_subject_ids = logic.parse_subject_ids
 sorted_new_card_ids = logic.sorted_new_card_ids
 
@@ -86,11 +87,29 @@ class SortedNewCardIdsTests(unittest.TestCase):
         self.assertEqual(sorted_new_card_ids(entries, set()), [2, 1])
 
 
+class ImmersionCardsToUnsuspendTests(unittest.TestCase):
+    def test_selects_only_closure_subjects(self) -> None:
+        # entries: (subject_id, card_id) for suspended new core cards
+        entries = [
+            (400, 3001),   # immersion → unsuspend
+            (900, 3002),   # immersion → unsuspend
+            (77, 3003),    # unrelated locked card → stay suspended
+            (None, 3004),  # no subject → stay suspended
+        ]
+        picked = immersion_cards_to_unsuspend(entries, {900, 400})
+        self.assertEqual(picked, [3001, 3002])
+
+    def test_empty_closure_unsuspends_nothing(self) -> None:
+        entries = [(400, 1), (900, 2)]
+        self.assertEqual(immersion_cards_to_unsuspend(entries, set()), [])
+
+
 class ImmersionConfigDefaultsTests(unittest.TestCase):
     def test_defaults_enabled_with_satori_tag(self) -> None:
         config = WkAdaptiveNewConfig()
         self.assertTrue(config.immersion_priority_enabled)
         self.assertEqual(config.immersion_tag, "satori-mining")
+        self.assertTrue(config.immersion_unsuspend)
 
 
 if __name__ == "__main__":

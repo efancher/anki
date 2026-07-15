@@ -135,9 +135,23 @@ new-card queues** (ahead of the JLPT/WK-level baseline). So a word you mine from
 Satori — and every kanji/radical it needs — becomes your highest-priority new
 cards in **WaniKani Core · Kanji / Vocabulary / Radicals**.
 
+Because `core.suspend_unstarted` keeps subjects you haven't reached in WaniKani
+suspended, the add-on also **unsuspends the immersion closure** (mined subjects
++ prerequisites) so they actually enter the new queue instead of only being
+reordered among already-unlocked cards. Your per-tier **new/day** limits still
+pace how many appear, so this never floods reviews. Like `wk_unlock`, it only
+ever unsuspends — it never re-suspends — so the two add-ons don't fight. Toggle
+with `immersion_unsuspend` in `out/wk_adaptive_new_config.json`.
+
 This is recomputed live: on collection load, right after you **re-import** the
-Satori `.apkg`, and after sync — no generator re-run needed. Toggle with
-`immersion_priority_enabled` in `out/wk_adaptive_new_config.json`.
+Satori `.apkg`, and after sync — no generator re-run needed. Toggle the whole
+feature with `immersion_priority_enabled` in `out/wk_adaptive_new_config.json`.
+
+To unlock an already-open collection immediately (no restart), run:
+
+```bash
+python3 scripts/unlock_satori_closure_ankiconnect.py   # --dry-run to preview
+```
 
 ## Related
 

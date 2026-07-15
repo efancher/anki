@@ -22,6 +22,10 @@ PRESET_NAME_PREFIX = "WK FSRS · New ·"
 # baseline ordering. Tag applied to Satori notes by satori_decks.py.
 DEFAULT_IMMERSION_PRIORITY_ENABLED = True
 DEFAULT_IMMERSION_TAG = "satori-mining"
+# Also unlock (unsuspend) the immersion closure so mined words + prereqs can
+# actually enter the new queue, not just get reordered within already-unlocked
+# cards. Paced by each tier's new/day limit, so this does not flood reviews.
+DEFAULT_IMMERSION_UNSUSPEND_ENABLED = True
 
 # Sort rank for the immersion-first grouping (lower = introduced earlier).
 IMMERSION_RANK_LEAD = 0
@@ -51,6 +55,7 @@ class WkAdaptiveNewConfig:
     auto_run_on_load: bool = True
     immersion_priority_enabled: bool = DEFAULT_IMMERSION_PRIORITY_ENABLED
     immersion_tag: str = DEFAULT_IMMERSION_TAG
+    immersion_unsuspend: bool = DEFAULT_IMMERSION_UNSUSPEND_ENABLED
 
 
 @dataclass(frozen=True)
@@ -165,6 +170,25 @@ def new_card_sort_key(
         else IMMERSION_RANK_REST
     )
     return (is_immersion, baseline_score, card_id)
+
+
+def immersion_cards_to_unsuspend(
+    entries: Sequence[Tuple[Optional[int], int]],
+    immersion_ids: Set[int],
+) -> List[int]:
+    """Pick suspended-new card ids whose subject is in the immersion closure.
+
+    ``entries`` is ``(subject_id, card_id)`` for each currently suspended new
+    core card. Cards without a subject id (or outside the closure) are left
+    suspended so unrelated locked cards are untouched.
+    """
+    if not immersion_ids:
+        return []
+    return [
+        card_id
+        for subject_id, card_id in entries
+        if subject_id is not None and subject_id in immersion_ids
+    ]
 
 
 def sorted_new_card_ids(

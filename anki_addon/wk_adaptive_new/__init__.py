@@ -27,11 +27,13 @@ from .logic import (
     DEFAULT_BASE_PRESET_NAME,
     DEFAULT_IMMERSION_PRIORITY_ENABLED,
     DEFAULT_IMMERSION_TAG,
+    DEFAULT_IMMERSION_UNSUSPEND_ENABLED,
     TierAvailability,
     UNRANKED_BASELINE_SCORE,
     WkAdaptiveNewConfig,
     build_tier_plan,
     expand_immersion_closure,
+    immersion_cards_to_unsuspend,
     parse_subject_ids,
     preset_name_for_suffix,
     sorted_new_card_ids,
@@ -41,6 +43,8 @@ ADDON_NAME = "WK Adaptive New"
 DEFAULT_CONFIG_NAME = "wk_adaptive_new_config.json"
 DEFAULT_DECK_OPTIONS_JSON = "anki_deck_options.json"
 ANKI_CARD_TYPE_NEW = 0
+ANKI_QUEUE_NEW = 0
+ANKI_QUEUE_SUSPENDED = -1
 STUDY_PRIORITY_JSON = "wk_study_priority.json"
 SUPPLEMENTARY_PRESET_SUFFIX = "Supplementary"
 CORE_NOTE_SCOPE = "tag:wk-core"
@@ -122,6 +126,9 @@ def load_adaptive_config() -> WkAdaptiveNewConfig:
                 payload.get("immersion_priority_enabled", DEFAULT_IMMERSION_PRIORITY_ENABLED)
             ),
             immersion_tag=str(payload.get("immersion_tag", DEFAULT_IMMERSION_TAG)),
+            immersion_unsuspend=bool(
+                payload.get("immersion_unsuspend", DEFAULT_IMMERSION_UNSUSPEND_ENABLED)
+            ),
         )
     return WkAdaptiveNewConfig()
 
@@ -320,6 +327,31 @@ def build_immersion_priority_ids(col: Any, config: WkAdaptiveNewConfig) -> Set[i
     return expand_immersion_closure(seed, build_core_prereq_map(col))
 
 
+def unsuspend_immersion_cards(col: Any, immersion_ids: Set[int]) -> int:
+    """Unsuspend suspended new core cards in the immersion closure.
+
+    Mirrors wk_unlock (queue → new); wk_unlock only ever unsuspends, so the two
+    add-ons do not fight. Daily new/day limits still pace how many are served.
+    """
+    if not immersion_ids:
+        return 0
+    card_ids = col.find_cards(f"{CORE_NOTE_SCOPE} is:new is:suspended")
+    if not card_ids:
+        return 0
+    entries: List[Tuple[Optional[int], int]] = []
+    for card_id in card_ids:
+        card = col.get_card(card_id)
+        note = col.get_note(card.nid)
+        entries.append((_wk_subject_id_from_note(note), int(card_id)))
+    to_unsuspend = immersion_cards_to_unsuspend(entries, immersion_ids)
+    for card_id in to_unsuspend:
+        card = col.get_card(card_id)
+        if int(card.queue) == ANKI_QUEUE_SUSPENDED:
+            card.queue = ANKI_QUEUE_NEW
+            col.update_card(card)
+    return len(to_unsuspend)
+
+
 def reposition_new_cards_by_priority(
     col: Any,
     deck_name: str,
@@ -439,6 +471,10 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
         lines.append(
             f"Immersion priority: {len(immersion_ids)} subjects (mined {config.immersion_tag} + prereqs)"
         )
+        if config.immersion_unsuspend:
+            unsuspended = unsuspend_immersion_cards(col, immersion_ids)
+            if unsuspended:
+                lines.append(f"Immersion unlock: unsuspended {unsuspended} new card(s)")
     if priority_scores or immersion_ids:
         order_label = "immersion-first" if immersion_ids else "JLPT priority"
         for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK, CORE_VOCABULARY_DECK):
