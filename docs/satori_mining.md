@@ -26,6 +26,23 @@ Import the `.apkg` in Anki (**Add** first time only).
 
 **Notes already exist?** Anki will report every note “could not be imported” / skipped — that is normal. Do **not** enable **Update existing notes when first field matches**: the package ships empty **SentenceAudio** fields and would wipe TTS you already generated.
 
+**Import offers to create `WK Satori Immersion+`?** Stop — do not accept it. Anki
+forks a note type (appending `+`) when the incoming `.apkg`'s field *order*
+differs from your existing note type. Notes stuck under the fork are then skipped
+on every future import (Anki dedups by GUID) and go invisible to the gloss
+worksheet, audio backfill, and new-card prioritization — you'll see far fewer
+sentences than you mined. Refresh templates with
+`push_satori_template_ankiconnect.py` instead of importing. If a fork already
+exists, consolidate it back (scheduling is preserved):
+
+```bash
+python3 scripts/consolidate_satori_note_types_ankiconnect.py --dry-run  # preview
+python3 scripts/consolidate_satori_note_types_ankiconnect.py            # migrate
+```
+
+then delete the emptied `+` type via **Tools → Manage Note Types → Delete**, and
+re-run the audio backfill for the migrated notes.
+
 For template-only upgrades (Easy autoplay / Normal manual, template **v6**), push via AnkiConnect instead:
 
 ```bash
