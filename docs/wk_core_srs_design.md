@@ -1,7 +1,7 @@
 # WaniKani → Anki Core SRS — Design & Implementation Tracker
 
 **Status:** Core kanji/vocab Review re-enabled; new-card order driven by immersion (Satori) mining + prerequisite closure via `wk_adaptive_new`  
-**Last updated:** 2026-07-15  
+**Last updated:** 2026-07-19
 **Owner intent:** Replace WaniKani’s review queue with Anki + FSRS. One-time WK schedule import. All unlock/availability logic runs **inside Anki** (no weekly Python script for progress).
 
 ### Current snapshot (2026-07-10)
@@ -11,6 +11,7 @@
 | **Generator** | `python wk_decks.py --from-config` — default `generate_decks` includes `core-radical`, `core-kanji`, `core-vocabulary`, `kanji-meaning` |
 | **Kanji path** | **Kanji Meaning Anchor** (kanji → English); readings via cloze / phonetic / immersion |
 | **New-card order** | `wk_adaptive_new` reorders core new queues: **immersion (Satori) mined vocab + prereq closure lead**, then JLPT/WK-level baseline (`wk_study_priority.json`) |
+| **Study queues** | Study directly from home decks; `WK::` filtered decks and `wk_filtered_decks` are retired |
 | **Unlock** | `wk_unlock` — conjugations, verb/adj types, vocab cloze/dictation/sentence via kanji meaning `PrerequisiteIds` (Guru+); phonetic = reviewed once |
 | **Immersion** | Migaku + Satori (`scripts/import_satori.py`) cloze decks |
 | **User docs** | [wk_anki_runbook.md](../wk_anki_runbook.md), [satori_mining.md](satori_mining.md) |
@@ -76,7 +77,7 @@
 │  • FSRS reviews on core + supplementary cards                   │
 │  • wk_unlock addon: mature check, unsuspend, wk-mature tags     │
 │  • wk_deck_options addon: WK FSRS preset (existing)             │
-│  • wk_filtered_decks addon: daily queues (existing, update searches) │
+│  • Direct home-deck study; adaptive new controls limits + ordering   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -253,7 +254,7 @@ Radicals: only Meaning card exists — one card interval ≥ threshold.
 deck:"WaniKani Vocabulary Context" -is:suspended
 ```
 
-Update `FILTERED_DECK_DEFINITIONS` and `anki_filtered_decks.json` accordingly.
+Filtered decks are retired; no filtered-deck definitions are generated.
 
 ---
 
@@ -322,7 +323,8 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 - Core: `patch_apkg_wk_scheduling()` suspends + `wk-locked` when WK assignment has no `unlocked_at` / `started_at`.
 - Supplementary: `supplementary_import_tags()` + `patch_apkg_supplementary_suspend()` when vocab not WK-mature (stage &lt; 5 and interval &lt; 7 days).
 
-**Filtered daily decks** (`wk_filtered_decks` addon): searches include `-is:suspended` so locked cards never appear. Core filtered decks (`WK::Core Radicals/Kanji/Vocabulary`) included in default JSON.
+**Study queues:** study directly from home decks. Suspended cards do not enter
+normal study queues; `wk_adaptive_new` controls new limits and core ordering.
 
 **Re-import:** Generator refreshes note **content** and templates; does **not** re-sync unlock state. Protect scheduling when `wk-schedule-bootstrapped` is set.
 
@@ -337,9 +339,8 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 3. Import `out/wk_all.apkg` — update note types.
 4. Tools → WK Apply Deck Options; enable FSRS.
 5. Install **wk_unlock** addon; run unlock pass once.
-6. Tools → WK Setup Filtered Decks.
-7. Verify Browse: `tag:wk-core`, spot-check due dates vs WK.
-8. Stop doing WK reviews; optional: WK lessons only for new unlocks until fully Anki-gated.
+6. Verify Browse: `tag:wk-core`, spot-check due dates vs WK.
+7. Stop doing WK reviews; optional: WK lessons only for new unlocks until fully Anki-gated.
 
 ---
 
@@ -389,7 +390,6 @@ Decks are **not** nested in Anki. Linking is **logical**, within one collection:
 | `docs/migaku_mining.md` | Migaku → Anki Map Fields setup |
 | `docs/wk_voicevox_tts_design.md` | **Planned** VOICEVOX synthesis for immersion cards |
 | `anki_addon/wk_unlock/` | Unlock + mature tags (core + supplementary) |
-| `anki_addon/wk_filtered_decks/` | Daily filtered decks |
 | `anki_addon/wk_deck_options/` | WK FSRS preset |
 | `wk_anki_runbook.md` | User workflow + migration playbook |
 | `tests/test_wk_*.py` | Scheduling, unlock, supplementary, mnemonics, reading audio, config |

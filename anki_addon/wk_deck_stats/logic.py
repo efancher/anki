@@ -63,6 +63,9 @@ SUPPLEMENTARY_DECK_ORDER: Tuple[str, ...] = (
     "Immersion · Yomitan Mining",
     "Immersion · Migaku Mining",
     "Immersion · Satori",
+    "Immersion · Shadowing",
+    "Immersion · Shadowing Candidates",
+
     "WaniKani Leech Fixes",
     "WaniKani Pitch Leeches",
     "WaniKani Verb Pair Contrasts",

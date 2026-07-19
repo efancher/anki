@@ -1,6 +1,6 @@
 # WaniKani + Grammar → Anki Runbook
 
-Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar from [Hanabira](https://hanabira.org/) open data) + immersion mining (Yomitan / Satori).
+Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar from [Hanabira](https://hanabira.org/) open data) + immersion mining (Yomitan / Satori / Shadowing).
 
 **Recommended import:** `out/wk_all.apkg` — one file updates every active deck.
 
@@ -12,10 +12,10 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 - **Core · Radicals** — still generated; dual meaning/reading Core · Kanji / Vocabulary retired from default
 - `wk_unlock` **add-on** — conjugations / verb·adj types unlock when kanji components are Guru+ in the meaning anchor; phonetic families unlock on reviewed-once
 - `no_wk_progress_filter` — import full supplementary catalog; gate with `wk-locked` in Anki
-- **Immersion** — Yomitan mining + Satori Reader CSV (`scripts/import_satori.py`)
+- **Immersion** — Yomitan mining + Satori Reader CSV (`scripts/import_satori.py`) + Shadowing projects (`scripts/import_shadowing.py`)
 - **TTS off by default** — `reading_audio: false`, grammar `sentence_audio: false`
 
-Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md). Yomitan: [docs/yomitan_mining.md](docs/yomitan_mining.md). Satori: [docs/satori_mining.md](docs/satori_mining.md).
+Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md). Yomitan: [docs/yomitan_mining.md](docs/yomitan_mining.md). Satori: [docs/satori_mining.md](docs/satori_mining.md). Shadowing: [docs/shadowing_mining.md](docs/shadowing_mining.md).
 
 **Off by default** (suspended / not in `generate_decks`): Core · Kanji, Core · Vocabulary, vocab-cloze, vocab-sentence, dictation, leeches.
 
@@ -81,25 +81,24 @@ Disable auto-sync: `"sync_anki_addons": false` in config, or pass `--no-sync-add
 
 | Folder              | Menu item                   |
 | ------------------- | --------------------------- |
-| `wk_filtered_decks` | **WK Setup Filtered Decks** |
 | `wk_deck_options`   | **WK Apply Deck Options**   |
 | `wk_unlock`         | **WK Run Unlock Pass**      |
 | `wk_adaptive_new`   | **WK Adjust New Limits**    |
 | `wk_health_check`   | **WK Health Check**         |
 
 
-**Optional (dev):** symlink the five folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
+**Optional (dev):** symlink the add-on folders instead of `cp -R` so repo updates apply after restart. Details: [anki_addon/README.md](anki_addon/README.md).
 
 ### Second machine (work desktop, etc.)
 
-AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered decks, tags) but **not** add-on code. Each desktop needs a **one-time** install of all six add-ons.
+AnkiWeb syncs your **collection** (cards, scheduling, deck options, tags) but **not** add-on code. Each desktop needs a one-time add-on install.
 
 
 | Syncs via AnkiWeb                              | Local install required                     |
 | ---------------------------------------------- | ------------------------------------------ |
 | Cards, due dates, `wk-locked` / unlock results | Add-on folders in `addons21/`              |
 | Deck option presets (`WK FSRS · New · …`)      | **Tools → WK …** menu items                |
-| Filtered decks you already built               | Auto unlock / adaptive new on that machine |
+| Home decks and their scheduling                | Auto unlock / adaptive new on that machine |
 
 
 **On each additional desktop:**
@@ -116,7 +115,7 @@ AnkiWeb syncs your **collection** (cards, scheduling, deck options, filtered dec
 
 After that, use normal Anki sync. Unlock passes and adaptive new limits **run only on machines where the add-ons are installed** — run **WK Run Unlock Pass** / **WK Adjust New Limits** on any desktop before syncing if you want those effects everywhere without opening the other machine.
 
-**Desktop Anki is required** for add-ons. AnkiMobile can review synced cards but cannot run unlock or build filtered decks.
+**Desktop Anki is required** for add-ons. AnkiMobile can review synced cards but cannot run unlock or adaptive-new refreshes.
 
 ---
 
@@ -149,12 +148,11 @@ This replaces the old “Phase 2 migration” — it **is implemented**; these a
 3. **Import** `out/wk_all.apkg` → **Update note types** (Always update when prompted).
 4. **Tools → WK Apply Deck Options** — assigns **WK FSRS** preset; enable FSRS globally if asked.
 5. **Tools → WK Run Unlock Pass** — unsuspends level-1 radicals and eligible cards (also runs on later desktop opens).
-6. **Tools → WK Setup Filtered Decks** — creates daily filtered decks from `out/anki_filtered_decks.json`.
-7. **Tools → WK Health Check** — sanity stats (review history, filtered-deck reschedule, priority tags). Run again after import to compare against the saved snapshot.
-8. **Verify** in Browse:
+6. **Tools → WK Health Check** — sanity stats (review history and priority tags). Run again after import to compare against the saved snapshot.
+7. **Verify** in Browse:
   - `tag:wk-core` — spot-check due dates vs WaniKani if you bootstrapped scheduling.
   - `tag:wk-locked` — supplementary suspended until linked subject is mature in core.
-9. **Stop WK reviews.** Optional: keep WK **lessons** only until caught up in Anki.
+8. **Stop WK reviews.** Optional: keep WK **lessons** only until caught up in Anki.
 
 
 
@@ -174,16 +172,10 @@ This replaces the old “Phase 2 migration” — it **is implemented**; these a
 
 ### Core SRS (main queue)
 
-Use filtered decks:
-
-
-| Filtered deck           | Underlying deck                |
-| ----------------------- | ------------------------------ |
-| **WK::Kanji Meaning**   | WaniKani Kanji Meaning Anchor  |
-| **WK::Core Radicals**   | WaniKani Core · Radicals       |
-
-
-Kanji Meaning is meaning-only (no reading). Core · Kanji / Vocabulary dual Review is retired from default queues.
+Study directly from **WaniKani Core · Radicals**, **WaniKani Core · Kanji**,
+**WaniKani Core · Vocabulary**, and **WaniKani Kanji Meaning Anchor** as desired.
+Kanji Meaning is meaning-only (no reading). **WK Adjust New Limits** controls
+per-deck new limits and places Satori-linked subjects first in each core queue.
 
 ### Supplementary decks
 
@@ -200,32 +192,29 @@ Open **desktop Anki periodically** if you study on mobile, so unlock passes sync
 Review in **Japanese Grammar Context** when useful — Hanabira pattern clozes filtered by JLPT cap at generate time.
 
 
-| Home deck                    | Filtered queue  | Content                         |
-| ---------------------------- | --------------- | ------------------------------- |
-| **Japanese Grammar Context** | **WK::Grammar** | Hanabira / pattern clozes       |
+Study directly from **Japanese Grammar Context**.
+
+**Conjugation drills** use separate home decks:
 
 
-**Conjugation drills** use separate home decks with matching filtered queues (batch size 5, rebuild between rounds):
-
-
-| Home deck                                   | Filtered queue                         |
-| ------------------------------------------- | -------------------------------------- |
-| **WaniKani Verb Conjugation Practice**      | **WK::Conjugations · Verbs**           |
-| **WaniKani Adjective Conjugation Practice** | **WK::Conjugations · Adjectives**      |
-| **WaniKani Verb Conjugation Reverse**       | **WK::Conjugations · Reverse**         |
-| **WaniKani Verb Type Practice**             | **WK::Conjugations · Verb Types**      |
-| **WaniKani Adjective Type Practice**        | **WK::Conjugations · Adjective Types** |
+| Home deck                                   | Content                         |
+| ------------------------------------------- | ------------------------------- |
+| **WaniKani Verb Conjugation Practice**      | Forward verb forms              |
+| **WaniKani Adjective Conjugation Practice** | Forward adjective forms         |
+| **WaniKani Verb Conjugation Reverse**       | Reverse verb forms              |
+| **WaniKani Verb Type Practice**             | Verb type recognition           |
+| **WaniKani Adjective Type Practice**        | Adjective type recognition      |
 
 
 
 
 ### Suggested daily order
 
-1. **WK::Kanji Meaning** — primary kanji jumpstart.
-2. **WK::Core Radicals** if due.
-3. **WK::Conjugations ·** filtered decks (verbs → adjectives → reverse/types as you like).
-4. **WK::Immersion · Yomitan** / **WK::Immersion · Satori** for cloze reading practice.
-5. **WK::Grammar** / **WK::Phonetic Families** when you have energy.
+1. **WaniKani Kanji Meaning Anchor** — optional meaning-only jumpstart.
+2. **WaniKani Core · Radicals / Kanji / Vocabulary** — primary core SRS.
+3. Conjugation home decks (verbs → adjectives → reverse/types as you like).
+4. **Immersion · Yomitan Mining** / **Immersion · Satori** for cloze reading practice.
+5. **Japanese Grammar Context** / **WaniKani Phonetic Families** when you have energy.
 
 Grammar is **not** gated by kanji maturity today (see [§12](#12-tips--tuning)); use `grammar.max_jlpt` and `max_unknown_kanji` at generate time instead.
 
@@ -242,8 +231,7 @@ Then in Anki:
 
 1. Import `out/wk_all.apkg` → update note types / merge notes.
 2. **Tools → WK Apply Deck Options** (if new decks appeared).
-3. **Tools → WK Setup Filtered Decks**.
-4. **Tools → WK Run Unlock Pass** (optional; also on collection load).
+3. **Tools → WK Run Unlock Pass** (optional; also on collection load).
 
 **Do not re-import to refresh unlock state** — that is **wk_unlock**’s job.
 
@@ -298,7 +286,7 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 | Kanji Meaning Anchor | `WkSubjectId` only — no `wk-locked` |
 | Phonetic Families | `PrerequisiteIds` (family kanji) + `wk-locked` until any family kanji reviewed once |
 | Grammar Context                                                          | JLPT cap only at generate time; sentence TTS off                               |
-| Immersion · Yomitan / Immersion · Satori | Cloze production; progressive hints via unlock pass |
+| Immersion · Yomitan / Immersion · Satori / Immersion · Shadowing | Cloze production; Yomitan progressive hints via unlock; Satori/Shadowing English always on |
 
 Off by default (not in `generate_decks`): vocab-cloze, vocab-sentence, dictation, core-kanji, core-vocabulary, leeches. TTS/`reading_audio` false.
 
@@ -309,28 +297,12 @@ Optional individual decks: leeches, verb pairs, confusables, etc. — `python wk
 
 
 
-## 7. Filtered decks
+## 7. Home-deck study
 
-From `out/anki_filtered_decks.json`. Rebuild via **Tools → WK Setup Filtered Decks** after import.
-
-
-| Name                                                                               | Purpose                                                                    |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **WK::Core Radicals**                                                              | Daily radical review                                                       |
-| **WK::Kanji Meaning**                                                              | Kanji → meaning only (primary kanji path; no unlock gate)                  |
-| **WK::N5 · Prereq Radicals**                                                       | Radicals still needed for N5 items (`jlpt-n5-prereq`, not yet `wk-mature`) |
-| **WK::Rendaku**                                                                    | Compound reading with 連濁 on the second kanji                               |
-| **WK::Conjugations · Verbs / Adjectives / Reverse / Verb Types / Adjective Types** | Conjugation drills (5-card batches; TTS off by default)                    |
-| **WK::Grammar**                                                                    | Hanabira pattern clozes (**Japanese Grammar Context**; no sentence TTS)    |
-| **WK::Phonetic Families**                                                          | Phonetic on'yomi drills                                                    |
-| **WK::Immersion · Yomitan**                                                        | Yomitan-mined sentence cloze → type reading; shadow card for pitch |
-| **WK::Immersion · Satori**                                                        | Satori Reader CSV cloze → type word (English always on back) |
-| **WK::Immersion · Satori Conj**                                                   | Satori verb/adj conjugation drills (5-card batches) |
-
-Retired from default queues (cards suspended; opt-in rebuild only): Vocab Context, Vocab Sentence Meaning/Reading, Dictation, Core Kanji/Vocabulary, leeches.
-
-
-All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only — no review-ahead), and **Relative overdueness** ordering. **Prereq** decks also use `-tag:wk-mature` so Guru I+ items (interval ≥ 7d on all card types, tagged by **wk_unlock**) drop out once they satisfy the chain.
+Filtered decks are retired. Study from the generated home decks directly.
+**WK Adjust New Limits** assigns per-tier new/day limits and reprioritizes the
+core Radicals, Kanji, and Vocabulary queues; **wk_unlock** controls eligibility
+by suspending or unsuspending prerequisite-gated cards.
 
 ---
 
@@ -340,7 +312,7 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 
 **Grammar:** `python wk_decks.py --deck grammar` — Hanabira clozes ordered by JLPT; browse by `tag:jlpt-n5`, etc.
 
-**Conjugation:** type-in forms via **WK::Conjugations ·** filtered decks (5 at a time, rebuild for more); `--verify-conjugations-only` for rule checks. Unlock via kanji meaning `PrerequisiteIds`.
+**Conjugation:** type-in forms via their WaniKani conjugation home decks; `--verify-conjugations-only` for rule checks. Unlock via kanji meaning `PrerequisiteIds`.
 
 **Phonetic families:** Keisei DB in `.wk_cache/keisei/`. Unlock when any family kanji reviewed once in the meaning anchor.
 
@@ -348,11 +320,13 @@ All searches use `-is:suspended`, `(is:due OR is:new)` (today’s workload only 
 
 **Yomitan immersion:** Sentence cloze on front — type the reading in kana; sentence audio + pitch on back; second **Shadow → pitch** card for speaking practice. Native YouTube clips via `scripts/extract_immersion_clip.py`. Setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
 
-**Satori immersion:** Import a Satori Reader CSV with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. English word + sentence translation always on the back. Conjugations: `python3 scripts/import_satori.py export.csv --conjugations` → `out/wk_satori_conjugations.apkg` / **WK::Immersion · Satori Conj**. Setup: [docs/satori_mining.md](docs/satori_mining.md).
+**Satori immersion:** Import a Satori Reader CSV with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. English word + sentence translation always on the back. Conjugations: `python3 scripts/import_satori.py export.csv --conjugations` → `out/wk_satori_conjugations.apkg` / **Immersion · Satori Conjugations**. Setup: [docs/satori_mining.md](docs/satori_mining.md).
+
+**Shadowing immersion:** Import a shadowmine project with `python3 scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID` → `out/wk_shadowing.apkg` + `out/wk_shadowing_candidates.apkg`. One cloze per matched WK vocab word (native clip audio); curated non-WK candidates in a separate deck. Setup: [docs/shadowing_mining.md](docs/shadowing_mining.md).
 
 **Off by default:** vocab-cloze, vocab-sentence, dictation, core-kanji/vocabulary, leeches (opt-in `--deck …`). TTS/`reading_audio` false in config.
 
-**Rendaku:** Two-kanji WK compounds where the second morpheme voices (e.g. やま + かわ → やま**が**わ). Card shows morpheme hint → type full reading. Filtered deck **WK::Rendaku**. Default min SRS Master+ (`--rendaku-min-srs 7`).
+**Rendaku:** Two-kanji WK compounds where the second morpheme voices (e.g. やま + かわ → やま**が**わ). Card shows morpheme hint → type full reading. Study from **WaniKani Rendaku**. Default min SRS Master+ (`--rendaku-min-srs 7`).
 
 ---
 
@@ -383,41 +357,13 @@ Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs a
 
 **Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; check kanji meaning maturity (≥ **7** day interval, Guru I equivalent) for conjugations/types.
 
-**Counts jumped after import / filtered-deck rebuild:** Usually **not** new unique cards — see [Filtered decks inflated counts](#filtered-decks-inflated-counts-after-import).
+**Legacy `WK::` decks still appear:** Run
+`python3 scripts/remove_wk_filtered_decks_ankiconnect.py`; it returns queued
+cards to their home decks before removing the retired filtered decks.
 
 **Reading audio failures:** Re-run generator; optional `--refresh-reading-audio`.
 
 **FSRS:** Preset **WK FSRS** via **WK Apply Deck Options**.
-
-### Filtered decks inflated counts after import
-
-You finished core for the day, then imported and ran **WK Setup Filtered Decks** — and suddenly many **New** / **Review** counts appear. Common causes:
-
-
-| Cause                              | What happened                                                                                                                                                                                  |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **More filtered decks**            | Each `WK::…` deck shows its own queue (up to its limit). N5 prereq decks can each list ~20 cards — often the **same** physical cards you already saw in `WK::Core `*, not six times more work. |
-| **New tags on re-import**          | `jlpt-n5-`* tags route cards into new filtered searches they did not match before.                                                                                                             |
-| **Unlock pass**                    | **wk_unlock** on load unsuspends eligible `wk-locked` cards → they become **New**.                                                                                                             |
-| **Bootstrap re-import**            | If `"core.bootstrap_scheduling": true` in config, re-import can re-apply WK intervals and fight FSRS. Set it `false` after your one-time migration.                                            |
-| **Reschedule in filtered decks**   | Must be **on** for daily WK filtered decks. If off, Good/Easy show **(end)** and FSRS does not update — see below.                                                                             |
-| **Review-ahead in filtered decks** | Searches use `(is:due OR is:new)` so rebuilds do not pull far-future reviews (little scheduling benefit per Anki manual). Order is **Relative overdueness** among that set.                    |
-
-
-**What to do**
-
-1. Set `"core.bootstrap_scheduling": false` in `wk_deck_config.json` before routine re-imports.
-2. For today: study **one** track only — e.g. finish `WK::Core `* **or** the N5 prereq chain, not both in parallel.
-3. Check unique workload in Browse: `tag:wk-core is:due` and `tag:wk-core is:new` — that is the real due set, not the sum of every filtered deck badge.
-4. If **Good / Easy show (end)**: filtered deck has **Reschedule cards based on my answers** disabled. Regenerate, run **WK Setup Filtered Decks**, or per deck: gear icon → Options → enable reschedule. Without it, filtered-deck reviews do not stick.
-
-
-
-### Good / Easy show “(end)” in a filtered deck
-
-Anki shows **1m · 10m · (end) · (end)** when the filtered deck is in **cram mode** (reschedule **off**). Again/Hard may still show learning-step times, but Good/Easy only remove the card from the filtered queue — **home-deck FSRS does not advance**.
-
-WK core study is meant to run **through filtered decks with reschedule on**. After fixing, buttons show normal intervals (e.g. 10m / 4d / …).
 
 **AnkiWeb sync fails mid-upload (~40k items, “network error”):** First sync with reading + grammar TTS media is large (often **500MB–1GB+**, tens of thousands of files). Try: **Preferences → Network → increase sync timeout** (e.g. 120s); stable Wi‑Fi, no VPN; **Sync → upload** on desktop first. On mobile, enable **sync without media** until desktop upload finishes. **Tools → Check Media → Delete Unused** after re-imports (orphans accumulate). Study on desktop only if sync keeps failing — add-ons require desktop anyway. Regenerate with latest generator to dedupe shared audio (see [Media reuse](#media-reuse)).
 
@@ -458,13 +404,15 @@ Optional config at `out/wk_adaptive_new_config.json` (or `WK_ADAPTIVE_NEW_CONFIG
   "review_count_scope": "tag:wk-core",
   "auto_run_on_load": true,
   "immersion_priority_enabled": true,
-  "immersion_tag": "satori-mining"
+  "immersion_tags": ["satori-mining", "shadowing-mining"],
+  "immersion_unsuspend": true
 }
 ```
 
 Example: with defaults, **0 due reviews** → up to **15** new (radicals first); **100 due** → about **7** new; **200+ due** → **0** new until reviews shrink.
 
-Study core via **WK::Core**  filtered decks as usual; Anki’s per-deck **new/day** limits enforce the allocation.
+Study core from the three **WaniKani Core ·** home decks; Anki’s per-deck
+**new/day** limits enforce the allocation.
 
 **JLPT priority:** regenerate writes `out/wk_study_priority.json`. Core notes get JLPT split tags at import:
 
@@ -477,7 +425,7 @@ Study core via **WK::Core**  filtered decks as usual; Anki’s per-deck **new/da
 
 **WK Adjust New Limits** reorders new cards in all three core decks when that file is present.
 
-**Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab you mine from **Satori** (`tag:satori-mining`) plus its full prerequisite tree (vocab → kanji → radicals) jump to the **front** of the core new queues, ahead of the JLPT/level baseline. The set is read live from the collection, so **re-importing** the Satori `.apkg` (even with many existing notes) re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
+**Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab tagged `satori-mining` or `shadowing-mining` plus its full prerequisite tree (vocab → kanji → radicals) jump to the **front** of the core new queues, ahead of the JLPT/level baseline. The set is read live from the collection, so **re-importing** immersion `.apkg` files re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
 
 ### New cards: protect core (manual alternative)
 
@@ -558,6 +506,7 @@ Dedicated leech decks are optional (legacy). Anki’s **Browse →** `tag:leech`
 | Pitch CSV / Yomitan dict (`--pitch-csv`, `--yomitan-dict`) | You care about accent, not just reading                                                                          |
 | **Yomitan immersion deck**                                 | [docs/yomitan_mining.md](docs/yomitan_mining.md) — cloze + shadow/pitch + clip audio |
 | **Satori immersion import**                                | [docs/satori_mining.md](docs/satori_mining.md) — CSV → Immersion · Satori                                        |
+| **Shadowing immersion import**                             | [docs/shadowing_mining.md](docs/shadowing_mining.md) — project → Immersion · Shadowing (+ candidates)          |
 | YouTube immersion deck                                     | [docs/wk_immersion_youtube_design.md](docs/wk_immersion_youtube_design.md) (deferred)                            |
 
 

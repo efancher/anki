@@ -152,6 +152,8 @@ MINING_NOTE_TYPES = frozenset(
         "WK Migaku Immersion",
         "WK Migaku Immersion+",
         "WK Satori Immersion",
+        "WK Shadowing Immersion",
+        "WK Shadowing Candidate",
     }
 )
 FIELD_HINT_STAGE = "HintStage"
@@ -198,7 +200,8 @@ def _mining_hint_state(note) -> Optional[MiningHintState]:
 
 def collect_mining_hint_notes() -> List[MiningHintState]:
     notes: List[MiningHintState] = []
-    # Satori keeps English on the front always — do not progress its hint flags.
+    # Satori/Shadowing keep English on the front always — do not progress their
+    # hint flags (query excludes satori-mining / shadowing-* tags).
     for note_id in mw.col.find_notes(
         "(tag:yomitan-mining OR tag:migaku-mining) -tag:mining-setup"
     ):

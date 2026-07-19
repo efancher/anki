@@ -17,7 +17,6 @@ DRY_RUN=0
 
 WK_ADDONS=(
   wk_deck_options
-  wk_filtered_decks
   wk_unlock
   wk_adaptive_new
   wk_health_check
@@ -25,18 +24,19 @@ WK_ADDONS=(
   wk_immersion
 )
 
-# Retired add-ons — remove if still present (old wk_mining breaks Anki 25+ mining hooks).
+# Retired add-ons — remove if still present.
 DEPRECATED_ADDONS=(
   wk_mining
+  wk_filtered_decks
 )
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--dry-run]
 
-  Sync anki_addon/{wk_deck_options,wk_filtered_decks,wk_unlock,wk_adaptive_new,wk_health_check,wk_deck_stats,wk_immersion}
+  Sync anki_addon/{wk_deck_options,wk_unlock,wk_adaptive_new,wk_health_check,wk_deck_stats,wk_immersion}
   into Anki's add-ons directory (rsync, removes stale files).
-  Removes deprecated wk_mining if present (superseded by wk_immersion).
+  Removes deprecated wk_mining and wk_filtered_decks if present.
 
   Set ANKI_ADDONS_DIR to override the destination.
 EOF

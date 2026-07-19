@@ -105,11 +105,30 @@ class ImmersionCardsToUnsuspendTests(unittest.TestCase):
 
 
 class ImmersionConfigDefaultsTests(unittest.TestCase):
-    def test_defaults_enabled_with_satori_tag(self) -> None:
+    def test_defaults_enabled_with_satori_and_shadowing_tags(self) -> None:
         config = WkAdaptiveNewConfig()
         self.assertTrue(config.immersion_priority_enabled)
         self.assertEqual(config.immersion_tag, "satori-mining")
+        self.assertEqual(tuple(config.immersion_tags), ("satori-mining", "shadowing-mining"))
         self.assertTrue(config.immersion_unsuspend)
+        self.assertEqual(
+            logic.effective_immersion_tags(config),
+            ("satori-mining", "shadowing-mining"),
+        )
+
+    def test_effective_tags_prefer_list_over_legacy(self) -> None:
+        config = WkAdaptiveNewConfig(
+            immersion_tag="legacy-only",
+            immersion_tags=("shadowing-mining", "satori-mining", "shadowing-mining"),
+        )
+        self.assertEqual(
+            logic.effective_immersion_tags(config),
+            ("shadowing-mining", "satori-mining"),
+        )
+
+    def test_effective_tags_fall_back_to_legacy_scalar(self) -> None:
+        config = WkAdaptiveNewConfig(immersion_tag="custom-mining", immersion_tags=())
+        self.assertEqual(logic.effective_immersion_tags(config), ("custom-mining",))
 
 
 if __name__ == "__main__":

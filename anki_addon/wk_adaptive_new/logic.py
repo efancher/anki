@@ -22,6 +22,7 @@ PRESET_NAME_PREFIX = "WK FSRS · New ·"
 # baseline ordering. Tag applied to Satori notes by satori_decks.py.
 DEFAULT_IMMERSION_PRIORITY_ENABLED = True
 DEFAULT_IMMERSION_TAG = "satori-mining"
+DEFAULT_IMMERSION_TAGS = ("satori-mining", "shadowing-mining")
 # Also unlock (unsuspend) the immersion closure so mined words + prereqs can
 # actually enter the new queue, not just get reordered within already-unlocked
 # cards. Paced by each tier's new/day limit, so this does not flood reviews.
@@ -54,8 +55,27 @@ class WkAdaptiveNewConfig:
     core_tiers: Sequence[str] = field(default_factory=lambda: DEFAULT_CORE_TIERS)
     auto_run_on_load: bool = True
     immersion_priority_enabled: bool = DEFAULT_IMMERSION_PRIORITY_ENABLED
+    # Legacy single-tag field kept for backward-compatible configs.
     immersion_tag: str = DEFAULT_IMMERSION_TAG
+    # Preferred multi-source seed tags (Satori + Shadowing by default).
+    immersion_tags: Sequence[str] = field(default_factory=lambda: DEFAULT_IMMERSION_TAGS)
     immersion_unsuspend: bool = DEFAULT_IMMERSION_UNSUSPEND_ENABLED
+
+
+def effective_immersion_tags(config: WkAdaptiveNewConfig) -> Tuple[str, ...]:
+    """Resolve immersion seed tags from list and/or legacy scalar config."""
+    tags = [str(tag).strip() for tag in (config.immersion_tags or ()) if str(tag).strip()]
+    if tags:
+        # Preserve order while uniquifying.
+        seen = set()
+        ordered: List[str] = []
+        for tag in tags:
+            if tag not in seen:
+                seen.add(tag)
+                ordered.append(tag)
+        return tuple(ordered)
+    legacy = str(config.immersion_tag or "").strip()
+    return (legacy,) if legacy else ()
 
 
 @dataclass(frozen=True)

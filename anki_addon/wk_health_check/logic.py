@@ -28,23 +28,6 @@ TK_GRAMMAR_PREREQ_TAG = "tk-grammar-prereq"
 JLPT_N5_VOCAB_TAG = "jlpt-n5-vocab"
 JLPT_N5_PREREQ_TAG = "jlpt-n5-prereq"
 
-EXPECTED_WK_FILTERED_DECK_NAMES = (
-    "WK::Core Radicals",
-    "WK::Kanji Meaning",
-    "WK::N5 · Prereq Radicals",
-    "WK::Conjugations · Verbs",
-    "WK::Conjugations · Adjectives",
-    "WK::Conjugations · Reverse",
-    "WK::Conjugations · Verb Types",
-    "WK::Conjugations · Adjective Types",
-    "WK::Grammar",
-    "WK::Phonetic Families",
-    "WK::Immersion · Yomitan",
-    "WK::Immersion · Migaku",
-    "WK::Immersion · Satori",
-    "WK::Immersion · Satori",
-)
-
 SEVERITY_OK = "ok"
 SEVERITY_WARN = "warn"
 SEVERITY_FAIL = "fail"
@@ -373,23 +356,14 @@ def build_health_report(
                 f"{preset.deck_name}: expected WK FSRS preset, got “{preset.preset_name}”.",
             )
 
-    filtered_by_name = {deck.name: deck for deck in filtered_decks}
-    missing_filtered = [
-        name for name in EXPECTED_WK_FILTERED_DECK_NAMES if name not in filtered_by_name
-    ]
-    for name in missing_filtered:
-        report.add(SEVERITY_WARN, f"Filtered deck missing: {name}")
-
-    reschedule_off = [deck.name for deck in filtered_decks if not deck.reschedule]
-    if reschedule_off:
+    if filtered_decks:
+        names = [deck.name for deck in filtered_decks]
         report.add(
-            SEVERITY_FAIL,
-            f"{len(reschedule_off)} WK filtered decks have reschedule OFF (Good/Easy will show “end”): "
-            + ", ".join(reschedule_off[:5])
-            + ("…" if len(reschedule_off) > 5 else ""),
+            SEVERITY_WARN,
+            f"{len(filtered_decks)} retired WK:: filtered decks remain; study from home decks: "
+            + ", ".join(names[:5])
+            + ("…" if len(names) > 5 else ""),
         )
-    elif filtered_decks:
-        report.add(SEVERITY_OK, f"{len(filtered_decks)} WK:: filtered decks; reschedule enabled on all checked.")
 
     if study_priority_path:
         report.add(
@@ -424,8 +398,6 @@ def format_health_report(report: HealthReport) -> str:
     body = "\n".join(f"{icon.get(line.severity, '?')} {line.message}" for line in report.lines)
     footer = (
         "\n\nTip: run again after import or WK Adjust New Limits. "
-        "Review-card and reps totals should not drop sharply unless you reset scheduling. "
-        "After WK Setup Filtered Decks, home deck counts may look lower while cards sit in "
-        "WK:: queues — metrics here use home decks and should stay stable."
+        "Review-card and reps totals should not drop sharply unless you reset scheduling."
     )
     return header + body + footer

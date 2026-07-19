@@ -184,6 +184,18 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             )
         )
 
+    def test_shadowing_sentence_audio_autoplays(self) -> None:
+        self.assertTrue(
+            sentence_audio_autoplay(
+                note_type_name="WK Shadowing Immersion", field_name="SentenceAudio"
+            )
+        )
+        self.assertTrue(
+            sentence_audio_autoplay(
+                note_type_name="WK Shadowing Candidate", field_name="SentenceAudio"
+            )
+        )
+
     def test_synthesize_uses_disk_cache(self) -> None:
         import tempfile
         import unittest.mock

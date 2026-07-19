@@ -12,7 +12,7 @@ Mine vocabulary from reading (web, ebooks, Satori Reader, etc.) into Anki with *
 | **wk_unlock** add-on | **Tools → WK Run Unlock Pass** updates hint stages (no suspend) |
 | **UserNotes** field | Empty at mine time; personal mnemonics (katakana bridges, etc.) |
 | **Glossary / Synonyms / Antonyms** | J–J definition + thesaurus hooks on the card back (template **v14**; see below) |
-| **WK::Immersion · Yomitan** filtered deck | Optional daily queue (install `wk_filtered_decks`, then **Tools → WK Setup Filtered Decks**) |
+| **Immersion · Yomitan Mining** | Home deck; study directly from this deck |
 
 ## One-time setup
 

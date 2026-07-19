@@ -14,15 +14,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from wk_decks import (
-    CORE_FILTERED_DECK_CARD_LIMIT,
     FILTERED_DECK_DEFINITIONS,
-    FILTERED_DECK_SEARCH_DUE_OR_NEW,
-    FILTERED_DECK_SEARCH_NOT_MATURE,
     WK_SRS_STAGE_GURU_1,
     all_vocab_subjects,
-    daily_filtered_deck_search,
-    effective_filtered_deck_definitions,
-    prereq_filtered_deck_search,
     passes_progress_filter,
     supplementary_import_tags,
     vocab_supplementary_import_tags,
@@ -152,83 +146,8 @@ class WkSupplementaryGatingTests(unittest.TestCase):
         )
         self.assertEqual(intervals[2], 1)
 
-    def test_filtered_deck_searches_scope_daily_workload(self) -> None:
-        prereq_names = {
-            "WK::N5 · Prereq Radicals",
-        }
-        for spec in FILTERED_DECK_DEFINITIONS:
-            self.assertIn(
-                FILTERED_DECK_SEARCH_DUE_OR_NEW,
-                spec["search"],
-                msg=f"Missing due/new scope in {spec['name']}",
-            )
-            self.assertIn(
-                "-is:suspended",
-                spec["search"],
-                msg=f"Missing -is:suspended in {spec['name']}",
-            )
-            if spec["name"] in prereq_names:
-                self.assertIn(
-                    FILTERED_DECK_SEARCH_NOT_MATURE,
-                    spec["search"],
-                    msg=f"Missing wk-mature exclusion in {spec['name']}",
-                )
-            else:
-                self.assertNotIn(
-                    FILTERED_DECK_SEARCH_NOT_MATURE,
-                    spec["search"],
-                    msg=f"Unexpected wk-mature exclusion in {spec['name']}",
-                )
-        for spec in effective_filtered_deck_definitions():
-            self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, spec["search"])
-
-    def test_prereq_filtered_deck_search_helper(self) -> None:
-        search = prereq_filtered_deck_search("tag:wk-core tag:jlpt-n5-prereq tag:kanji")
-        self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, search)
-        self.assertIn(FILTERED_DECK_SEARCH_NOT_MATURE, search)
-        self.assertIn("-is:suspended", search)
-
-    def test_daily_filtered_deck_search_helper(self) -> None:
-        search = daily_filtered_deck_search('deck:"WaniKani Core · Kanji"')
-        self.assertIn(FILTERED_DECK_SEARCH_DUE_OR_NEW, search)
-        self.assertNotIn(FILTERED_DECK_SEARCH_NOT_MATURE, search)
-
-    def test_conjugation_filtered_decks_use_batch_limit(self) -> None:
-        conjugation_names = {
-            "WK::Conjugations · Verbs",
-            "WK::Conjugations · Adjectives",
-            "WK::Conjugations · Reverse",
-            "WK::Conjugations · Verb Types",
-            "WK::Conjugations · Adjective Types",
-        }
-        by_name = {spec["name"]: spec for spec in FILTERED_DECK_DEFINITIONS}
-        for name in conjugation_names:
-            self.assertIn(name, by_name)
-            self.assertEqual(by_name[name]["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
-            self.assertIn(
-                FILTERED_DECK_SEARCH_DUE_OR_NEW,
-                by_name[name]["search"],
-            )
-
-    def test_core_dual_review_filtered_decks_retired(self) -> None:
-        by_name = {spec["name"]: spec for spec in FILTERED_DECK_DEFINITIONS}
-        self.assertNotIn("WK::Core Kanji", by_name)
-        self.assertNotIn("WK::Core Vocabulary", by_name)
-        self.assertNotIn("WK::N5 · Kanji", by_name)
-        self.assertNotIn("WK::N5 · Vocabulary", by_name)
-        self.assertIn("WK::Kanji Meaning", by_name)
-        self.assertIn("WK::Immersion · Satori", by_name)
-        self.assertIn("WK::Immersion · Satori Conj", by_name)
-        self.assertNotIn("WK::Vocab Context", by_name)
-        self.assertNotIn("WK::Vocab Sentence Meaning", by_name)
-        self.assertNotIn("WK::Vocab Sentence Reading", by_name)
-        self.assertNotIn("WK::Dictation", by_name)
-        self.assertIn('deck:"Immersion · Satori"', by_name["WK::Immersion · Satori"]["search"])
-        self.assertEqual(by_name["WK::Immersion · Satori Conj"]["limit"], CORE_FILTERED_DECK_CARD_LIMIT)
-        self.assertIn(
-            'deck:"Immersion · Satori Conjugations"',
-            by_name["WK::Immersion · Satori Conj"]["search"],
-        )
+    def test_filtered_decks_are_retired(self) -> None:
+        self.assertEqual(FILTERED_DECK_DEFINITIONS, [])
 
 if __name__ == "__main__":
     unittest.main()

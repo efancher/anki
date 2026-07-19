@@ -61,7 +61,6 @@ python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Im
 |-------|------|
 | **Immersion · Satori** | Home deck |
 | **WK Satori Immersion** | Cloze + type-in; English always on back |
-| **WK::Immersion · Satori** | Filtered daily queue |
 | Tag `satori-mining` | Marks immersion notes (English hint always on front) |
 
 ## Card layout
@@ -106,7 +105,9 @@ Build **separate** conjugation drills from JE verbs/adjectives in the same CSV (
 python3 scripts/import_satori.py /path/to/satori_export.csv --conjugations
 ```
 
-Writes `out/wk_satori_conjugations.apkg`. Import it, then study via filtered deck **WK::Immersion · Satori Conj** (5-card batches). Lemmas already covered by WK conjugations are skipped when a WK index/cache is available.
+Writes `out/wk_satori_conjugations.apkg`. Import it, then study directly from
+**Immersion · Satori Conjugations**. Lemmas already covered by WK conjugations
+are skipped when a WK index/cache is available.
 
 ## Gloss worksheet (Cure Dolly–style mapping practice)
 
@@ -173,4 +174,5 @@ python3 scripts/unlock_satori_closure_ankiconnect.py   # --dry-run to preview
 ## Related
 
 - [migaku_mining.md](migaku_mining.md) — video/browser mining (same Immersion family)
+- [shadowing_mining.md](shadowing_mining.md) — shadowmine project → Immersion · Shadowing
 - [wk_anki_runbook.md](../wk_anki_runbook.md) — daily queues and unlock

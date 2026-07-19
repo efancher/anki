@@ -16,7 +16,7 @@ Mine vocabulary from video and reading with **Migaku** into Anki: sentence cloze
 | **WK Migaku Immersion** note type | Cloze + type-in; Migaku sends notes here |
 | **wk_immersion** add-on | Cloze blank, WK links, hint flags; VOICEVOX fallback if no Migaku audio |
 | **wk_unlock** add-on | **Tools → WK Run Unlock Pass** updates hint stages |
-| **WK::Immersion · Migaku** filtered deck | Optional daily queue (`wk_filtered_decks`) |
+| **Immersion · Migaku Mining** | Home deck; study directly from this deck |
 
 ## One-time setup
 

@@ -239,6 +239,8 @@ DECK_IDS = {
     "vocab-sentence-reading": 2059400136,
     "satori": 2059400137,
     "satori-conjugations": 2059400138,
+    "shadowing": 2059400139,
+    "shadowing-candidates": 2059400140,
 }
 
 MODEL_IDS = {
@@ -263,6 +265,8 @@ MODEL_IDS = {
     "vocab_sentence_meaning": 1865429032,
     "vocab_sentence_reading": 1865429033,
     "satori": 1865429034,
+    "shadowing": 1865429035,
+    "shadowing_candidate": 1865429036,
 }
 
 # Bump the relevant key when that note type's templates/CSS change.
@@ -290,6 +294,8 @@ MODEL_TEMPLATE_VERSIONS = {
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
     "satori": "v8",
+    "shadowing": "v1",
+    "shadowing_candidate": "v1",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -320,6 +326,8 @@ MODEL_TEMPLATE_MOD_SLOT = {
     "vocab_sentence_meaning": 23,
     "vocab_sentence_reading": 24,
     "satori": 25,
+    "shadowing": 26,
+    "shadowing_candidate": 27,
 }
 TEMPLATE_MOD_SLOT_STRIDE = 10_000_000
 TEMPLATE_MOD_SECONDS_PER_VERSION = 86400
@@ -349,11 +357,12 @@ NOTE_TYPE_NAMES = {
     "vocab_sentence_meaning": "WK Update-Safe Vocab Sentence Meaning",
     "vocab_sentence_reading": "WK Update-Safe Vocab Sentence Reading",
     "satori": "WK Satori Immersion",
+    "shadowing": "WK Shadowing Immersion",
+    "shadowing_candidate": "WK Shadowing Candidate",
 }
 
 BUNDLE_FILENAME = "wk_all.apkg"
 RUN_HISTORY_FILENAME = "wk_run_history.csv"
-FILTERED_DECKS_JSON = "anki_filtered_decks.json"
 DECK_OPTIONS_JSON = "anki_deck_options.json"
 WK_FSRS_PRESET_NAME = "WK FSRS"
 WK_FSRS_DECK_CONFIG_ID = 2059400100
@@ -436,7 +445,9 @@ def prereq_filtered_deck_search(*tag_clauses: str) -> str:
     )
 
 
-FILTERED_DECK_DEFINITIONS = [
+# Historical definitions retained only to document/migrate old profiles. They
+# are no longer emitted or installed; study directly from the home decks.
+_RETIRED_FILTERED_DECK_DEFINITIONS = [
     {
         "name": "WK::Core Radicals",
         "search": daily_filtered_deck_search('deck:"WaniKani Core · Radicals"'),
@@ -551,6 +562,10 @@ FILTERED_DECK_DEFINITIONS = [
     },
 ]
 
+# Filtered decks are retired. Keeping the active set explicit and empty makes
+# accidental recreation impossible for callers that still import this symbol.
+FILTERED_DECK_DEFINITIONS: List[dict] = []
+
 DECK_NAMES = {
     "leeches": "WaniKani Leech Fixes",
     "verb-pairs": "WaniKani Verb Pair Contrasts",
@@ -579,6 +594,8 @@ DECK_NAMES = {
     "vocab-sentence-reading": "WaniKani Vocabulary Sentence Reading",
     "satori": "Immersion · Satori",
     "satori-conjugations": "Immersion · Satori Conjugations",
+    "shadowing": "Immersion · Shadowing",
+    "shadowing-candidates": "Immersion · Shadowing Candidates",
 }
 
 PAIR_RULES = [
@@ -6476,70 +6493,6 @@ def append_run_history(output_dir: Path, row: Dict[str, Any]) -> Path:
     return path
 
 
-def write_filtered_deck_suggestions(
-    output_dir: Path,
-) -> Path:
-    path = output_dir / "anki_filtered_decks.txt"
-    lines = ["Suggested Anki filtered decks", ""]
-    for index, deck in enumerate(
-        effective_filtered_deck_definitions(),
-        start=1,
-    ):
-        lines.extend(
-            [
-                f"{index}. {deck['name']}",
-                "Search:",
-                deck["search"],
-                f"Limit: {deck['limit']}",
-                "Order: Relative overdueness",
-                "",
-            ]
-        )
-    lines.extend(
-        [
-            "Automated setup:",
-            f"  Install the add-on in anki_addon/wk_filtered_decks, then use",
-            f"  Tools → WK Setup Filtered Decks after importing {BUNDLE_FILENAME}.",
-            f"  It reads {FILTERED_DECKS_JSON} from your generator output folder.",
-            "",
-            "Notes:",
-            "- Reviews in filtered decks update the original cards.",
-            "- After regenerating/importing decks, run WK Setup Filtered Decks again (Rebuild).",
-            "- Filtered decks cannot be included inside .apkg files; they live in your Anki profile.",
-        ]
-    )
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
-
-
-def effective_filtered_deck_definitions() -> List[dict]:
-    return list(FILTERED_DECK_DEFINITIONS)
-
-
-def normalized_filtered_deck_definitions() -> List[dict]:
-    return [
-        {
-            **spec,
-            "reschedule": spec.get("reschedule", FILTERED_DECK_RESCHEDULE_DEFAULT),
-        }
-        for spec in effective_filtered_deck_definitions()
-    ]
-
-
-def write_filtered_decks_json(
-    output_dir: Path,
-) -> Path:
-    path = output_dir / FILTERED_DECKS_JSON
-    payload = {
-        "generator_version": VERSION,
-        "order_labels": {"relative_overdueness": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS},
-        "reschedule_default": FILTERED_DECK_RESCHEDULE_DEFAULT,
-        "decks": normalized_filtered_deck_definitions(),
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
-
-
 def write_deck_options_json(output_dir: Path, deck_names: Sequence[str]) -> Path:
     path = output_dir / DECK_OPTIONS_JSON
     payload = {
@@ -6659,10 +6612,6 @@ re-download. Re-import the .apkg to add new notes; stable GUIDs update existing 
 Each run appends a row to {RUN_HISTORY_FILENAME} with deck counts and which
 decks were bundled into {BUNDLE_FILENAME}.
 
-Filtered decks (WK::Daily Priority, etc.) cannot be bundled in .apkg files.
-After importing, run Tools → WK Setup Filtered Decks in Anki using the add-on
-in anki_addon/wk_filtered_decks (reads {FILTERED_DECKS_JSON}).
-
 Deck options: each .apkg embeds the "{WK_FSRS_PRESET_NAME}" preset. After import,
 run Tools → WK Apply Deck Options (anki_addon/wk_deck_options, reads {DECK_OPTIONS_JSON})
 to assign that preset to all WK decks. Enable FSRS globally in Anki if prompted.
@@ -6690,7 +6639,6 @@ def print_import_verification_help(bundle_path: Optional[Path] = None) -> None:
     print(f"  Grammar: {NOTE_TYPE_NAMES['grammar_cloze']} · template {MODEL_TEMPLATE_VERSIONS['grammar_cloze']}")
     print("  Grammar sentence audio plays on the card BACK (flip first); update that note type on import.")
     print(f"  Full instructions: out/anki_import_instructions.txt")
-    print(f"  Filtered decks: install anki_addon/wk_filtered_decks, then Tools → WK Setup Filtered Decks")
     print(f"  Deck options: install anki_addon/wk_deck_options, then Tools → WK Apply Deck Options")
 
 
@@ -7448,8 +7396,6 @@ def run_standalone_mining_deck(args: argparse.Namespace, output_dir: Path) -> No
     if bundle_path:
         print(f"  {bundle_path}  ← recommended import")
     print(f"  {path}")
-    write_filtered_deck_suggestions(output_dir)
-    write_filtered_decks_json(output_dir)
     print("Yomitan setup: docs/yomitan_mining.md")
     print_import_verification_help(bundle_path)
     maybe_sync_anki_addons(args)
@@ -8319,8 +8265,6 @@ def main() -> None:
             from wk_scheduling import patch_apkg_suspend_notes_with_tag
 
             patch_apkg_suspend_notes_with_tag(bundle_path, MINING_SETUP_TAG)
-    settings_path = write_filtered_deck_suggestions(output_dir)
-    filtered_json_path = write_filtered_decks_json(output_dir)
     deck_options_json_path = write_deck_options_json(
         output_dir,
         [deck.name for deck in built_decks],
@@ -8364,8 +8308,6 @@ def main() -> None:
         print(f"  {bundle_path}  ← recommended import")
     for path in created:
         print(f"  {path}")
-    print(f"  {settings_path}")
-    print(f"  {filtered_json_path}")
     print(f"  {deck_options_json_path}")
     print(f"  {instructions_path}")
     print(f"  {history_path}")

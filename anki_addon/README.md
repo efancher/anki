@@ -1,52 +1,3 @@
-# WK Filtered Deck Setup (Anki add-on)
-
-Filtered decks cannot be included in `.apkg` imports. This add-on creates them in your
-Anki profile after you import `out/wk_all.apkg`.
-
-## Install once
-
-1. Find Anki's add-ons folder:
-   - macOS: `~/Library/Application Support/Anki2/addons21/`
-   - Windows: `%APPDATA%/Anki2/addons21/`
-   - Linux: `~/.local/share/Anki2/addons21/`
-
-2. Copy the `wk_filtered_decks` folder into that directory.
-
-3. Restart Anki.
-
-## Weekly workflow
-
-```bash
-python wk_decks.py --deck all --only-started
-```
-
-1. Import `out/wk_all.apkg` into Anki (choose **Update** for note types).
-2. In Anki: **Tools → WK Setup Filtered Decks**.
-3. Select `out/anki_filtered_decks.json` if prompted (or set `WK_FILTERED_DECKS_JSON`).
-
-This creates/rebuilds filtered decks under the **WK** deck group:
-
-- WK::Daily Priority
-- WK::Verb Contrasts
-- WK::Leeches
-- WK::Meaning Leeches
-- WK::Reading Leeches
-- WK::Core Radicals
-- WK::Kanji Meaning
-- WK::Immersion · Migaku (optional — Migaku mining queue)
-- WK::Immersion · Satori (optional — Satori Reader CSV cloze)
-- WK::Confusables Light
-
-## Optional: default JSON path
-
-```bash
-export WK_FILTERED_DECKS_JSON="$HOME/anki/out/anki_filtered_decks.json"
-```
-
-Then the menu command finds the file automatically.
-
----
-
 # WK Deck Options Setup (Anki add-on)
 
 Each generated `.apkg` embeds a **WK FSRS** deck-options preset. This add-on assigns
@@ -138,7 +89,8 @@ Runs automatically on collection load, after apkg import, and after sync when
 | Key | Default | Effect |
 |-----|---------|--------|
 | `immersion_priority_enabled` | `true` | Float immersion-mined subjects + prereqs to the front of the core new queue |
-| `immersion_tag` | `satori-mining` | Tag identifying immersion notes whose `WkSubjectId`/`PrerequisiteIds` seed the boost |
+| `immersion_tags` | `["satori-mining", "shadowing-mining"]` | Tags whose `WkSubjectId`/`PrerequisiteIds` seed the boost |
+| `immersion_tag` | `satori-mining` | Legacy single-tag fallback when `immersion_tags` is absent |
 
 
 Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
@@ -151,7 +103,8 @@ Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
   "review_count_scope": "tag:wk-core",
   "auto_run_on_load": true,
   "immersion_priority_enabled": true,
-  "immersion_tag": "satori-mining"
+  "immersion_tags": ["satori-mining", "shadowing-mining"],
+  "immersion_unsuspend": true
 }
 ```
 
@@ -249,7 +202,7 @@ The report includes:
 - Suspicious cards (e.g. reps > 0 but still `new`)
 - Priority tags (`jlpt-n5-*`)
 - WK FSRS preset on core decks
-- WK:: filtered decks present and **reschedule** enabled
+- Any retired `WK::` filtered decks still present
 - `wk_study_priority.json` found on disk
 
 Each run saves `wk_health_snapshot.json` in your Anki profile folder. The next run compares review-card and reps totals to that snapshot — **sharp drops** after re-import may mean scheduling was reset (check `core.bootstrap_scheduling` in config).

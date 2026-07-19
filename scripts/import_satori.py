@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             apkg_path.replace(output_path)
             apkg_path = output_path
         print(f"Wrote {len(deck.notes)} conjugation notes ({len(drills)} drills) → {apkg_path}")
-        print("Import in Anki, then review via filtered deck WK::Immersion · Satori Conj.")
+        print("Import in Anki, then study from Immersion · Satori Conjugations.")
         return 0
 
     card_types = ("JE", "EJ") if args.include_ej else ("JE",)
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         "Do not enable Update existing notes (it blanks SentenceAudio)."
     )
     print("Template-only refresh: python3 scripts/push_satori_template_ankiconnect.py")
-    print("Then review via filtered deck WK::Immersion · Satori.")
+    print("Then study from Immersion · Satori.")
     return 0
 
 

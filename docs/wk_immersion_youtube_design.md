@@ -95,7 +95,7 @@ See [yomitan_mining.md](yomitan_mining.md).
 ┌─────────────────────────────────────────────────────────────────┐
 │ ONGOING — existing Anki addons                                   │
 │  • wk_unlock: unsuspend when WkSubjectId mature in core          │
-│  • wk_filtered_decks: new "WK::Immersion" filtered deck          │
+│  • Study directly from the Immersion home deck                    │
 │  • FSRS via wk_deck_options                                      │
 └─────────────────────────────────────────────────────────────────┘
 ```

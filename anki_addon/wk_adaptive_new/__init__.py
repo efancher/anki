@@ -27,11 +27,13 @@ from .logic import (
     DEFAULT_BASE_PRESET_NAME,
     DEFAULT_IMMERSION_PRIORITY_ENABLED,
     DEFAULT_IMMERSION_TAG,
+    DEFAULT_IMMERSION_TAGS,
     DEFAULT_IMMERSION_UNSUSPEND_ENABLED,
     TierAvailability,
     UNRANKED_BASELINE_SCORE,
     WkAdaptiveNewConfig,
     build_tier_plan,
+    effective_immersion_tags,
     expand_immersion_closure,
     immersion_cards_to_unsuspend,
     parse_subject_ids,
@@ -126,11 +128,24 @@ def load_adaptive_config() -> WkAdaptiveNewConfig:
                 payload.get("immersion_priority_enabled", DEFAULT_IMMERSION_PRIORITY_ENABLED)
             ),
             immersion_tag=str(payload.get("immersion_tag", DEFAULT_IMMERSION_TAG)),
+            immersion_tags=_parse_immersion_tags(payload),
             immersion_unsuspend=bool(
                 payload.get("immersion_unsuspend", DEFAULT_IMMERSION_UNSUSPEND_ENABLED)
             ),
         )
     return WkAdaptiveNewConfig()
+
+
+def _parse_immersion_tags(payload: Mapping[str, Any]) -> Tuple[str, ...]:
+    raw = payload.get("immersion_tags")
+    if isinstance(raw, list):
+        tags = tuple(str(tag).strip() for tag in raw if str(tag).strip())
+        if tags:
+            return tags
+    legacy = str(payload.get("immersion_tag", "")).strip()
+    if legacy:
+        return (legacy,)
+    return DEFAULT_IMMERSION_TAGS
 
 
 def load_supplementary_deck_names() -> List[str]:
@@ -287,16 +302,22 @@ def _wk_subject_id_from_note(note: Any) -> Optional[int]:
         return None
 
 
-def collect_immersion_seed_ids(col: Any, immersion_tag: str) -> Set[int]:
-    """WkSubjectId + PrerequisiteIds from every immersion (Satori) note.
+def collect_immersion_seed_ids(col: Any, immersion_tags: Sequence[str]) -> Set[int]:
+    """WkSubjectId + PrerequisiteIds from every immersion note (Satori, Shadowing, …).
 
     Read live from the collection, so re-imported or newly mined immersion cards
     are always reflected on the next refresh.
     """
     seed: Set[int] = set()
-    if not immersion_tag:
+    tags = [str(tag).strip() for tag in immersion_tags if str(tag).strip()]
+    if not tags:
         return seed
-    for note_id in col.find_notes(f"tag:{immersion_tag}"):
+    if len(tags) == 1:
+        query = f"tag:{tags[0]}"
+    else:
+        query = " OR ".join(f"tag:{tag}" for tag in tags)
+        query = f"({query})"
+    for note_id in col.find_notes(query):
         note = col.get_note(note_id)
         subject_id = _wk_subject_id_from_note(note)
         if subject_id is not None:
@@ -321,7 +342,8 @@ def build_immersion_priority_ids(col: Any, config: WkAdaptiveNewConfig) -> Set[i
     """Immersion-mined subjects plus their full prerequisite closure."""
     if not config.immersion_priority_enabled:
         return set()
-    seed = collect_immersion_seed_ids(col, config.immersion_tag)
+    tags = effective_immersion_tags(config)
+    seed = collect_immersion_seed_ids(col, tags)
     if not seed:
         return set()
     return expand_immersion_closure(seed, build_core_prereq_map(col))
@@ -468,8 +490,9 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
     priority_scores = load_priority_scores()
     immersion_ids = build_immersion_priority_ids(col, config)
     if immersion_ids:
+        tag_label = ", ".join(effective_immersion_tags(config)) or config.immersion_tag
         lines.append(
-            f"Immersion priority: {len(immersion_ids)} subjects (mined {config.immersion_tag} + prereqs)"
+            f"Immersion priority: {len(immersion_ids)} subjects (mined {tag_label} + prereqs)"
         )
         if config.immersion_unsuspend:
             unsuspended = unsuspend_immersion_cards(col, immersion_ids)

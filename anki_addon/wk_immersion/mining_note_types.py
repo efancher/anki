@@ -19,16 +19,24 @@ LEGACY_MIGAKU_TAG = "migaku-mining"
 SATORI_NOTE_TYPE = "WK Satori Immersion"
 SATORI_TAG = "satori-mining"
 
+# Shadowing project import — native clip audio; English always on front.
+SHADOWING_NOTE_TYPE = "WK Shadowing Immersion"
+SHADOWING_TAG = "shadowing-mining"
+SHADOWING_CANDIDATE_NOTE_TYPE = "WK Shadowing Candidate"
+SHADOWING_CANDIDATE_TAG = "shadowing-candidate"
+
 MINING_NOTE_TYPES: FrozenSet[str] = frozenset(
     {
         MINING_NOTE_TYPE,
         LEGACY_MIGAKU_NOTE_TYPE,
         LEGACY_MIGAKU_NOTE_TYPE_PLUS,
         SATORI_NOTE_TYPE,
+        SHADOWING_NOTE_TYPE,
+        SHADOWING_CANDIDATE_NOTE_TYPE,
     }
 )
 
-# Yomitan/Migaku cloze + shadow template upgrades only (not Satori's CSV layout).
+# Yomitan/Migaku cloze + shadow template upgrades only (not Satori/Shadowing layouts).
 MINING_TEMPLATE_UPGRADE_NOTE_TYPES: FrozenSet[str] = frozenset(
     {
         MINING_NOTE_TYPE,
@@ -38,7 +46,7 @@ MINING_TEMPLATE_UPGRADE_NOTE_TYPES: FrozenSet[str] = frozenset(
 )
 
 MINING_HINT_TAGS_QUERY = (
-    "(tag:yomitan-mining OR tag:migaku-mining OR tag:satori-mining) -tag:mining-setup"
+    "(tag:yomitan-mining OR tag:migaku-mining) -tag:mining-setup"
 )
 
 
