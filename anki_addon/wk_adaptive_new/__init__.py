@@ -34,10 +34,10 @@ from .logic import (
     WkAdaptiveNewConfig,
     build_tier_plan,
     effective_immersion_tags,
-    expand_immersion_closure,
     immersion_cards_to_unsuspend,
     parse_subject_ids,
     preset_name_for_suffix,
+    ranked_immersion_closure,
     sorted_new_card_ids,
 )
 
@@ -340,13 +340,26 @@ def build_core_prereq_map(col: Any) -> Dict[int, List[int]]:
 
 def build_immersion_priority_ids(col: Any, config: WkAdaptiveNewConfig) -> Set[int]:
     """Immersion-mined subjects plus their full prerequisite closure."""
+    return set(build_immersion_priority_ranks(col, config))
+
+
+def build_immersion_priority_ranks(
+    col: Any,
+    config: WkAdaptiveNewConfig,
+) -> Dict[int, int]:
+    """Map immersion subjects and prerequisites to their source priority rank."""
     if not config.immersion_priority_enabled:
-        return set()
+        return {}
     tags = effective_immersion_tags(config)
-    seed = collect_immersion_seed_ids(col, tags)
-    if not seed:
-        return set()
-    return expand_immersion_closure(seed, build_core_prereq_map(col))
+    seeds_by_tag = {
+        tag: collect_immersion_seed_ids(col, (tag,))
+        for tag in tags
+    }
+    return ranked_immersion_closure(
+        seeds_by_tag,
+        build_core_prereq_map(col),
+        tags,
+    )
 
 
 def unsuspend_immersion_cards(col: Any, immersion_ids: Set[int]) -> int:
@@ -378,9 +391,9 @@ def reposition_new_cards_by_priority(
     col: Any,
     deck_name: str,
     priority_scores: Mapping[int, int],
-    immersion_ids: Optional[Set[int]] = None,
+    immersion_priority: Optional[Mapping[int, int]] = None,
 ) -> int:
-    immersion = immersion_ids or set()
+    immersion = immersion_priority or {}
     card_ids = col.find_cards(f'deck:"{deck_name}" is:new -is:suspended')
     if not card_ids:
         return 0
@@ -488,7 +501,8 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
     supplementary_decks = load_supplementary_deck_names()
     lines = apply_allocations(col, config, allocations, supplementary_decks)
     priority_scores = load_priority_scores()
-    immersion_ids = build_immersion_priority_ids(col, config)
+    immersion_priority = build_immersion_priority_ranks(col, config)
+    immersion_ids = set(immersion_priority)
     if immersion_ids:
         tag_label = ", ".join(effective_immersion_tags(config)) or config.immersion_tag
         lines.append(
@@ -502,7 +516,7 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
         order_label = "immersion-first" if immersion_ids else "JLPT priority"
         for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK, CORE_VOCABULARY_DECK):
             reordered = reposition_new_cards_by_priority(
-                col, deck_name, priority_scores, immersion_ids
+                col, deck_name, priority_scores, immersion_priority
             )
             if reordered:
                 lines.append(f"{deck_name}: reordered {reordered} new ({order_label})")

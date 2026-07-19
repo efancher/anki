@@ -25,6 +25,7 @@ WkAdaptiveNewConfig = logic.WkAdaptiveNewConfig
 expand_immersion_closure = logic.expand_immersion_closure
 immersion_cards_to_unsuspend = logic.immersion_cards_to_unsuspend
 parse_subject_ids = logic.parse_subject_ids
+ranked_immersion_closure = logic.ranked_immersion_closure
 sorted_new_card_ids = logic.sorted_new_card_ids
 
 
@@ -85,6 +86,40 @@ class SortedNewCardIdsTests(unittest.TestCase):
             (11, 20_000, 2),
         ]
         self.assertEqual(sorted_new_card_ids(entries, set()), [2, 1])
+
+    def test_satori_rank_leads_shadowing_despite_baseline_score(self) -> None:
+        entries = [
+            (100, 50_000, 1),  # Satori
+            (200, 10_000, 2),  # Shadowing has a better baseline
+            (300, 1_000, 3),   # Non-immersion
+        ]
+        self.assertEqual(
+            sorted_new_card_ids(entries, {100: 0, 200: 1}),
+            [1, 2, 3],
+        )
+
+
+class RankedImmersionClosureTests(unittest.TestCase):
+    def test_tag_order_ranks_closures_and_shared_prereqs_take_best_rank(self) -> None:
+        ranks = ranked_immersion_closure(
+            {
+                "satori-mining": {900},
+                "shadowing-mining": {901},
+            },
+            {
+                900: [400],
+                901: [400, 401],
+                400: [100],
+                401: [101],
+            },
+            ("satori-mining", "shadowing-mining"),
+        )
+        self.assertEqual(ranks[900], 0)
+        self.assertEqual(ranks[400], 0)
+        self.assertEqual(ranks[100], 0)
+        self.assertEqual(ranks[901], 1)
+        self.assertEqual(ranks[401], 1)
+        self.assertEqual(ranks[101], 1)
 
 
 class ImmersionCardsToUnsuspendTests(unittest.TestCase):

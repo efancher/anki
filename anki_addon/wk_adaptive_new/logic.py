@@ -8,7 +8,7 @@ radicals → kanji → vocabulary → supplementary.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 
 DEFAULT_DAILY_WORKLOAD_TARGET = 200
@@ -28,9 +28,8 @@ DEFAULT_IMMERSION_TAGS = ("satori-mining", "shadowing-mining")
 # cards. Paced by each tier's new/day limit, so this does not flood reviews.
 DEFAULT_IMMERSION_UNSUSPEND_ENABLED = True
 
-# Sort rank for the immersion-first grouping (lower = introduced earlier).
-IMMERSION_RANK_LEAD = 0
-IMMERSION_RANK_REST = 1
+# Sort rank for subjects outside every configured immersion source.
+IMMERSION_RANK_REST = 1_000_000
 # Fallback baseline score when a subject is absent from wk_study_priority.json.
 UNRANKED_BASELINE_SCORE = 999_999_999
 
@@ -177,19 +176,37 @@ def expand_immersion_closure(
     return closure
 
 
+def ranked_immersion_closure(
+    seed_ids_by_tag: Mapping[str, Set[int]],
+    prereq_map: Mapping[int, Sequence[int]],
+    ordered_tags: Sequence[str],
+) -> Dict[int, int]:
+    """Rank each source's closure by tag order, keeping the best shared rank."""
+    ranks: Dict[int, int] = {}
+    for rank, tag in enumerate(ordered_tags):
+        closure = expand_immersion_closure(
+            seed_ids_by_tag.get(tag, set()),
+            prereq_map,
+        )
+        for subject_id in closure:
+            ranks[subject_id] = min(rank, ranks.get(subject_id, rank))
+    return ranks
+
+
 def new_card_sort_key(
     subject_id: Optional[int],
     baseline_score: int,
     card_id: int,
-    immersion_ids: Set[int],
+    immersion_priority: Union[Set[int], Mapping[int, int]],
 ) -> Tuple[int, int, int]:
-    """Immersion subjects (and prereqs) lead, then baseline JLPT/level score, then id."""
-    is_immersion = (
-        IMMERSION_RANK_LEAD
-        if subject_id is not None and subject_id in immersion_ids
-        else IMMERSION_RANK_REST
-    )
-    return (is_immersion, baseline_score, card_id)
+    """Order by immersion source, then baseline JLPT/level score, then id."""
+    if subject_id is None:
+        rank = IMMERSION_RANK_REST
+    elif isinstance(immersion_priority, Mapping):
+        rank = immersion_priority.get(subject_id, IMMERSION_RANK_REST)
+    else:
+        rank = 0 if subject_id in immersion_priority else IMMERSION_RANK_REST
+    return (rank, baseline_score, card_id)
 
 
 def immersion_cards_to_unsuspend(
@@ -213,16 +230,17 @@ def immersion_cards_to_unsuspend(
 
 def sorted_new_card_ids(
     entries: Sequence[Tuple[Optional[int], int, int]],
-    immersion_ids: Set[int],
+    immersion_priority: Union[Set[int], Mapping[int, int]],
 ) -> List[int]:
     """Order new-card entries ``(subject_id, baseline_score, card_id)`` for the queue.
 
-    Immersion-linked subjects and their prerequisites come first (ordered by the
-    baseline score, so radical→kanji→vocab and JLPT/level order is preserved within
-    each group), followed by everything else by baseline score.
+    Immersion-linked subjects and prerequisites come first by configured source
+    order, then by baseline score within each source. Everything else follows.
     """
     ordered = sorted(
         entries,
-        key=lambda item: new_card_sort_key(item[0], item[1], item[2], immersion_ids),
+        key=lambda item: new_card_sort_key(
+            item[0], item[1], item[2], immersion_priority
+        ),
     )
     return [card_id for _subject_id, _score, card_id in ordered]

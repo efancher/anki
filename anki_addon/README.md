@@ -89,7 +89,7 @@ Runs automatically on collection load, after apkg import, and after sync when
 | Key | Default | Effect |
 |-----|---------|--------|
 | `immersion_priority_enabled` | `true` | Float immersion-mined subjects + prereqs to the front of the core new queue |
-| `immersion_tags` | `["satori-mining", "shadowing-mining"]` | Tags whose `WkSubjectId`/`PrerequisiteIds` seed the boost |
+| `immersion_tags` | `["satori-mining", "shadowing-mining"]` | Priority-ordered tags whose subjects/prerequisites seed the boost (Satori leads Shadowing by default) |
 | `immersion_tag` | `satori-mining` | Legacy single-tag fallback when `immersion_tags` is absent |
 
 
