@@ -332,6 +332,26 @@ def _is_likely_name(lemma: str, pos: str) -> bool:
     return False
 
 
+# Shadowing ASR often splits names like し吾 (Shogo) into し + 吾(われ).
+# Override dictionary pronoun readings when these surfaces appear.
+_SURFACE_READING_OVERRIDES: Dict[str, str] = {
+    "し吾": "しょご",
+    "し吾先輩": "しょごせんぱい",
+    "し吾君": "しょごくん",
+}
+
+
+def name_surface_for_shogo(sentence: str, surface: str) -> str:
+    """Expand 吾先輩/吾君 to し吾… when the sentence has the ASR name form."""
+    surf = (surface or "").strip()
+    plain = (sentence or "").strip()
+    if surf == "吾先輩" and "し吾先輩" in plain:
+        return "し吾先輩"
+    if surf == "吾君" and "し吾君" in plain:
+        return "し吾君"
+    return surf
+
+
 def katakana_to_hiragana(text: str) -> str:
     """Map full-width katakana to hiragana (readings for type-in)."""
     out: List[str] = []
@@ -375,9 +395,12 @@ def reading_for_candidate_lemma(lemma: str, reading: str = "") -> str:
 def reading_for_surface_in_sentence(sentence: str, surface: str) -> str:
     """Join fugashi token readings covering ``surface`` in ``sentence`` (hiragana)."""
     plain = (sentence or "").strip()
-    surf = (surface or "").strip()
+    surf = name_surface_for_shogo(plain, surface)
     if not plain or not surf:
         return ""
+    override = _SURFACE_READING_OVERRIDES.get(surf)
+    if override:
+        return override
     idx = plain.find(surf)
     if idx < 0:
         return reading_for_candidate_lemma(surf)
@@ -385,6 +408,11 @@ def reading_for_surface_in_sentence(sentence: str, surface: str) -> str:
     parts: List[str] = []
     for token in tokenize_japanese(plain):
         if token.end <= idx or token.start >= end:
+            continue
+        # Prefer overrides for multi-char name chunks inside the span.
+        tok_override = _SURFACE_READING_OVERRIDES.get(token.surface)
+        if tok_override:
+            parts.append(tok_override)
             continue
         piece = normalize_ja_reading(token.reading)
         if not piece:

@@ -47,6 +47,19 @@ class ReadingNormalizeTests(unittest.TestCase):
         self.assertEqual(reading_for_candidate_lemma("先輩", "センパイ"), "せんぱい")
         self.assertEqual(reading_for_candidate_lemma("吾先輩"), "")
 
+    def test_shogo_asr_name_uses_shogo_not_ware(self) -> None:
+        from shadowing_match import reading_for_surface_in_sentence
+
+        sentence = "あの、し吾先輩っておいくつなんですか?"
+        self.assertEqual(
+            reading_for_surface_in_sentence(sentence, "吾先輩"),
+            "しょごせんぱい",
+        )
+        self.assertEqual(
+            reading_for_surface_in_sentence(sentence, "し吾先輩"),
+            "しょごせんぱい",
+        )
+
 
 class MatchWkVocabTests(unittest.TestCase):
     def test_exact_expression_match(self) -> None:

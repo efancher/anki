@@ -26,6 +26,7 @@ from shadowing_match import (
     WkMatch,
     candidate_lemmas_in_sentence,
     match_wk_vocab_in_sentence,
+    name_surface_for_shogo,
     reading_for_candidate_lemma,
     reading_for_surface_in_sentence,
 )
@@ -590,25 +591,28 @@ def shadowing_candidate_note_fields(
     candidate: CandidateLemma,
     audio_filename: str,
 ) -> List[str]:
-    reading = (
-        reading_for_candidate_lemma(candidate.lemma, candidate.reading)
-        or reading_for_surface_in_sentence(sentence.japanese, candidate.surface or candidate.lemma)
+    surface = name_surface_for_shogo(
+        sentence.japanese, candidate.surface or candidate.lemma
     )
+    expression = surface if surface.startswith("し吾") else candidate.lemma
+    reading = reading_for_surface_in_sentence(
+        sentence.japanese, surface
+    ) or reading_for_candidate_lemma(candidate.lemma, candidate.reading)
     cloze_html, plain_sentence = build_satori_cloze_sentence(
         sentence.japanese,
-        candidate.lemma,
+        expression,
         reading,
-        surface=candidate.surface,
+        surface=surface,
     )
     sound = f"[sound:{audio_filename}]" if audio_filename else ""
-    duplicate_key = f"{source.source_id}|{sentence.sentence_id}|{candidate.lemma}"
+    duplicate_key = f"{source.source_id}|{sentence.sentence_id}|{expression}"
     meta = (
         f"Shadowing candidate · {source.title} · {candidate.pos or 'content'} · "
         f"template {SHADOWING_CANDIDATE_TEMPLATE_VERSION}"
     )
     values = {
         "DuplicateKey": duplicate_key,
-        "Expression": candidate.lemma,
+        "Expression": expression,
         "Reading": reading,
         "Translation": sentence.english,
         "ClozeSentence": cloze_html or html.escape(plain_sentence or sentence.japanese),
