@@ -205,6 +205,16 @@ class ImmersionTtsLogicTests(unittest.TestCase):
                 note_type_name="WK Satori Immersion", field_name="Audio"
             )
         )
+        self.assertFalse(
+            sentence_audio_autoplay(
+                note_type_name="WK Shadowing Candidate", field_name="ReadingAudio"
+            )
+        )
+        self.assertFalse(
+            sentence_audio_autoplay(
+                note_type_name="WK Satori Immersion", field_name="ReadingAudio"
+            )
+        )
 
     def test_synthesize_uses_disk_cache(self) -> None:
         import tempfile

@@ -26,6 +26,7 @@ FIELD_SENTENCE_FURIGANA = "SentenceFurigana"
 FIELD_SENTENCE_AUDIO = "SentenceAudio"
 FIELD_SENTENCE_AUDIO_EASY = "SentenceAudioEasy"
 FIELD_AUDIO = "Audio"
+FIELD_READING_AUDIO = "ReadingAudio"
 FIELD_EXPRESSION = "Expression"
 FIELD_READING = "Reading"
 FIELD_SPEAKER = "VoicevoxSpeakerId"
@@ -422,7 +423,7 @@ def sentence_audio_autoplay(*, note_type_name: str, field_name: str) -> bool:
     Satori/Shadowing word ``Audio`` (surface span) is always manual.
     Yomitan/Migaku: SentenceAudio autoplays (they have no Easy-first layout).
     """
-    if field_name == FIELD_AUDIO:
+    if field_name == FIELD_AUDIO or field_name == FIELD_READING_AUDIO:
         try:
             from .mining_note_types import (
                 SATORI_NOTE_TYPE,

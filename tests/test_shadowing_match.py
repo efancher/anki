@@ -13,7 +13,9 @@ if str(REPO_ROOT) not in sys.path:
 from shadowing_match import (  # noqa: E402
     candidate_lemmas_in_sentence,
     kanji_stem,
+    katakana_to_hiragana,
     match_wk_vocab_in_sentence,
+    reading_for_candidate_lemma,
 )
 
 
@@ -35,6 +37,15 @@ class KanjiStemTests(unittest.TestCase):
         self.assertEqual(kanji_stem("分かります"), "分")
         self.assertEqual(kanji_stem("友達"), "友達")
         self.assertEqual(kanji_stem("ありがとう"), "")
+
+
+class ReadingNormalizeTests(unittest.TestCase):
+    def test_katakana_lemma_becomes_hiragana_reading(self) -> None:
+        self.assertEqual(katakana_to_hiragana("センパイ"), "せんぱい")
+        self.assertEqual(reading_for_candidate_lemma("バイト"), "ばいと")
+        self.assertEqual(reading_for_candidate_lemma("マジ"), "まじ")
+        self.assertEqual(reading_for_candidate_lemma("先輩", "センパイ"), "せんぱい")
+        self.assertEqual(reading_for_candidate_lemma("吾先輩"), "")
 
 
 class MatchWkVocabTests(unittest.TestCase):

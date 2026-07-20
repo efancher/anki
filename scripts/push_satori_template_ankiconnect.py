@@ -33,6 +33,12 @@ from satori_decks import (  # noqa: E402
     resolve_satori_word_meaning,
     should_skip_copula_cloze,
 )
+from shadowing_decks import (  # noqa: E402
+    SHADOWING_CANDIDATE_NOTE_TYPE_NAME,
+    SHADOWING_NOTE_TYPE_NAME,
+    make_shadowing_candidate_model,
+    make_shadowing_model,
+)
 
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
 
@@ -58,8 +64,22 @@ def anki_connect(base_url: str, action: str, **params: object) -> object:
 
 
 def ensure_audio_fields(base_url: str, model_name: str) -> None:
+    """Add media fields the templates expect but older Anki note types may lack."""
     fields = list(anki_connect(base_url, "modelFieldNames", modelName=model_name))
-    for name in ("SentenceAudio", "SentenceAudioEasy"):
+    if model_name == SATORI_NOTE_TYPE_NAME:
+        wanted: tuple[str, ...] = (
+            "SentenceAudio",
+            "SentenceAudioEasy",
+            "Audio",
+            "ReadingAudio",
+        )
+    elif model_name == SHADOWING_NOTE_TYPE_NAME:
+        wanted = ("Audio", "ReadingAudio")
+    elif model_name == SHADOWING_CANDIDATE_NOTE_TYPE_NAME:
+        wanted = ("Audio", "ReadingAudio")
+    else:
+        return
+    for name in wanted:
         if name in fields:
             continue
         anki_connect(
@@ -189,13 +209,24 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if not args.cloze_only:
-        if args.model != SATORI_NOTE_TYPE_NAME:
-            raise SystemExit(
-                f"--cloze-only is required to refresh non-Satori note types "
-                f"(refusing to push Satori templates onto {args.model!r})."
-            )
         ensure_audio_fields(args.anki_connect, args.model)
-        model = make_satori_model()
+        if args.model == SATORI_NOTE_TYPE_NAME:
+            model = make_satori_model()
+            version_label = SATORI_TEMPLATE_VERSION
+        elif args.model == SHADOWING_NOTE_TYPE_NAME:
+            from shadowing_decks import SHADOWING_TEMPLATE_VERSION
+
+            model = make_shadowing_model()
+            version_label = SHADOWING_TEMPLATE_VERSION
+        elif args.model == SHADOWING_CANDIDATE_NOTE_TYPE_NAME:
+            from shadowing_decks import SHADOWING_CANDIDATE_TEMPLATE_VERSION
+
+            model = make_shadowing_candidate_model()
+            version_label = SHADOWING_CANDIDATE_TEMPLATE_VERSION
+        else:
+            raise SystemExit(
+                f"Unknown model {args.model!r}; use --cloze-only for cloze refresh only."
+            )
         tmpl = model.templates[0]
         anki_connect(
             args.anki_connect,
@@ -214,8 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             f"Updated {args.model} templates + CSS "
-            f"(repo template {SATORI_TEMPLATE_VERSION}: full surface highlight/blank + Target audio; "
-            "Easy autoplay, Normal manual)."
+            f"(repo template {version_label})."
         )
     if not args.no_refresh_cloze:
         updated = refresh_cloze_fields(args.anki_connect, args.model)

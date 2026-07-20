@@ -47,6 +47,7 @@ from mining_logic import (  # noqa: E402
 # Kanji ranges (CJK unified + extension A + compatibility ideographs).
 _KANJI_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _KANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ffー]")
+_HIRAGANA_RE = re.compile(r"[\u3040-\u309fー]")
 # Trim these after a dictionary-form surface (okurigana matched).
 _TRAILING_PARTICLES: Tuple[str, ...] = (
     "から",
@@ -84,6 +85,41 @@ _CONJUGATED_TRAILING_PARTICLES: Tuple[str, ...] = tuple(
     particle for particle in _TRAILING_PARTICLES if particle not in {"て", "で", "では"}
 )
 
+# Not conjugation — separate morphology/cards (達, さん, …).
+_NON_INFLECTION_SUFFIXES: Tuple[str, ...] = (
+    "たち",
+    "達",
+    "さん",
+    "くん",
+    "ちゃん",
+    "さま",
+    "様",
+)
+
+# Stop hiragana conjugation growth before these (aux / clause boundaries).
+# Do NOT include ます/ました — those are part of the verb form (作りました).
+_GROW_STOP_PREFIXES: Tuple[str, ...] = (
+    "ください",
+    "下さい",
+    "かもしれない",
+    "かもしれません",
+    "けれど",
+    "けれども",
+    "けど",
+    "です",
+    "でした",
+    "でしょう",
+    "から",
+    "ので",
+    "のに",
+    "すみません",
+    "すいません",
+    "んだよ",
+    "んだ",
+    "のだ",
+    "んです",
+)
+
 
 def kanji_stem(text: str) -> str:
     """Contiguous substring from the first kanji to the last kanji (inclusive).
@@ -102,15 +138,34 @@ def _is_kana(ch: str) -> bool:
     return bool(_KANA_RE.match(ch))
 
 
+def _is_hiragana(ch: str) -> bool:
+    return bool(_HIRAGANA_RE.match(ch))
+
+
+def _is_kanji(ch: str) -> bool:
+    return bool(_KANJI_RE.match(ch))
+
+
 def _expression_parts(expression: str) -> Tuple[str, str, str]:
-    """Split expression into (kana_prefix, kanji_stem, okurigana)."""
+    """Split expression into (kana_prefix, kanji_stem, okurigana).
+
+    Kana-only lemmas return empty okurigana so expand_surface_span does not
+    grow through following kana (ひなたち, 声でピーピー, 口にえさ, …).
+
+    Address/plural suffixes (さん, たち, …) are stripped from okurigana so they
+    do not trigger conjugation growth (お姉さん → prefix お, stem 姉).
+    """
     expr = plain_mining_text(expression)
     stem = kanji_stem(expr)
     if not stem:
-        return "", "", expr
+        return "", "", ""
     stem_at = expr.find(stem)
     prefix = expr[:stem_at]
     okurigana = expr[stem_at + len(stem) :]
+    for suffix in _NON_INFLECTION_SUFFIXES:
+        if okurigana.endswith(suffix):
+            okurigana = okurigana[: -len(suffix)]
+            break
     return prefix, stem, okurigana
 
 
@@ -135,24 +190,132 @@ def _trim_trailing_particles(
     return text
 
 
+def _trim_non_inflection_suffixes(
+    span: str,
+    *,
+    min_len: int,
+    expression: str,
+) -> str:
+    """Drop pluralizer/address suffixes that are not part of the lemma."""
+    expr = plain_mining_text(expression)
+    text = span
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _NON_INFLECTION_SUFFIXES:
+            if expr.endswith(suffix):
+                continue
+            if len(text) - len(suffix) < min_len:
+                continue
+            if text.endswith(suffix):
+                text = text[: -len(suffix)]
+                changed = True
+                break
+    return text
+
+
+def _okurigana_is_inflecting(okurigana: str) -> bool:
+    """True when okurigana is hiragana that can conjugate (not 々, さん, …)."""
+    if not okurigana:
+        return False
+    return all(_is_hiragana(ch) for ch in okurigana)
+
+
+def _looks_like_inflection_after_stem(after: str, okurigana: str) -> bool:
+    """Whether kana after a kanji stem looks like this lemma's inflection."""
+    if not after or not _is_hiragana(after[0]):
+        return False
+    if not okurigana:
+        return True
+    if not _okurigana_is_inflecting(okurigana):
+        return after.startswith(okurigana)
+    if after.startswith(okurigana):
+        return True
+    # しい→しかった, がる→がって: first kana preserved
+    if after[0] == okurigana[0]:
+        return True
+    # Single-kana okurigana (る/い/う…) — conjugated forms change the vowel row.
+    if len(okurigana) == 1:
+        allowed = _SINGLE_OKURI_CONJ_STARTS.get(okurigana)
+        if allowed is not None:
+            return after[0] in allowed
+        return True
+    return False
+
+
+# First hiragana allowed after the kanji stem for common single-kana okurigana.
+# Include ま for polite ます/ました (来ました, します).
+_SINGLE_OKURI_CONJ_STARTS: Dict[str, frozenset] = {
+    "る": frozenset("らりるれろっないたてとどだでずねま"),
+    "う": frozenset("わいうえおったてとだま"),
+    "く": frozenset("かきくけこいったてとだま"),
+    "す": frozenset("さしすせそったてとだま"),
+    "つ": frozenset("たちつてとっだま"),
+    "ぬ": frozenset("なにぬねのっだま"),
+    "ぶ": frozenset("ばびぶべぼんっだてとま"),
+    "む": frozenset("まみむめもんっだてと"),
+    "ぐ": frozenset("がぎぐげごいだてとま"),
+    "い": frozenset("いくけかっう"),  # i-adjective
+}
+
+
+def _find_stem_index(plain: str, stem: str, okurigana: str) -> int:
+    """First stem hit that is not mid-kanji-compound and matches inflection."""
+    start = 0
+    while True:
+        idx = plain.find(stem, start)
+        if idx < 0:
+            return -1
+        after_idx = idx + len(stem)
+        # 日本|人 — stem must not continue into another kanji with no okurigana.
+        if after_idx < len(plain) and _is_kanji(plain[after_idx]):
+            start = idx + 1
+            continue
+        after = plain[after_idx:]
+        if okurigana and not _looks_like_inflection_after_stem(after, okurigana):
+            start = idx + 1
+            continue
+        return idx
+
+
 def expand_surface_span(
     plain: str,
     start: int,
     end: int,
     expression: str,
 ) -> Tuple[int, int]:
-    """Grow a provisional span to the full surface form of expression in plain."""
+    """Grow a provisional span to the full surface form of expression in plain.
+
+    Exact dictionary-form / token-surface hits do not grow through following
+    kana. Only a stem-sized hit for an inflecting lemma may grow, and only
+    through hiragana up to an aux/clause boundary (not through アルバイト).
+    """
     prefix, stem, okurigana = _expression_parts(expression)
     if stem and prefix:
         if start >= len(prefix) and plain[start - len(prefix) : start] == prefix:
             start -= len(prefix)
-    # Only inflecting words (those with okurigana) may grow through following kana.
-    # All-kanji nouns like 日本 must not swallow ではありません / particles.
-    if okurigana:
-        while end < len(plain) and _is_kana(plain[end]):
-            end += 1
-    span = plain[start:end]
+
+    provisional = plain[start:end]
     core = prefix + stem
+    stem_only = bool(stem) and provisional in {stem, core}
+    if stem and _okurigana_is_inflecting(okurigana) and stem_only:
+        after = plain[end:]
+        if _looks_like_inflection_after_stem(after, okurigana):
+            grown = 0
+            min_before_stop = max(len(okurigana), 1)
+            while end < len(plain) and _is_hiragana(plain[end]):
+                if grown >= min_before_stop:
+                    stopped = False
+                    for boundary in _GROW_STOP_PREFIXES:
+                        if plain.startswith(boundary, end):
+                            stopped = True
+                            break
+                    if stopped:
+                        break
+                end += 1
+                grown += 1
+
+    span = plain[start:end]
     if stem and span.startswith(core) and okurigana and span[len(core) :].startswith(okurigana):
         # Dictionary form is present — safe to strip a following particle.
         min_len = len(core) + len(okurigana)
@@ -166,9 +329,15 @@ def expand_surface_span(
         min_len = len(core) if core else 1
         particles = _CONJUGATED_TRAILING_PARTICLES
     else:
+        # Exact kana (or empty) match — still drop a trailing particle if one
+        # was included by a too-long provisional span.
         min_len = len(plain_mining_text(expression)) or 1
         particles = _TRAILING_PARTICLES
     trimmed = _trim_trailing_particles(span, min_len=max(min_len, 1), particles=particles)
+    # Pluralizer / address suffixes are separate cards (達, さん), not inflection.
+    trimmed = _trim_non_inflection_suffixes(
+        trimmed, min_len=max(min_len, 1), expression=expression
+    )
     return start, start + len(trimmed)
 
 
@@ -312,9 +481,9 @@ def resolve_surface_span(
         if idx >= 0:
             return _finish(idx, idx + len(surf))
 
-    _prefix, stem, _okuri = _expression_parts(expr)
+    _prefix, stem, okuri = _expression_parts(expr)
     if stem:
-        idx = plain.find(stem)
+        idx = _find_stem_index(plain, stem, okuri)
         if idx >= 0:
             return _finish(idx, idx + len(stem))
 
@@ -368,9 +537,10 @@ def build_satori_cloze_sentence(
     Marks the **whole surface span** of the target word in the sentence (including
     conjugation / okurigana). Type-in remains the dictionary ``Reading``.
 
-    Kanji targets use two tones: ``cloze-target`` for the lemma core (what the
-    reading answers) and ``cloze-inflection`` for conjugated endings.
-    Hiragana-only targets are blanked.
+    When the **sentence surface** contains kanji, use two tones: ``cloze-target``
+    for the lemma core and ``cloze-inflection`` for conjugated endings.
+    When the surface is kana-only (even if the lemma is written in kanji, e.g.
+    達 → たち), blank it — highlighting kana would spoil the type-in.
     """
     resolved = resolve_surface_span(
         sentence, expression, reading, surface=surface
@@ -382,7 +552,8 @@ def build_satori_cloze_sentence(
     before = html.escape(plain[:start])
     surface_text = plain[start:end]
     after = html.escape(plain[end:])
-    if kanji_stem(plain_mining_text(expression)) or kanji_stem(surface_text):
+    # Blank vs highlight follows what appears in the sentence, not the lemma script.
+    if kanji_stem(surface_text):
         marked = format_cloze_surface_html(surface_text, expression)
     else:
         marked = f'<span class="cloze-blank">{CLOZE_BLANK_DISPLAY}</span>'
@@ -427,6 +598,7 @@ SATORI_FIELD_NAMES: Tuple[str, ...] = (
     "Sentence",
     "SentenceFurigana",
     "Audio",
+    "ReadingAudio",
     "SentenceAudio",
     "SentenceAudioEasy",
     "VoicevoxAudio",
@@ -468,6 +640,12 @@ SATORI_BACK = """
   <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
 </div>
 {{/Audio}}
+{{#ReadingAudio}}
+<div class="audio-row surface-audio-row">
+  <div class="audio-label meta">Reading</div>
+  <audio class="surface-audio-manual" controls preload="none" src="{{ReadingAudio}}"></audio>
+</div>
+{{/ReadingAudio}}
 {{#Sentence}}
 <div class="context">
   <div class="sentence-audio-block">
@@ -760,6 +938,7 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         "Sentence": enrichment.sentence,
         "SentenceFurigana": sentence_furigana,
         "Audio": "",
+        "ReadingAudio": "",
         "SentenceAudio": "",
         "SentenceAudioEasy": "",
         "VoicevoxAudio": "",

@@ -26,6 +26,8 @@ from shadowing_match import (
     WkMatch,
     candidate_lemmas_in_sentence,
     match_wk_vocab_in_sentence,
+    reading_for_candidate_lemma,
+    reading_for_surface_in_sentence,
 )
 from satori_decks import build_satori_cloze_sentence, should_skip_copula_cloze
 from wk_decks import (
@@ -100,6 +102,7 @@ SHADOWING_FIELD_NAMES: Tuple[str, ...] = (
     "SentenceAudio",
     "SentenceAudioEasy",
     "Audio",
+    "ReadingAudio",
     "VoicevoxAudio",
     "VoicevoxSpeakerId",
     "UserNotes",
@@ -117,6 +120,7 @@ SHADOWING_CANDIDATE_FIELD_NAMES: Tuple[str, ...] = (
     "Sentence",
     "SentenceAudio",
     "Audio",
+    "ReadingAudio",
     "Glossary",
     "UserNotes",
     "SourceUrl",
@@ -133,6 +137,10 @@ SHADOWING_FRONT = """
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
   <div class="hint-block">
     {{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}
+    {{^WkMeaning}}
+      {{#HintGlossary}}<div class="hint-meaning">{{HintGlossary}}</div>{{/HintGlossary}}
+      {{^HintGlossary}}{{{DictLinksEn}}}{{/HintGlossary}}
+    {{/WkMeaning}}
   </div>
   <div class="type-prompt">{{type:Reading}}</div>
 </div>
@@ -152,6 +160,12 @@ SHADOWING_BACK = """
   <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
 </div>
 {{/Audio}}
+{{#ReadingAudio}}
+<div class="audio-row surface-audio-row">
+  <div class="audio-label meta">Reading</div>
+  <audio class="surface-audio-manual" controls preload="none" src="{{ReadingAudio}}"></audio>
+</div>
+{{/ReadingAudio}}
 {{#Sentence}}
 <div class="context">
   {{#SentenceAudio}}
@@ -194,7 +208,7 @@ SHADOWING_CANDIDATE_FRONT = """
 <div class="mining-card">
   {{#ClozeSentence}}<div class="cloze-sentence jp">{{ClozeSentence}}</div>{{/ClozeSentence}}
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
-  <div class="type-prompt">{{type:Expression}}</div>
+  <div class="type-prompt">{{type:Reading}}</div>
 </div>
 """
 
@@ -210,6 +224,12 @@ SHADOWING_CANDIDATE_BACK = """
   <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
 </div>
 {{/Audio}}
+{{#ReadingAudio}}
+<div class="audio-row surface-audio-row">
+  <div class="audio-label meta">Reading</div>
+  <audio class="surface-audio-manual" controls preload="none" src="{{ReadingAudio}}"></audio>
+</div>
+{{/ReadingAudio}}
 {{#Sentence}}
 <div class="context">
   {{#SentenceAudio}}
@@ -545,6 +565,7 @@ def shadowing_note_fields(
         "SentenceAudio": sound,
         "SentenceAudioEasy": "",
         "Audio": "",
+        "ReadingAudio": "",
         "VoicevoxAudio": "",
         "VoicevoxSpeakerId": "",
         "UserNotes": sentence.notes,
@@ -569,10 +590,14 @@ def shadowing_candidate_note_fields(
     candidate: CandidateLemma,
     audio_filename: str,
 ) -> List[str]:
+    reading = (
+        reading_for_candidate_lemma(candidate.lemma, candidate.reading)
+        or reading_for_surface_in_sentence(sentence.japanese, candidate.surface or candidate.lemma)
+    )
     cloze_html, plain_sentence = build_satori_cloze_sentence(
         sentence.japanese,
         candidate.lemma,
-        candidate.reading,
+        reading,
         surface=candidate.surface,
     )
     sound = f"[sound:{audio_filename}]" if audio_filename else ""
@@ -584,12 +609,13 @@ def shadowing_candidate_note_fields(
     values = {
         "DuplicateKey": duplicate_key,
         "Expression": candidate.lemma,
-        "Reading": candidate.reading,
+        "Reading": reading,
         "Translation": sentence.english,
         "ClozeSentence": cloze_html or html.escape(plain_sentence or sentence.japanese),
         "Sentence": plain_sentence or sentence.japanese,
         "SentenceAudio": sound,
         "Audio": "",
+        "ReadingAudio": "",
         "Glossary": f"POS: {candidate.pos}" if candidate.pos else "non-WK candidate",
         "UserNotes": sentence.notes,
         "SourceUrl": source.url,
@@ -599,7 +625,7 @@ def shadowing_candidate_note_fields(
     fields: List[str] = []
     for name in SHADOWING_CANDIDATE_FIELD_NAMES:
         value = values[name]
-        if name in {"ClozeSentence", "SentenceAudio", "Audio"}:
+        if name in {"ClozeSentence", "SentenceAudio", "Audio", "ReadingAudio"}:
             fields.append(value)
         else:
             fields.append(html.escape(value))

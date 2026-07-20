@@ -147,6 +147,10 @@ class SatoriDecksTests(unittest.TestCase):
         self.assertNotIn("hint-reading", front)
         self.assertIn("{{furigana:SentenceFurigana}}", back)
         self.assertIn("{{furigana:Furigana}}", back)
+        self.assertIn("{{Audio}}", back)
+        self.assertIn("{{ReadingAudio}}", back)
+        self.assertIn("Target", back)
+        self.assertIn("Reading", back)
         self.assertIn("{{SentenceAudio}}", back)
         self.assertIn("{{SentenceAudioEasy}}", back)
         self.assertIn("Normal", back)
@@ -285,11 +289,93 @@ class SatoriClozeTests(unittest.TestCase):
             "喜んで",
         )
 
+    def test_exact_lemma_does_not_swallow_following_clause(self) -> None:
+        from satori_decks import surface_span_text
+
+        sentence = "ああ、年は同じかもしれないけど、俺バイトでは先輩だよ。"
+        self.assertEqual(surface_span_text(sentence, "同じ", "おなじ"), "同じ")
+        cloze, _ = build_satori_cloze_sentence(sentence, "同じ", "おなじ")
+        self.assertIn('<span class="cloze-target">同じ</span>', cloze)
+        self.assertIn("かもしれない", cloze)
+        self.assertNotIn("cloze-inflection", cloze)
+
+    def test_conjugation_growth_stops_before_katakana(self) -> None:
+        from satori_decks import surface_span_text
+
+        sentence = "授業来ないでアルバイトしてたこともあるよ。"
+        self.assertEqual(surface_span_text(sentence, "来る", "くる"), "来ないで")
+        cloze, _ = build_satori_cloze_sentence(sentence, "来る", "くる")
+        self.assertIn('<span class="cloze-target">来</span>', cloze)
+        self.assertIn('<span class="cloze-inflection">ないで</span>', cloze)
+        self.assertIn("アルバイト", cloze)
+
+    def test_conjugation_growth_stops_before_kudasai(self) -> None:
+        from satori_decks import surface_span_text
+
+        self.assertEqual(
+            surface_span_text("いいから教えてくださいよ。", "教える", "おしえる"),
+            "教えて",
+        )
+
+    def test_stem_does_not_match_inside_kanji_compound(self) -> None:
+        from satori_decks import surface_span_text
+
+        # 任す must not latch onto 任 inside 担任
+        self.assertEqual(
+            surface_span_text(
+                "同じだ。俺の担任もひ先生だったんだよ。", "任す", "まかす"
+            ),
+            "",
+        )
+
+    def test_senpai_highlights_only_lemma(self) -> None:
+        cloze, _ = build_satori_cloze_sentence(
+            "あの、し吾先輩っておいくつなんですか?", "先輩", "せんぱい"
+        )
+        self.assertIn('<span class="cloze-target">先輩</span>', cloze)
+        self.assertIn("っておいくつ", cloze)
+        self.assertNotIn("cloze-inflection", cloze)
+
+    def test_kanji_lemma_with_kana_surface_is_blanked(self) -> None:
+        """達 appears as たち in the sentence — blank, don't highlight the kana."""
+        sentence = "巣から、３羽のひなたちが顔を出しました。"
+        cloze, _ = build_satori_cloze_sentence(sentence, "達", "たち")
+        self.assertIn("cloze-blank", cloze)
+        self.assertNotIn("cloze-target", cloze)
+        self.assertIn("ひな", cloze)
+        self.assertNotIn("たち", cloze)
+
     def test_hiragana_only_word_is_blanked(self) -> None:
         cloze, _ = build_satori_cloze_sentence("これはとても綺麗だ。", "とても", "とても")
         self.assertIn("cloze-blank", cloze)
         self.assertNotIn("cloze-target", cloze)
         self.assertNotIn("とても", cloze)
+
+    def test_kana_lemma_does_not_swallow_pluralizer(self) -> None:
+        from satori_decks import surface_span_text
+
+        sentence = "巣から、３羽のひなたちが顔を出しました。"
+        self.assertEqual(surface_span_text(sentence, "ひな", "ひな"), "ひな")
+        cloze, _ = build_satori_cloze_sentence(sentence, "ひな", "ひな")
+        self.assertIn("cloze-blank", cloze)
+        self.assertIn("たち", cloze)
+        self.assertNotIn("ひな", cloze)
+
+    def test_kana_particle_does_not_swallow_following_word(self) -> None:
+        from satori_decks import surface_span_text
+
+        sentence = "ひなたちは大きな声でピーピーと鳴いて、口を大きく開けました。"
+        self.assertEqual(surface_span_text(sentence, "で", "で"), "で")
+        cloze, _ = build_satori_cloze_sentence(sentence, "で", "で")
+        self.assertIn("ピーピー", cloze)
+
+    def test_okurigana_noun_does_not_mark_pluralizer_as_inflection(self) -> None:
+        cloze, _ = build_satori_cloze_sentence(
+            "子どもたちが遊んだ。", "子ども", "こども"
+        )
+        self.assertIn('<span class="cloze-target">子ども</span>', cloze)
+        self.assertNotIn("cloze-inflection", cloze)
+        self.assertIn("たち", cloze)
 
 
 if __name__ == "__main__":

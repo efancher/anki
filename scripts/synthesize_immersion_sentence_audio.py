@@ -1,9 +1,11 @@
 """
-WK Immersion — synthesize sentence + surface-span audio for immersion notes.
+WK Immersion — synthesize sentence + Target/Reading audio for immersion notes.
 
 Fills SentenceAudio (normal) and SentenceAudioEasy (slower). For Satori/Shadowing
-notes, also fills Audio with Voicevox of the cloze surface span (Target button).
-Audio is cached under .wk_cache/immersion_sentence_audio/.
+notes, also fills:
+  • Audio — Voicevox of the cloze surface span (Target button)
+  • ReadingAudio — Voicevox of the hiragana Reading (answer)
+Cached under .wk_cache/immersion_sentence_audio/.
 Pass --force to regenerate cache and overwrite note fields.
 
 Usage (Anki must be running; VOICEVOX engine recommended):
@@ -58,6 +60,7 @@ FIELD_SENTENCE_FURIGANA = _logic.FIELD_SENTENCE_FURIGANA
 FIELD_SENTENCE_AUDIO = _logic.FIELD_SENTENCE_AUDIO
 FIELD_SENTENCE_AUDIO_EASY = _logic.FIELD_SENTENCE_AUDIO_EASY
 FIELD_AUDIO = _logic.FIELD_AUDIO
+FIELD_READING_AUDIO = _logic.FIELD_READING_AUDIO
 FIELD_EXPRESSION = _logic.FIELD_EXPRESSION
 FIELD_READING = _logic.FIELD_READING
 MINING_NOTE_TYPES = _note_types.MINING_NOTE_TYPES
@@ -240,7 +243,10 @@ def main() -> None:
     parser.add_argument(
         "--surface-only",
         action="store_true",
-        help="Only fill the Target (surface-span) Audio field on Satori/Shadowing notes",
+        help=(
+            "Only fill Target (Audio / surface span) and Reading (ReadingAudio / hiragana) "
+            "on Satori/Shadowing notes"
+        ),
     )
     args = parser.parse_args()
 
@@ -272,10 +278,12 @@ def main() -> None:
             )
     has_easy = FIELD_SENTENCE_AUDIO_EASY in field_names
     has_audio = FIELD_AUDIO in field_names
+    has_reading_audio = FIELD_READING_AUDIO in field_names
 
     note_ids = find_immersion_note_ids(args.anki_connect, args.note_id, note_types)
     ok = failed = skipped = 0
     surface_ok = surface_failed = surface_skipped = 0
+    reading_ok = reading_failed = reading_skipped = 0
 
     for nid in note_ids:
         info = anki_request(args.anki_connect, "notesInfo", notes=[nid])[0]
@@ -290,6 +298,7 @@ def main() -> None:
         sentence_audio = value(FIELD_SENTENCE_AUDIO)
         sentence_audio_easy = value(FIELD_SENTENCE_AUDIO_EASY) if has_easy else "[sound:skip]"
         word_audio = value(FIELD_AUDIO) if has_audio else ""
+        reading_audio = value(FIELD_READING_AUDIO) if has_reading_audio else ""
         expression = value(FIELD_EXPRESSION)
         reading = value(FIELD_READING)
 
@@ -354,29 +363,59 @@ def main() -> None:
             else:
                 skipped += 1
 
-        if (
-            has_audio
-            and model_name in SURFACE_AUDIO_NOTE_TYPES
-            and (args.force or args.surface_only or not sentence_audio_already_set(word_audio))
-        ):
+        if model_name in SURFACE_AUDIO_NOTE_TYPES:
             surface = surface_span_text(sentence, expression, reading)
-            if not surface:
-                surface_skipped += 1
-            elif store_field_audio(
-                base_url=args.anki_connect,
-                note_id=nid,
-                note_type_name=model_name,
-                field_name=FIELD_AUDIO,
-                tts_text=surface,
-                config=config,
-                speed_scale=config.voicevox_speed_scale,
-                force=args.force,
+            reading_text = (reading or "").strip()
+
+            if has_audio and (
+                args.force or args.surface_only or not sentence_audio_already_set(word_audio)
             ):
-                surface_ok += 1
-            else:
-                surface_failed += 1
-        elif has_audio and model_name in SURFACE_AUDIO_NOTE_TYPES:
-            surface_skipped += 1
+                # Candidates previously stored Reading TTS in Audio — always
+                # (re)fill Target from the surface span when forcing/surface-only.
+                tts_surface = surface or reading_text
+                if not tts_surface:
+                    surface_skipped += 1
+                elif store_field_audio(
+                    base_url=args.anki_connect,
+                    note_id=nid,
+                    note_type_name=model_name,
+                    field_name=FIELD_AUDIO,
+                    tts_text=tts_surface,
+                    config=config,
+                    speed_scale=config.voicevox_speed_scale,
+                    force=args.force or (
+                        # Candidate Audio held Reading TTS before ReadingAudio existed.
+                        model_name == SHADOWING_CANDIDATE_NOTE_TYPE and args.surface_only
+                    ),
+                ):
+                    surface_ok += 1
+                else:
+                    surface_failed += 1
+            elif has_audio:
+                surface_skipped += 1
+
+            if has_reading_audio and (
+                args.force
+                or args.surface_only
+                or not sentence_audio_already_set(reading_audio)
+            ):
+                if not reading_text:
+                    reading_skipped += 1
+                elif store_field_audio(
+                    base_url=args.anki_connect,
+                    note_id=nid,
+                    note_type_name=model_name,
+                    field_name=FIELD_READING_AUDIO,
+                    tts_text=reading_text,
+                    config=config,
+                    speed_scale=config.voicevox_speed_scale,
+                    force=args.force,
+                ):
+                    reading_ok += 1
+                else:
+                    reading_failed += 1
+            elif has_reading_audio:
+                reading_skipped += 1
 
         _ = did_sentence  # keep branch clarity for sentence counters above
 
@@ -384,6 +423,10 @@ def main() -> None:
     print(
         f"Target (surface) audio: {surface_ok} synthesized, "
         f"{surface_failed} failed, {surface_skipped} skipped."
+    )
+    print(
+        f"Reading audio: {reading_ok} synthesized, "
+        f"{reading_failed} failed, {reading_skipped} skipped."
     )
 
 

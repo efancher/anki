@@ -16,6 +16,8 @@ from mining_vocab_index import lookup_wk_vocab
 _KANJI_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _KATAKANA_WORD_RE = re.compile(r"[\u30a0-\u30ff\u31f0-\u31ffー]{2,}")
 _KANJI_RUN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{1,}")
+_HIRAGANA_CHAR_RE = re.compile(r"[\u3041-\u3096]")
+_KATAKANA_CHAR_RE = re.compile(r"[\u30A1-\u30F6]")
 
 # UniDic coarse POS prefixes treated as content words for candidate generation.
 _CONTENT_POS_PREFIXES = (
@@ -330,6 +332,70 @@ def _is_likely_name(lemma: str, pos: str) -> bool:
     return False
 
 
+def katakana_to_hiragana(text: str) -> str:
+    """Map full-width katakana to hiragana (readings for type-in)."""
+    out: List[str] = []
+    for ch in text or "":
+        code = ord(ch)
+        if 0x30A1 <= code <= 0x30F6:  # ァ–ヶ
+            out.append(chr(code - 0x60))
+        elif ch == "ヴ":
+            out.append("ゔ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def normalize_ja_reading(reading: str) -> str:
+    """Normalize a dictionary/token reading to hiragana type-in form."""
+    text = (reading or "").strip()
+    if not text:
+        return ""
+    # UniDic sometimes returns "センパイ" or "センパイ-センパイ"
+    if "-" in text:
+        text = text.split("-", 1)[0]
+    return katakana_to_hiragana(text)
+
+
+def reading_for_candidate_lemma(lemma: str, reading: str = "") -> str:
+    """Best-effort hiragana reading for candidate type-in."""
+    normalized = normalize_ja_reading(reading)
+    if normalized:
+        return normalized
+    text = (lemma or "").strip()
+    if not text:
+        return ""
+    if all(_HIRAGANA_CHAR_RE.match(ch) or ch in "ーゝゞ" for ch in text):
+        return text
+    if all(_KATAKANA_CHAR_RE.match(ch) or ch in "ーヴ" for ch in text):
+        return katakana_to_hiragana(text)
+    return ""
+
+
+def reading_for_surface_in_sentence(sentence: str, surface: str) -> str:
+    """Join fugashi token readings covering ``surface`` in ``sentence`` (hiragana)."""
+    plain = (sentence or "").strip()
+    surf = (surface or "").strip()
+    if not plain or not surf:
+        return ""
+    idx = plain.find(surf)
+    if idx < 0:
+        return reading_for_candidate_lemma(surf)
+    end = idx + len(surf)
+    parts: List[str] = []
+    for token in tokenize_japanese(plain):
+        if token.end <= idx or token.start >= end:
+            continue
+        piece = normalize_ja_reading(token.reading)
+        if not piece:
+            piece = reading_for_candidate_lemma(token.surface, token.reading)
+        if piece:
+            parts.append(piece)
+    if parts:
+        return "".join(parts)
+    return reading_for_candidate_lemma(surf)
+
+
 def candidate_lemmas_in_sentence(
     sentence: str,
     index: dict,
@@ -376,7 +442,7 @@ def _candidates_from_tokens(
         out.append(
             CandidateLemma(
                 lemma=lemma,
-                reading=token.reading,
+                reading=reading_for_candidate_lemma(lemma, token.reading),
                 surface=token.surface,
                 pos=token.pos,
                 start=token.start,
@@ -408,7 +474,7 @@ def _candidates_fallback(
             out.append(
                 CandidateLemma(
                     lemma=lemma,
-                    reading="",
+                    reading=reading_for_candidate_lemma(lemma),
                     surface=lemma,
                     pos="unknown",
                     start=match.start(),

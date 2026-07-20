@@ -147,6 +147,12 @@ class ShadowingIdentityTests(unittest.TestCase):
         )
         self.assertEqual(model.name, SHADOWING_NOTE_TYPE_NAME)
         self.assertEqual(cand.name, SHADOWING_CANDIDATE_NOTE_TYPE_NAME)
+        self.assertIn("{{type:Reading}}", cand.templates[0]["qfmt"])
+        self.assertNotIn("{{type:Expression}}", cand.templates[0]["qfmt"])
+        self.assertIn("{{Audio}}", cand.templates[0]["afmt"])
+        self.assertIn("{{ReadingAudio}}", cand.templates[0]["afmt"])
+        self.assertIn("Target", cand.templates[0]["afmt"])
+        self.assertIn("Reading", cand.templates[0]["afmt"])
 
 
 class ShadowingProjectLoadTests(unittest.TestCase):
