@@ -66,11 +66,16 @@ python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Im
 ## Card layout
 
 - **Front:** the `Context1` sentence + English word meaning + `{{type:Reading}}`. The target word is marked in-sentence:
-  - **Has kanji** → the kanji stem is **highlighted** (blue), okurigana stays visible. You read the highlighted kanji in context. This works for conjugated verbs/adjectives too, since kanji don't change when a word inflects (e.g. `作る` highlights `作` in `…巣を作りました`).
+  - **Has kanji** → the surface form is marked in two tones: **blue** for the lemma core (what your reading answers), **purple dashed** for conjugated endings (e.g. `青` + `くて`; `やって来` + `ました`). Type the dictionary reading (`あおい`, `やってくる`).
   - **Hiragana-only** → the whole word is **blanked** (`＿＿＿`); produce it from context + the English hint.
-- **Back:** expression + reading, **word English**, full sentence (+ furigana when present), **sentence translation**, Easy audio (autoplay) + Normal (manual)
+- **Back:** expression + reading, **word English**, **Target** audio button (surface span via Voicevox), full sentence (+ furigana when present), **sentence translation**, Easy audio (autoplay) + Normal (manual)
 
-Changing this layout on existing notes: `ClozeSentence` is a stored field, so run `python3 scripts/push_satori_template_ankiconnect.py` — it pushes the template and recomputes `ClozeSentence` on every live note (re-importing the `.apkg` skips existing notes).
+Changing this layout on existing notes: `ClozeSentence` is a stored field, so run `python3 scripts/push_satori_template_ankiconnect.py` — it pushes the template and recomputes `ClozeSentence` on every live note (re-importing the `.apkg` skips existing notes). For Shadowing notes:
+
+```bash
+python3 scripts/push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Immersion"
+python3 scripts/push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Candidate"
+```
 
 ## Sentence audio (VOICEVOX)
 

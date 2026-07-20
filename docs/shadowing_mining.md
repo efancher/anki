@@ -40,13 +40,20 @@ Writes:
 | Kind | Behavior |
 |------|----------|
 | WK cloze | One note per `(sentence × matched WK subject)`. Same native clip; different cloze target. |
-| Cloze style | Same as Satori: highlight kanji stem; blank hiragana-only targets. |
+| Cloze style | Highlight/blank the **whole surface span** in the sentence; type the dictionary reading |
 | English | Always on the front (`WkMeaning` / sentence translation on back). |
-| Audio | Packaged clip in `SentenceAudio` as `[sound:…]` (autoplays). |
+| Audio | Packaged clip in `SentenceAudio` (autoplays). Optional Voicevox **Target** button plays the cloze surface span (`Audio`). |
 | Priority tag | `shadowing-mining` (seeds `wk_adaptive_new`) |
 | Candidates | Content words only; excludes WK lemmas, particles/auxiliaries (with fugashi), stopwords. Tag `shadowing-candidate` does **not** seed core priority. |
 
 Auto-caption sentences are imported by default and tagged `shadowing-auto-caption`. Pass `--skip-auto-caption` to omit them.
+
+To recompute cloze marks on notes already in Anki (after a cloze-logic change):
+
+```bash
+python3 scripts/push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Immersion"
+python3 scripts/push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Candidate"
+```
 
 ## Priority config
 

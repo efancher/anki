@@ -293,9 +293,9 @@ MODEL_TEMPLATE_VERSIONS = {
     "kanji_meaning": "v3",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
-    "satori": "v8",
-    "shadowing": "v1",
-    "shadowing_candidate": "v1",
+    "satori": "v12",
+    "shadowing": "v4",
+    "shadowing_candidate": "v4",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 
@@ -6314,10 +6314,12 @@ def count_pitch_leeches(leeches: Sequence[dict], pitch_index: Dict[Tuple[str, st
 def normalize_wanted_decks(wanted: Set[str]) -> Set[str]:
     normalized = set(wanted)
     if "core" in normalized:
-        # Dual meaning/reading Review retired — radicals only. Use core-kanji /
-        # core-vocabulary explicitly if you still want those decks.
+        # Radicals are the default core bundle; kanji/vocabulary stay available as
+        # explicit core-kanji / core-vocabulary decks (reading audio lives there).
         normalized.discard("core")
         normalized.add("core-radical")
+        normalized.add("core-kanji")
+        normalized.add("core-vocabulary")
     if "conjugations" in normalized:
         normalized.discard("conjugations")
         normalized.add("conjugations-verbs")
@@ -7128,7 +7130,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "conjugations-adjectives",
         "conjugations-reverse",
         "verb-types", "adjective-types", "vocab-cloze", "dictation", "kanji-meaning", "vocab-sentence", "rendaku", "mining", "grammar",
-        "core", "all",
+        "core", "core-radical", "core-kanji", "core-vocabulary", "all",
     ], default=cfg.get("deck", "all"))
     parser.add_argument("--refresh-cache", action="store_true", default=cfg.get("refresh_cache", False))
     parser.add_argument("--output-dir", default=cfg.get("output_dir", str(OUTPUT_DIR)))

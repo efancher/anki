@@ -27,7 +27,7 @@ from shadowing_match import (
     candidate_lemmas_in_sentence,
     match_wk_vocab_in_sentence,
 )
-from satori_decks import build_satori_cloze_sentence
+from satori_decks import build_satori_cloze_sentence, should_skip_copula_cloze
 from wk_decks import (
     COMMON_CSS,
     DECK_IDS,
@@ -116,6 +116,7 @@ SHADOWING_CANDIDATE_FIELD_NAMES: Tuple[str, ...] = (
     "ClozeSentence",
     "Sentence",
     "SentenceAudio",
+    "Audio",
     "Glossary",
     "UserNotes",
     "SourceUrl",
@@ -145,6 +146,12 @@ SHADOWING_BACK = """
   {{^Furigana}}{{Expression}}{{#Reading}} <span class="reading answer">{{Reading}}</span>{{/Reading}}{{/Furigana}}
 </div>
 {{#WkMeaning}}<div class="meaning answer">{{WkMeaning}}</div>{{/WkMeaning}}
+{{#Audio}}
+<div class="audio-row surface-audio-row">
+  <div class="audio-label meta">Target</div>
+  <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
+</div>
+{{/Audio}}
 {{#Sentence}}
 <div class="context">
   {{#SentenceAudio}}
@@ -170,6 +177,17 @@ SHADOWING_BACK = """
 {{#SourceTitle}}<div class="source">{{SourceTitle}}</div>{{/SourceTitle}}
 {{#SourceUrl}}<div class="source"><a href="{{SourceUrl}}">{{SourceUrl}}</a></div>{{/SourceUrl}}
 <div class="meta">{{Meta}}</div>
+<script>
+(function () {
+  document.querySelectorAll("audio.surface-audio-manual").forEach(function (audio) {
+    var src = (audio.getAttribute("src") || "").trim();
+    var match = src.match(/\\[sound:([^\\]]+)\\]/);
+    if (match) {
+      audio.setAttribute("src", match[1]);
+    }
+  });
+})();
+</script>
 """
 
 SHADOWING_CANDIDATE_FRONT = """
@@ -186,6 +204,12 @@ SHADOWING_CANDIDATE_BACK = """
 <div class="answer-word jp">
   {{Expression}}{{#Reading}} <span class="reading answer">{{Reading}}</span>{{/Reading}}
 </div>
+{{#Audio}}
+<div class="audio-row surface-audio-row">
+  <div class="audio-label meta">Target</div>
+  <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
+</div>
+{{/Audio}}
 {{#Sentence}}
 <div class="context">
   {{#SentenceAudio}}
@@ -203,6 +227,17 @@ SHADOWING_CANDIDATE_BACK = """
 {{/Glossary}}
 {{#SourceTitle}}<div class="source">{{SourceTitle}}</div>{{/SourceTitle}}
 <div class="meta">{{Meta}}</div>
+<script>
+(function () {
+  document.querySelectorAll("audio.surface-audio-manual").forEach(function (audio) {
+    var src = (audio.getAttribute("src") || "").trim();
+    var match = src.match(/\\[sound:([^\\]]+)\\]/);
+    if (match) {
+      audio.setAttribute("src", match[1]);
+    }
+  });
+})();
+</script>
 """
 
 SHADOWING_CSS = """
@@ -222,6 +257,12 @@ SHADOWING_CSS = """
   padding: 0 2px;
   font-weight: 600;
 }
+.cloze-inflection {
+  color: #ce93d8;
+  border-bottom: 2px dashed #ce93d8;
+  padding: 0 1px;
+  font-weight: 500;
+}
 .hint-block { margin: 12px auto; max-width: 640px; font-size: 20px; line-height: 1.5; }
 .hint-meaning { color: #c8e6c9; margin-bottom: 6px; }
 .type-prompt { margin: 18px auto; max-width: 520px; font-size: 28px; }
@@ -231,6 +272,16 @@ SHADOWING_CSS = """
 .context-furigana { line-height: 2.1; }
 .context-furigana ruby rt { font-size: 14px; color: #d8d8d8; }
 .sentence-audio { margin: 8px 0 12px; }
+.audio-row { margin: 6px 0; }
+.audio-label { font-size: 13px; margin-bottom: 2px; opacity: 0.85; }
+.surface-audio-row { margin: 10px auto; max-width: 520px; }
+.surface-audio-manual {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin: 2px 0 6px;
+  height: 32px;
+}
 .sentence-en { font-size: 18px; color: #c8e6c9; margin-top: 10px; }
 .word-def {
   text-align: left;
@@ -433,9 +484,10 @@ def shadowing_note_fields(
     wk_entry: Optional[dict],
     audio_filename: str,
     transcript_tag: str,
+    surface: str = "",
 ) -> List[str]:
     cloze_html, plain_sentence = build_satori_cloze_sentence(
-        sentence.japanese, expression, reading
+        sentence.japanese, expression, reading, surface=surface
     )
     enrichment = enrich_mining_note_fields(
         expression=expression,
@@ -518,7 +570,10 @@ def shadowing_candidate_note_fields(
     audio_filename: str,
 ) -> List[str]:
     cloze_html, plain_sentence = build_satori_cloze_sentence(
-        sentence.japanese, candidate.lemma, candidate.reading
+        sentence.japanese,
+        candidate.lemma,
+        candidate.reading,
+        surface=candidate.surface,
     )
     sound = f"[sound:{audio_filename}]" if audio_filename else ""
     duplicate_key = f"{source.source_id}|{sentence.sentence_id}|{candidate.lemma}"
@@ -534,6 +589,7 @@ def shadowing_candidate_note_fields(
         "ClozeSentence": cloze_html or html.escape(plain_sentence or sentence.japanese),
         "Sentence": plain_sentence or sentence.japanese,
         "SentenceAudio": sound,
+        "Audio": "",
         "Glossary": f"POS: {candidate.pos}" if candidate.pos else "non-WK candidate",
         "UserNotes": sentence.notes,
         "SourceUrl": source.url,
@@ -543,7 +599,7 @@ def shadowing_candidate_note_fields(
     fields: List[str] = []
     for name in SHADOWING_CANDIDATE_FIELD_NAMES:
         value = values[name]
-        if name in {"ClozeSentence", "SentenceAudio"}:
+        if name in {"ClozeSentence", "SentenceAudio", "Audio"}:
             fields.append(value)
         else:
             fields.append(html.escape(value))
@@ -609,6 +665,13 @@ def build_shadowing_decks(
         matched_expr = {match.expression for match in matches}
 
         for match in matches:
+            if should_skip_copula_cloze(
+                match.expression,
+                match.reading,
+                sentence.japanese,
+                surface=match.surface,
+            ):
+                continue
             guid = stable_guid(
                 SHADOWING_KIND,
                 project.source.source_id,
@@ -625,6 +688,7 @@ def build_shadowing_decks(
                     wk_entry=match.wk_entry,
                     audio_filename=audio_name,
                     transcript_tag=sentence.transcript_status,
+                    surface=match.surface,
                 ),
                 tags=_trust_tags(sentence),
                 guid=guid,

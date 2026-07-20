@@ -1,8 +1,9 @@
 """
-WK Immersion — synthesize full-sentence audio for Yomitan / Migaku / Satori notes.
+WK Immersion — synthesize sentence + surface-span audio for immersion notes.
 
-Fills SentenceAudio (normal speed) and SentenceAudioEasy (slower VOICEVOX speed).
-Audio is cached under .wk_cache/immersion_sentence_audio/ (skip VOICEVOX on cache hit).
+Fills SentenceAudio (normal) and SentenceAudioEasy (slower). For Satori/Shadowing
+notes, also fills Audio with Voicevox of the cloze surface span (Target button).
+Audio is cached under .wk_cache/immersion_sentence_audio/.
 Pass --force to regenerate cache and overwrite note fields.
 
 Usage (Anki must be running; VOICEVOX engine recommended):
@@ -11,6 +12,7 @@ Usage (Anki must be running; VOICEVOX engine recommended):
   python3 scripts/synthesize_immersion_sentence_audio.py --note-id 1234567890
   python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion"
   python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion" --force
+  python3 scripts/synthesize_immersion_sentence_audio.py --surface-only --note-type "WK Satori Immersion"
 
 Requires AnkiConnect (default http://127.0.0.1:8765) or use the in-Anki menu instead:
 Tools → WK Synthesize Immersion Sentence Audio
@@ -55,10 +57,16 @@ FIELD_SENTENCE = _logic.FIELD_SENTENCE
 FIELD_SENTENCE_FURIGANA = _logic.FIELD_SENTENCE_FURIGANA
 FIELD_SENTENCE_AUDIO = _logic.FIELD_SENTENCE_AUDIO
 FIELD_SENTENCE_AUDIO_EASY = _logic.FIELD_SENTENCE_AUDIO_EASY
+FIELD_AUDIO = _logic.FIELD_AUDIO
+FIELD_EXPRESSION = _logic.FIELD_EXPRESSION
+FIELD_READING = _logic.FIELD_READING
 MINING_NOTE_TYPES = _note_types.MINING_NOTE_TYPES
 SATORI_NOTE_TYPE = _note_types.SATORI_NOTE_TYPE
+SHADOWING_NOTE_TYPE = _note_types.SHADOWING_NOTE_TYPE
+SHADOWING_CANDIDATE_NOTE_TYPE = _note_types.SHADOWING_CANDIDATE_NOTE_TYPE
 ImmersionTtsConfig = _logic.ImmersionTtsConfig
 audio_field_value = _logic.audio_field_value
+sentence_audio_already_set = _logic.sentence_audio_already_set
 sentence_audio_autoplay = _logic.sentence_audio_autoplay
 sentence_audio_fields_needing_synth = _logic.sentence_audio_fields_needing_synth
 sentence_media_basename = _logic.sentence_media_basename
@@ -66,6 +74,25 @@ sentence_text_for_tts = _logic.sentence_text_for_tts
 should_synthesize_note = _logic.should_synthesize_note
 synthesize_sentence_audio = _logic.synthesize_sentence_audio
 unwrap_sound_tag = _logic.unwrap_sound_tag
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+# satori_decks imports mining_logic from wk_immersion — keep that ahead of repo root.
+_immersion_dir = str(REPO_ROOT / "anki_addon" / "wk_immersion")
+if _immersion_dir in sys.path:
+    sys.path.remove(_immersion_dir)
+sys.path.insert(0, _immersion_dir)
+# Drop a stale top-level mining_logic if tests/other loaders registered it.
+sys.modules.pop("mining_logic", None)
+from satori_decks import surface_span_text  # noqa: E402
+
+SURFACE_AUDIO_NOTE_TYPES = frozenset(
+    {
+        SATORI_NOTE_TYPE,
+        SHADOWING_NOTE_TYPE,
+        SHADOWING_CANDIDATE_NOTE_TYPE,
+    }
+)
 
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
 
@@ -208,7 +235,12 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace existing SentenceAudio / SentenceAudioEasy and regenerate disk cache",
+        help="Replace existing SentenceAudio / SentenceAudioEasy / Audio and regenerate disk cache",
+    )
+    parser.add_argument(
+        "--surface-only",
+        action="store_true",
+        help="Only fill the Target (surface-span) Audio field on Satori/Shadowing notes",
     )
     args = parser.parse_args()
 
@@ -229,91 +261,130 @@ def main() -> None:
             "Or use Tools → WK Synthesize Immersion Sentence Audio inside Anki."
         ) from exc
 
-    required = [FIELD_SENTENCE, FIELD_SENTENCE_AUDIO]
-    missing = [name for name in required if name not in field_names]
-    if missing:
-        raise SystemExit(
-            f"Note type {check_type!r} is missing field(s): {', '.join(missing)}.\n"
-            "For Satori: re-run scripts/import_satori.py and import with Update.\n"
-            "For Yomitan: python3 wk_decks.py --deck mining → import → Update."
-        )
+    if not args.surface_only:
+        required = [FIELD_SENTENCE, FIELD_SENTENCE_AUDIO]
+        missing = [name for name in required if name not in field_names]
+        if missing:
+            raise SystemExit(
+                f"Note type {check_type!r} is missing field(s): {', '.join(missing)}.\n"
+                "For Satori: re-run scripts/import_satori.py and import with Update.\n"
+                "For Yomitan: python3 wk_decks.py --deck mining → import → Update."
+            )
     has_easy = FIELD_SENTENCE_AUDIO_EASY in field_names
+    has_audio = FIELD_AUDIO in field_names
 
     note_ids = find_immersion_note_ids(args.anki_connect, args.note_id, note_types)
     ok = failed = skipped = 0
+    surface_ok = surface_failed = surface_skipped = 0
 
     for nid in note_ids:
         info = anki_request(args.anki_connect, "notesInfo", notes=[nid])[0]
         fields = info.get("fields") or {}
         model_name = info.get("modelName") or check_type
-        sentence = (fields.get(FIELD_SENTENCE) or {}).get("value") or ""
-        sentence_furigana = (fields.get(FIELD_SENTENCE_FURIGANA) or {}).get("value") or ""
-        sentence_audio = (fields.get(FIELD_SENTENCE_AUDIO) or {}).get("value") or ""
-        sentence_audio_easy = (
-            (fields.get(FIELD_SENTENCE_AUDIO_EASY) or {}).get("value") or "" if has_easy else "[sound:skip]"
-        )
-        sentence_audio = unwrap_satori_normal_if_needed(
-            base_url=args.anki_connect,
-            note_id=nid,
-            note_type_name=model_name,
-            sentence_audio=sentence_audio,
-        )
-        if not args.force and not should_synthesize_note(
-            note_type_name=model_name,
-            sentence=sentence,
-            sentence_furigana=sentence_furigana,
-            sentence_audio=sentence_audio,
-            sentence_audio_easy=sentence_audio_easy if has_easy else "",
-            config=config,
-            on_mine=True,
-        ):
-            skipped += 1
-            continue
-        tts_text = sentence_text_for_tts(sentence, sentence_furigana)
-        if not tts_text:
-            skipped += 1
-            continue
 
-        needed = sentence_audio_fields_needing_synth(
-            sentence_audio=sentence_audio,
-            sentence_audio_easy=sentence_audio_easy if has_easy else "[sound:skip]",
-            force=args.force,
-        )
-        if not has_easy:
-            needed = tuple(name for name in needed if name != FIELD_SENTENCE_AUDIO_EASY)
-        if not needed:
-            skipped += 1
-            continue
+        def value(name: str) -> str:
+            return (fields.get(name) or {}).get("value") or ""
 
-        note_ok = False
-        note_failed = False
-        for field_name in needed:
-            speed = (
-                config.voicevox_easy_speed_scale
-                if field_name == FIELD_SENTENCE_AUDIO_EASY
-                else config.voicevox_speed_scale
-            )
-            if store_field_audio(
+        sentence = value(FIELD_SENTENCE)
+        sentence_furigana = value(FIELD_SENTENCE_FURIGANA)
+        sentence_audio = value(FIELD_SENTENCE_AUDIO)
+        sentence_audio_easy = value(FIELD_SENTENCE_AUDIO_EASY) if has_easy else "[sound:skip]"
+        word_audio = value(FIELD_AUDIO) if has_audio else ""
+        expression = value(FIELD_EXPRESSION)
+        reading = value(FIELD_READING)
+
+        did_sentence = False
+        if not args.surface_only:
+            sentence_audio = unwrap_satori_normal_if_needed(
                 base_url=args.anki_connect,
                 note_id=nid,
                 note_type_name=model_name,
-                field_name=field_name,
-                tts_text=tts_text,
+                sentence_audio=sentence_audio,
+            )
+            if args.force or should_synthesize_note(
+                note_type_name=model_name,
+                sentence=sentence,
+                sentence_furigana=sentence_furigana,
+                sentence_audio=sentence_audio,
+                sentence_audio_easy=sentence_audio_easy if has_easy else "",
                 config=config,
-                speed_scale=speed,
+                on_mine=True,
+            ):
+                tts_text = sentence_text_for_tts(sentence, sentence_furigana)
+                if tts_text:
+                    needed = sentence_audio_fields_needing_synth(
+                        sentence_audio=sentence_audio,
+                        sentence_audio_easy=sentence_audio_easy if has_easy else "[sound:skip]",
+                        force=args.force,
+                    )
+                    if not has_easy:
+                        needed = tuple(
+                            name for name in needed if name != FIELD_SENTENCE_AUDIO_EASY
+                        )
+                    note_ok = False
+                    note_failed = False
+                    for field_name in needed:
+                        speed = (
+                            config.voicevox_easy_speed_scale
+                            if field_name == FIELD_SENTENCE_AUDIO_EASY
+                            else config.voicevox_speed_scale
+                        )
+                        if store_field_audio(
+                            base_url=args.anki_connect,
+                            note_id=nid,
+                            note_type_name=model_name,
+                            field_name=field_name,
+                            tts_text=tts_text,
+                            config=config,
+                            speed_scale=speed,
+                            force=args.force,
+                        ):
+                            note_ok = True
+                        else:
+                            note_failed = True
+                    if note_ok:
+                        ok += 1
+                        did_sentence = True
+                    elif note_failed:
+                        failed += 1
+                    else:
+                        skipped += 1
+                else:
+                    skipped += 1
+            else:
+                skipped += 1
+
+        if (
+            has_audio
+            and model_name in SURFACE_AUDIO_NOTE_TYPES
+            and (args.force or args.surface_only or not sentence_audio_already_set(word_audio))
+        ):
+            surface = surface_span_text(sentence, expression, reading)
+            if not surface:
+                surface_skipped += 1
+            elif store_field_audio(
+                base_url=args.anki_connect,
+                note_id=nid,
+                note_type_name=model_name,
+                field_name=FIELD_AUDIO,
+                tts_text=surface,
+                config=config,
+                speed_scale=config.voicevox_speed_scale,
                 force=args.force,
             ):
-                note_ok = True
+                surface_ok += 1
             else:
-                note_failed = True
-        if note_ok:
-            ok += 1
-        elif note_failed:
-            failed += 1
-        else:
-            skipped += 1
+                surface_failed += 1
+        elif has_audio and model_name in SURFACE_AUDIO_NOTE_TYPES:
+            surface_skipped += 1
 
-    print(f"Done: {ok} synthesized, {failed} failed, {skipped} skipped.")
+        _ = did_sentence  # keep branch clarity for sentence counters above
+
+    print(f"Sentence audio: {ok} synthesized, {failed} failed, {skipped} skipped.")
+    print(
+        f"Target (surface) audio: {surface_ok} synthesized, "
+        f"{surface_failed} failed, {surface_skipped} skipped."
+    )
 
 
 if __name__ == "__main__":

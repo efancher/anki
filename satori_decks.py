@@ -3,7 +3,7 @@ satori_decks.py
 
 Immersion · Satori — sentence cloze cards from a Satori Reader CSV export.
 
-Front: cloze blank in Context1 + type Expression (kanji).
+Front: cloze mark on the full surface span in Context1 + type Reading (dictionary kana).
 Back: full sentence, reading, word English, sentence translation (always shown).
 """
 
@@ -46,6 +46,43 @@ from mining_logic import (  # noqa: E402
 
 # Kanji ranges (CJK unified + extension A + compatibility ideographs).
 _KANJI_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_KANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ffー]")
+# Trim these after a dictionary-form surface (okurigana matched).
+_TRAILING_PARTICLES: Tuple[str, ...] = (
+    "から",
+    "まで",
+    "より",
+    "ので",
+    "のに",
+    "では",
+    "にも",
+    "のは",
+    "への",
+    "とは",
+    "は",
+    "が",
+    "を",
+    "に",
+    "で",
+    "へ",
+    "と",
+    "も",
+    "や",
+    "か",
+    "の",
+    "ね",
+    "よ",
+    "な",
+    "わ",
+    "さ",
+    "ぞ",
+    "ぜ",
+)
+# After a conjugated surface, still drop clear particles — but never て/で,
+# which are also te-form endings (喜んで, 見て).
+_CONJUGATED_TRAILING_PARTICLES: Tuple[str, ...] = tuple(
+    particle for particle in _TRAILING_PARTICLES if particle not in {"て", "で", "では"}
+)
 
 
 def kanji_stem(text: str) -> str:
@@ -61,38 +98,295 @@ def kanji_stem(text: str) -> str:
     return text[indices[0] : indices[-1] + 1]
 
 
-def build_satori_cloze_sentence(
-    sentence: str, expression: str, reading: str
-) -> Tuple[str, str]:
-    """Satori front cloze. Returns (cloze_html, plain_sentence).
+def _is_kana(ch: str) -> bool:
+    return bool(_KANA_RE.match(ch))
 
-    - Target word contains kanji → highlight the kanji stem (learn readings in
-      context). Works for conjugated verbs/adjectives because kanji are invariant.
-    - Hiragana-only word → blank it with underscores.
+
+def _expression_parts(expression: str) -> Tuple[str, str, str]:
+    """Split expression into (kana_prefix, kanji_stem, okurigana)."""
+    expr = plain_mining_text(expression)
+    stem = kanji_stem(expr)
+    if not stem:
+        return "", "", expr
+    stem_at = expr.find(stem)
+    prefix = expr[:stem_at]
+    okurigana = expr[stem_at + len(stem) :]
+    return prefix, stem, okurigana
+
+
+def _trim_trailing_particles(
+    span: str,
+    *,
+    min_len: int,
+    particles: Sequence[str],
+) -> str:
+    """Drop trailing particles while keeping at least min_len characters."""
+    text = span
+    changed = True
+    while changed:
+        changed = False
+        for particle in particles:
+            if len(text) - len(particle) < min_len:
+                continue
+            if text.endswith(particle):
+                text = text[: -len(particle)]
+                changed = True
+                break
+    return text
+
+
+def expand_surface_span(
+    plain: str,
+    start: int,
+    end: int,
+    expression: str,
+) -> Tuple[int, int]:
+    """Grow a provisional span to the full surface form of expression in plain."""
+    prefix, stem, okurigana = _expression_parts(expression)
+    if stem and prefix:
+        if start >= len(prefix) and plain[start - len(prefix) : start] == prefix:
+            start -= len(prefix)
+    # Only inflecting words (those with okurigana) may grow through following kana.
+    # All-kanji nouns like 日本 must not swallow ではありません / particles.
+    if okurigana:
+        while end < len(plain) and _is_kana(plain[end]):
+            end += 1
+    span = plain[start:end]
+    core = prefix + stem
+    if stem and span.startswith(core) and okurigana and span[len(core) :].startswith(okurigana):
+        # Dictionary form is present — safe to strip a following particle.
+        min_len = len(core) + len(okurigana)
+        particles: Sequence[str] = _TRAILING_PARTICLES
+    elif stem and not okurigana:
+        # All-kanji (or kanji+prefix) noun — strip particles only; no kana growth.
+        min_len = len(core) if core else 1
+        particles = _TRAILING_PARTICLES
+    elif stem:
+        # Conjugated: keep te-form て/で; still drop は/が/を/…
+        min_len = len(core) if core else 1
+        particles = _CONJUGATED_TRAILING_PARTICLES
+    else:
+        min_len = len(plain_mining_text(expression)) or 1
+        particles = _TRAILING_PARTICLES
+    trimmed = _trim_trailing_particles(span, min_len=max(min_len, 1), particles=particles)
+    return start, start + len(trimmed)
+
+
+def split_surface_for_cloze(surface: str, expression: str) -> Tuple[str, str]:
+    """Split surface into (answer_core, inflection_suffix) for two-tone cloze.
+
+    Answer core is the lemma-aligned portion (kana prefix + kanji stem, plus
+    dictionary okurigana when present). Inflection is conjugated material such
+    as くて in 青くて or ました in やって来ました.
+    """
+    surface = plain_mining_text(surface)
+    if not surface:
+        return "", ""
+    prefix, stem, okurigana = _expression_parts(expression)
+    if not stem:
+        return surface, ""
+    core = prefix + stem
+    if surface.startswith(core):
+        rest = surface[len(core) :]
+        if okurigana and rest.startswith(okurigana):
+            return core + okurigana, rest[len(okurigana) :]
+        return core, rest
+    stem_at = surface.find(stem)
+    if stem_at < 0:
+        return surface, ""
+    return surface[: stem_at + len(stem)], surface[stem_at + len(stem) :]
+
+
+def format_cloze_surface_html(surface: str, expression: str) -> str:
+    """HTML for a kanji-bearing surface: core target + optional inflection tint."""
+    core, inflection = split_surface_for_cloze(surface, expression)
+    if not core:
+        return f'<span class="cloze-target">{html.escape(surface)}</span>'
+    marked = f'<span class="cloze-target">{html.escape(core)}</span>'
+    if inflection:
+        marked += f'<span class="cloze-inflection">{html.escape(inflection)}</span>'
+    return marked
+
+
+# Transparent sentence forms only — not ありません/ない-based negatives
+# (those are morphologically ある/ない, even when they negate です).
+_EXPRESSION_SURFACE_VARIANTS: Dict[str, Tuple[str, ...]] = {
+    "です": (
+        "でした",
+        "でしょう",
+        "です",
+        "だった",
+        "だろ",
+        "だ",
+    ),
+    "だ": (
+        "だった",
+        "だろ",
+        "だ",
+        "でした",
+        "でしょう",
+        "です",
+    ),
+    "である": (
+        "であった",
+        "である",
+        "です",
+        "でした",
+        "だ",
+        "だった",
+    ),
+}
+
+
+_OPAQUE_COPULA_LEMMAS = frozenset({"です", "だ", "である"})
+
+
+def should_skip_copula_cloze(
+    expression: str,
+    reading: str,
+    sentence: str,
+    *,
+    surface: str = "",
+) -> bool:
+    """Skip です/だ/である unless the sentence has an obvious form (です/でした/…).
+
+    Opaque negatives like ではありません are ある-based and are not useful clozes.
+    """
+    expr = plain_mining_text(expression)
+    if expr not in _OPAQUE_COPULA_LEMMAS:
+        return False
+    return (
+        resolve_surface_span(sentence, expression, reading, surface=surface) is None
+    )
+
+
+def surface_variants_for_expression(expression: str, reading: str = "") -> List[str]:
+    """Candidate surface strings for expression, longest conjugations first."""
+    expr = plain_mining_text(expression)
+    read = plain_mining_text(reading)
+    preferred: List[str] = []
+    seen = set()
+    for key in (expr, read):
+        for item in _EXPRESSION_SURFACE_VARIANTS.get(key, ()):
+            if item and item not in seen:
+                seen.add(item)
+                preferred.append(item)
+    for item in blank_targets_for_expression(expression, reading):
+        clean = plain_mining_text(item)
+        if clean and clean not in seen:
+            seen.add(clean)
+            preferred.append(clean)
+    return preferred
+
+
+def resolve_surface_span(
+    sentence: str,
+    expression: str,
+    reading: str = "",
+    *,
+    surface: str = "",
+) -> Optional[Tuple[int, int, str]]:
+    """Locate the target word span in sentence.
+
+    Returns (start, end, plain_sentence) or None when no span can be found.
+    Prefers an exact expression hit, then an optional morphology surface, then a
+    kanji-stem anchor expanded to the full surface form (including conjugation).
     """
     plain = plain_mining_text(sentence)
     if not plain:
-        return "", ""
-    stem = kanji_stem(plain_mining_text(expression))
+        return None
+    expr = plain_mining_text(expression)
+
+    def _finish(start: int, end: int) -> Tuple[int, int, str]:
+        start, end = expand_surface_span(plain, start, end, expr or expression)
+        return start, end, plain
+
+    if expr:
+        idx = plain.find(expr)
+        if idx >= 0:
+            return _finish(idx, idx + len(expr))
+
+    surf = plain_mining_text(surface)
+    if surf:
+        idx = plain.find(surf)
+        if idx >= 0:
+            return _finish(idx, idx + len(surf))
+
+    _prefix, stem, _okuri = _expression_parts(expr)
     if stem:
         idx = plain.find(stem)
         if idx >= 0:
-            before = html.escape(plain[:idx])
-            target = html.escape(stem)
-            after = html.escape(plain[idx + len(stem) :])
-            highlight = f'<span class="cloze-target">{target}</span>'
-            return f"{before}{highlight}{after}", plain
-    for target in blank_targets_for_expression(expression, reading):
+            return _finish(idx, idx + len(stem))
+
+    for target in surface_variants_for_expression(expression, reading):
         clean = plain_mining_text(target)
         if not clean:
             continue
         idx = plain.find(clean)
-        if idx >= 0:
-            before = html.escape(plain[:idx])
-            after = html.escape(plain[idx + len(clean) :])
-            blank = f'<span class="cloze-blank">{CLOZE_BLANK_DISPLAY}</span>'
-            return f"{before}{blank}{after}", plain
-    return html.escape(plain), plain
+        if idx < 0:
+            continue
+        # Known conjugations are already the full surface — do not re-expand
+        # via dictionary okurigana heuristics (です must not grow through kana).
+        variant_keys = {expr, plain_mining_text(reading)}
+        is_known_variant = any(
+            clean in _EXPRESSION_SURFACE_VARIANTS.get(key, ()) for key in variant_keys if key
+        )
+        if is_known_variant:
+            return idx, idx + len(clean), plain
+        if clean == expr:
+            return _finish(idx, idx + len(clean))
+        return _finish(idx, idx + len(clean))
+    return None
+
+
+def surface_span_text(
+    sentence: str,
+    expression: str,
+    reading: str = "",
+    *,
+    surface: str = "",
+) -> str:
+    """Plain surface form of the target word in the sentence (for TTS / Audio)."""
+    resolved = resolve_surface_span(
+        sentence, expression, reading, surface=surface
+    )
+    if resolved is None:
+        return ""
+    start, end, plain = resolved
+    return plain[start:end]
+
+
+def build_satori_cloze_sentence(
+    sentence: str,
+    expression: str,
+    reading: str,
+    *,
+    surface: str = "",
+) -> Tuple[str, str]:
+    """Immersion front cloze. Returns (cloze_html, plain_sentence).
+
+    Marks the **whole surface span** of the target word in the sentence (including
+    conjugation / okurigana). Type-in remains the dictionary ``Reading``.
+
+    Kanji targets use two tones: ``cloze-target`` for the lemma core (what the
+    reading answers) and ``cloze-inflection`` for conjugated endings.
+    Hiragana-only targets are blanked.
+    """
+    resolved = resolve_surface_span(
+        sentence, expression, reading, surface=surface
+    )
+    if resolved is None:
+        plain = plain_mining_text(sentence)
+        return (html.escape(plain) if plain else ""), plain
+    start, end, plain = resolved
+    before = html.escape(plain[:start])
+    surface_text = plain[start:end]
+    after = html.escape(plain[end:])
+    if kanji_stem(plain_mining_text(expression)) or kanji_stem(surface_text):
+        marked = format_cloze_surface_html(surface_text, expression)
+    else:
+        marked = f'<span class="cloze-blank">{CLOZE_BLANK_DISPLAY}</span>'
+    return f"{before}{marked}{after}", plain
 
 SATORI_KIND = "satori-mining"
 SATORI_TAG = "satori-mining"
@@ -149,6 +443,10 @@ SATORI_FRONT = """
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
   <div class="hint-block">
     {{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}
+    {{^WkMeaning}}
+      {{#HintGlossary}}<div class="hint-meaning">{{HintGlossary}}</div>{{/HintGlossary}}
+      {{^HintGlossary}}{{{DictLinksEn}}}{{/HintGlossary}}
+    {{/WkMeaning}}
   </div>
   <div class="type-prompt">{{type:Reading}}</div>
 </div>
@@ -164,6 +462,12 @@ SATORI_BACK = """
   {{^Furigana}}{{Expression}}{{#Reading}} <span class="reading answer">{{Reading}}</span>{{/Reading}}{{/Furigana}}
 </div>
 {{#WkMeaning}}<div class="meaning answer">{{WkMeaning}}</div>{{/WkMeaning}}
+{{#Audio}}
+<div class="audio-row surface-audio-row">
+  <div class="audio-label meta">Target</div>
+  <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
+</div>
+{{/Audio}}
 {{#Sentence}}
 <div class="context">
   <div class="sentence-audio-block">
@@ -209,7 +513,7 @@ SATORI_BACK = """
 <div class="meta">{{Meta}}</div>
 <script>
 (function () {
-  document.querySelectorAll("audio.sentence-audio-manual").forEach(function (audio) {
+  document.querySelectorAll("audio.sentence-audio-manual, audio.surface-audio-manual").forEach(function (audio) {
     var src = (audio.getAttribute("src") || "").trim();
     var match = src.match(/\\[sound:([^\\]]+)\\]/);
     if (match) {
@@ -237,6 +541,12 @@ SATORI_CSS = """
   padding: 0 2px;
   font-weight: 600;
 }
+.cloze-inflection {
+  color: #ce93d8;
+  border-bottom: 2px dashed #ce93d8;
+  padding: 0 1px;
+  font-weight: 500;
+}
 .hint-block { margin: 12px auto; max-width: 640px; font-size: 20px; line-height: 1.5; }
 .hint-meaning { color: #c8e6c9; margin-bottom: 6px; }
 .type-prompt { margin: 18px auto; max-width: 520px; font-size: 28px; }
@@ -248,8 +558,10 @@ SATORI_CSS = """
 .sentence-audio-block { margin: 8px 0 12px; }
 .audio-row { margin: 6px 0; }
 .audio-label { font-size: 13px; margin-bottom: 2px; }
+.surface-audio-row { margin: 10px auto; max-width: 520px; }
 .sentence-audio, .sentence-tts { margin: 2px 0 6px; }
-.sentence-audio-manual {
+.sentence-audio-manual,
+.surface-audio-manual {
   display: block;
   width: 100%;
   max-width: 420px;
@@ -285,6 +597,42 @@ class SatoriCard:
     sentence_furigana: str
     sentence_translation: str
     user_notes: str
+
+
+# Satori often leaves the English column blank for conjunctions / story vocab
+# that aren't in the WK mining index. Without a word gloss, kana-blank fronts
+# become pure memorization — keep short production hints here.
+SATORI_FALLBACK_MEANINGS: Dict[str, str] = {
+    "そして": "and; and then",
+    "しかし": "but; however",
+    "それで": "and so; therefore",
+    "それから": "and then; after that",
+    "だから": "so; therefore",
+    "でも": "but; however",
+    "木々": "trees",
+    "小鳥": "little bird",
+    "とっても": "very; extremely",
+    "親鳥": "parent bird",
+    "ある日": "one day",
+    "飛び出す": "to jump out; to fly out",
+    "怖がり": "coward; timid person",
+}
+
+
+def resolve_satori_word_meaning(
+    expression: str,
+    *,
+    csv_english: str = "",
+    wk_entry: Optional[dict] = None,
+) -> str:
+    """Prefer WK meaning, then CSV English, then curated fallbacks."""
+    wk_meaning = str((wk_entry or {}).get("meaning") or "").strip()
+    if wk_meaning:
+        return wk_meaning
+    csv_meaning = (csv_english or "").strip()
+    if csv_meaning:
+        return csv_meaning
+    return SATORI_FALLBACK_MEANINGS.get((expression or "").strip(), "").strip()
 
 
 def make_satori_model() -> WkModel:
@@ -363,13 +711,19 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
     )
     # Always keep Satori English visible (word + sentence), independent of hint stage.
     # Kana stays on the back only (via {{furigana:…}} / Reading) — never as a front hint.
-    wk_meaning = enrichment.wk_meaning or card.english
+    wk_meaning = resolve_satori_word_meaning(
+        card.expression,
+        csv_english=card.english,
+        wk_entry=wk_entry,
+    )
     translation = card.sentence_translation
     glossary = card.parts_of_speech
     duplicate_key = f"{card.card_id}|{enrichment.expression}|{enrichment.sentence}"
     meta = f"Satori · {card.card_type} · template {SATORI_TEMPLATE_VERSION}"
     expression_furigana = (card.expression_furigana or "").strip()
     sentence_furigana = (card.sentence_furigana or "").strip()
+    # Hide the Jisho chip when a word gloss is already on the front.
+    dict_links_en = "" if wk_meaning else enrichment.dict_links_en
     raw_html_fields = {
         "ClozeSentence",
         "DictLinksJa",
@@ -394,7 +748,7 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         "WkSubjectId": enrichment.wk_subject_id,
         "PrerequisiteIds": enrichment.prerequisite_ids,
         "WkMeaning": wk_meaning,
-        "HintGlossary": enrichment.hint_glossary,
+        "HintGlossary": enrichment.hint_glossary if not wk_meaning else "",
         "HintStage": "0",
         # Satori always shows English on the front; unlock must not clear these.
         "ShowEnglish": "1",
@@ -402,7 +756,7 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         "ShowJjBack": "",
         "SentenceKana": enrichment.sentence_kana,
         "DictLinksJa": enrichment.dict_links_ja,
-        "DictLinksEn": enrichment.dict_links_en,
+        "DictLinksEn": dict_links_en,
         "Sentence": enrichment.sentence,
         "SentenceFurigana": sentence_furigana,
         "Audio": "",
@@ -434,8 +788,12 @@ def build_satori_deck(
     deck = genanki.Deck(SATORI_DECK_ID, SATORI_DECK_NAME)
     model = make_satori_model()
     by_expression = (wk_index or {}).get("by_expression") or {}
+    skipped_copula = 0
 
     for card in cards:
+        if should_skip_copula_cloze(card.expression, card.reading, card.sentence):
+            skipped_copula += 1
+            continue
         wk_entry = by_expression.get(card.expression)
         guid = stable_guid(SATORI_KIND, card.card_id)
         note = genanki.Note(
@@ -445,6 +803,13 @@ def build_satori_deck(
             guid=guid,
         )
         deck.add_note(note)
+
+    if skipped_copula:
+        print(
+            f"Skipped {skipped_copula} opaque です/だ/である card(s) "
+            "(no obvious form in sentence).",
+            file=sys.stderr,
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out = output_dir / SATORI_EXPORT_FILENAME

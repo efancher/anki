@@ -9,15 +9,15 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 **Done — meaning-anchor curriculum.** WK study lives in Anki + FSRS via:
 
 - **Kanji Meaning Anchor** — primary kanji path (kanji → English); no import lock
-- **Core · Radicals** — still generated; dual meaning/reading Core · Kanji / Vocabulary retired from default
+- **Core · Radicals / Kanji / Vocabulary** — generated with reading audio on (`reading_audio: true`); kanji readings use Voicevox when available
 - `wk_unlock` **add-on** — conjugations / verb·adj types unlock when kanji components are Guru+ in the meaning anchor; phonetic families unlock on reviewed-once
 - `no_wk_progress_filter` — import full supplementary catalog; gate with `wk-locked` in Anki
 - **Immersion** — Yomitan mining + Satori Reader CSV (`scripts/import_satori.py`) + Shadowing projects (`scripts/import_shadowing.py`)
-- **TTS off by default** — `reading_audio: false`, grammar `sentence_audio: false`
+- **TTS on for core readings** — `reading_audio: true` (vocab = WK native clips; kanji = Voicevox when the engine is running, else edge-tts)
 
 Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.md). Yomitan: [docs/yomitan_mining.md](docs/yomitan_mining.md). Satori: [docs/satori_mining.md](docs/satori_mining.md). Shadowing: [docs/shadowing_mining.md](docs/shadowing_mining.md).
 
-**Off by default** (suspended / not in `generate_decks`): Core · Kanji, Core · Vocabulary, vocab-cloze, vocab-sentence, dictation, leeches.
+**Off by default** (suspended / not in `generate_decks`): vocab-cloze, vocab-sentence, dictation, leeches.
 
 **Not done yet:** grammar gated by kanji maturity; YouTube immersion ([planned doc](docs/wk_immersion_youtube_design.md)).
 
@@ -252,7 +252,7 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 | `no_wk_progress_filter`      | `true`             | Full supplementary import + Anki gating                    |
 | `fetch_wk_review_statistics` | `false`            | Skip WK review_statistics API (leech decks only)           |
 | `core.bootstrap_scheduling`  | `false`            | **Off by default.** Set `true` once for WK interval import |
-| `core.reading_audio`         | `true`             | Vocab WK audio + kanji TTS                                 |
+| `core.reading_audio`         | `true`             | Vocab WK audio + kanji Voicevox/edge TTS                                 |
 | `grammar.max_jlpt`           | `N5`               | Include Hanabira points through this JLPT level            |
 | `grammar.max_unknown_kanji`  | `5`                | Skip example sentences with too many unknown WK kanji      |
 
@@ -288,7 +288,7 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 | Grammar Context                                                          | JLPT cap only at generate time; sentence TTS off                               |
 | Immersion · Yomitan / Immersion · Satori / Immersion · Shadowing | Cloze production; Yomitan progressive hints via unlock; Satori/Shadowing English always on |
 
-Off by default (not in `generate_decks`): vocab-cloze, vocab-sentence, dictation, core-kanji, core-vocabulary, leeches. TTS/`reading_audio` false.
+Off by default (not in `generate_decks`): vocab-cloze, vocab-sentence, dictation, leeches. Core reading audio is on (`reading_audio: true`).
 
 
 Optional individual decks: leeches, verb pairs, confusables, etc. — `python wk_decks.py --deck leeches`
@@ -324,7 +324,7 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Shadowing immersion:** Import a shadowmine project with `python3 scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID` → `out/wk_shadowing.apkg` + `out/wk_shadowing_candidates.apkg`. One cloze per matched WK vocab word (native clip audio); curated non-WK candidates in a separate deck. Setup: [docs/shadowing_mining.md](docs/shadowing_mining.md).
 
-**Off by default:** vocab-cloze, vocab-sentence, dictation, core-kanji/vocabulary, leeches (opt-in `--deck …`). TTS/`reading_audio` false in config.
+**Off by default:** vocab-cloze, vocab-sentence, dictation, leeches (opt-in `--deck …`). Core `reading_audio` is on (WK vocab clips + Voicevox/edge for kanji).
 
 **Rendaku:** Two-kanji WK compounds where the second morpheme voices (e.g. やま + かわ → やま**が**わ). Card shows morpheme hint → type full reading. Study from **WaniKani Rendaku**. Default min SRS Master+ (`--rendaku-min-srs 7`).
 

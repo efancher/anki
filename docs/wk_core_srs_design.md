@@ -120,7 +120,7 @@ Current generator uses flat deck names (`WaniKani Current and Next Radicals`, et
 | `WkSubjectId` | WK subject id |
 | `PrerequisiteIds` | Comma-separated WK ids from `component_subject_ids` |
 
-**Core item (`WK Core Item` v5):** single **Review** template — recall meaning mentally, `{{type:Reading}}` on front (no audio); meaning + reading + `ReadingAudio` + mnemonics on back.
+**Core item (`WK Core Item` v5):** single **Review** template — recall meaning mentally, `{{type:Reading}}` on front; meaning + reading + `ReadingAudio` + mnemonics on back (vocab = WK native clip; kanji = Voicevox when available).
 
 **Leech item model (`WK Update-Safe Item` v7):** Meaning / Reading / Pitch; optional `ReadingAudio` on **back only** when leech decks are built with `--reading-audio`.
 

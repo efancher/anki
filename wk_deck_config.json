@@ -42,7 +42,7 @@
     "sentence_audio": false
   },
   "sentence_tts": {
-    "engine": "edge",
+    "engine": "auto",
     "voicevox_engine_url": "http://127.0.0.1:50021",
     "voicevox_speaker_id": 2,
     "voicevox_volume_scale": 2.0,
@@ -53,9 +53,9 @@
     "bootstrap_scheduling": false,
     "import_all_subjects": true,
     "suspend_unstarted": true,
-    "reading_audio": false,
+    "reading_audio": true,
     "reading_voice": "Kyoko"
   },
-  "reading_audio": false,
+  "reading_audio": true,
   "reading_voice": "Kyoko"
 }
