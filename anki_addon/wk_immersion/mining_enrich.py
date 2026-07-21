@@ -78,6 +78,10 @@ def lookup_wk_vocab(expression: str, reading: str, index: dict) -> Optional[dict
     by_expression = index.get("by_expression") or {}
     if expr and expr in by_expression:
         return dict(by_expression[expr])
+    # Homophones (週間 vs 習慣) must not match via reading when expression is known
+    # but absent from WK — only fall back to reading when expression is empty.
+    if expr:
+        return None
     by_reading = index.get("by_reading") or {}
     if read and read in by_reading:
         for vocab_id in by_reading[read]:

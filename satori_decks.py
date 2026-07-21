@@ -794,6 +794,7 @@ SATORI_FALLBACK_MEANINGS: Dict[str, str] = {
     "ある日": "one day",
     "飛び出す": "to jump out; to fly out",
     "怖がり": "coward; timid person",
+    "週間": "week(s); ... weeks",
 }
 
 

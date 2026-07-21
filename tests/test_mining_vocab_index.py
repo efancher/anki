@@ -40,6 +40,28 @@ class MiningVocabIndexTests(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry["id"], 456)
 
+    def test_lookup_does_not_confuse_homophones(self) -> None:
+        """週間 is not in WK; must not resolve to 習慣 via shared reading しゅうかん."""
+        index = build_mining_vocab_index(
+            [
+                {
+                    "id": 4813,
+                    "object": "vocabulary",
+                    "data": {
+                        "characters": "習慣",
+                        "readings": [{"reading": "しゅうかん", "primary": True}],
+                        "meanings": [
+                            {"meaning": "Custom", "primary": True},
+                            {"meaning": "Habit", "primary": False},
+                        ],
+                        "component_subject_ids": [10, 11],
+                    },
+                }
+            ]
+        )
+        self.assertIsNone(lookup_wk_vocab("週間", "しゅうかん", index))
+        self.assertEqual(lookup_wk_vocab("習慣", "しゅうかん", index)["id"], 4813)
+
 
 if __name__ == "__main__":
     unittest.main()
