@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 ANKI_CARD_TYPE_NEW = 0
 ANKI_CARD_TYPE_LEARN = 1
@@ -33,17 +33,8 @@ SUBJECT_TAG_KANJI = "kanji"
 SUBJECT_TAG_VOCABULARY = "vocabulary"
 SUBJECT_TAG_RADICAL = "radical"
 
-JLPT_LEVELS: Tuple[str, ...] = ("N5", "N4", "N3", "N2", "N1")
-WK_LEVEL_JLPT_THRESHOLDS: Tuple[Tuple[int, str], ...] = (
-    (10, "N5"),
-    (20, "N4"),
-    (35, "N3"),
-    (45, "N2"),
-    (60, "N1"),
-)
-BURNED_INTERVAL_DAYS = 365  # WaniKani burned — mirrors wk_unlock.logic
-
-WK_BUCKET_NAMES: Tuple[str, ...] = ("unseen", "apprentice", "guru", "master", "locked")
+# Immersion decks that seed core subject progress tables.
+IMMERSION_TAGS: Tuple[str, ...] = ("satori-mining", "shadowing-mining")
 
 # Display order for non-core generated decks (matches wk_decks.py DECK_NAMES).
 SUPPLEMENTARY_DECK_ORDER: Tuple[str, ...] = (
@@ -120,20 +111,13 @@ class StandardDeckRow:
 
 
 @dataclass(frozen=True)
-class VocabLockedByLevelRow:
-    wk_level: int
-    locked_count: int
+class ImmersionCoreProgressRow:
+    """Core kanji/vocab linked from Satori/Shadowing immersion notes."""
 
-
-@dataclass(frozen=True)
-class JlptBucketRow:
-    jlpt: str
     subject_kind: str
-    unseen_count: int
-    apprentice_count: int
-    guru_count: int
-    master_count: int
     locked_count: int
+    unseen_count: int
+    reviewed_count: int
     total_notes: int
 
 
@@ -142,9 +126,8 @@ class DeckStatsReport:
     generated_at: str
     wk_rows: Tuple[WkDeckRow, ...]
     standard_rows: Tuple[StandardDeckRow, ...]
-    vocab_locked_by_wk_level: Tuple[VocabLockedByLevelRow, ...] = ()
-    jlpt_kanji_rows: Tuple[JlptBucketRow, ...] = ()
-    jlpt_vocab_rows: Tuple[JlptBucketRow, ...] = ()
+    immersion_kanji: Optional[ImmersionCoreProgressRow] = None
+    immersion_vocab: Optional[ImmersionCoreProgressRow] = None
 
 
 def is_active_card(card: CardRow) -> bool:
@@ -181,6 +164,16 @@ def classify_wk_note(note: NoteRow) -> str:
     if max_ivl >= GURU_MIN_INTERVAL_DAYS:
         return "guru"
     return "apprentice"
+
+
+def classify_immersion_core_note(note: NoteRow) -> str:
+    """Return one of: locked, unseen, reviewed."""
+    bucket = classify_wk_note(note)
+    if bucket == "locked":
+        return "locked"
+    if bucket == "unseen":
+        return "unseen"
+    return "reviewed"
 
 
 def parse_prerequisite_ids(value: Optional[str]) -> Tuple[int, ...]:
@@ -222,23 +215,6 @@ def field_flag_is_true(value: Optional[str]) -> bool:
     return str(value or "").strip() == "1"
 
 
-def wk_level_to_jlpt(level: int) -> str:
-    """Mirror of wk_study_priority.wk_level_to_jlpt."""
-    for threshold, jlpt in WK_LEVEL_JLPT_THRESHOLDS:
-        if level <= threshold:
-            return jlpt
-    return JLPT_LEVELS[-1]
-
-
-def note_wk_level(note: NoteRow) -> int:
-    if note.wk_level is not None:
-        return note.wk_level
-    from_tags = parse_wk_level_from_tags(note.tags)
-    if from_tags is not None:
-        return from_tags
-    return WK_LEVEL_JLPT_THRESHOLDS[-1][0]
-
-
 def note_subject_kind(note: NoteRow) -> Optional[str]:
     if note.is_vocabulary or note.deck_name == CORE_VOCABULARY_DECK:
         return SUBJECT_TAG_VOCABULARY
@@ -255,109 +231,49 @@ def note_subject_kind(note: NoteRow) -> Optional[str]:
     return None
 
 
-def card_meets_maturity(card: CardRow) -> bool:
-    if not is_active_card(card):
-        return False
-    if card.ivl >= BURNED_INTERVAL_DAYS:
-        return True
-    return card.ivl >= GURU_MIN_INTERVAL_DAYS
+def collect_immersion_subject_ids(immersion_notes: Sequence[NoteRow]) -> Set[int]:
+    """WkSubjectId + PrerequisiteIds from Satori/Shadowing immersion notes."""
+    subject_ids: Set[int] = set()
+    for note in immersion_notes:
+        if note.wk_subject_id is not None:
+            subject_ids.add(note.wk_subject_id)
+        subject_ids.update(note.prerequisite_ids)
+    return subject_ids
 
 
-def subject_is_mature(note: NoteRow) -> bool:
-    """Mature when every active card meets Guru I threshold (mirrors wk_unlock)."""
-    active = [card for card in note.cards if is_active_card(card)]
-    if not active:
-        return False
-    return all(card_meets_maturity(card) for card in active)
-
-
-def build_mature_subject_ids(notes: Sequence[NoteRow]) -> set[int]:
-    mature: set[int] = set()
-    for note in notes:
-        if note.wk_subject_id is None:
-            continue
-        if subject_is_mature(note):
-            mature.add(note.wk_subject_id)
-    return mature
-
-
-def prerequisites_met(
-    prerequisite_ids: Sequence[int],
-    mature_subject_ids: set[int],
-) -> bool:
-    if not prerequisite_ids:
-        return True
-    return all(prerequisite_id in mature_subject_ids for prerequisite_id in prerequisite_ids)
-
-
-def is_vocab_locked_by_kanji_prereq(
-    note: NoteRow,
-    *,
-    mature_subject_ids: set[int],
-) -> bool:
-    """Vocab locked because at least one kanji prerequisite is not yet mature."""
-    if note_subject_kind(note) != SUBJECT_TAG_VOCABULARY:
-        return False
-    if classify_wk_note(note) != "locked":
-        return False
-    if not note.prerequisite_ids:
-        return False
-    return not prerequisites_met(note.prerequisite_ids, mature_subject_ids)
-
-
-def build_vocab_locked_by_wk_level(
+def build_immersion_core_progress(
     notes: Sequence[NoteRow],
     *,
-    mature_subject_ids: set[int],
-) -> Tuple[VocabLockedByLevelRow, ...]:
-    counts: Dict[int, int] = {}
-    for note in notes:
-        if not is_vocab_locked_by_kanji_prereq(note, mature_subject_ids=mature_subject_ids):
-            continue
-        level = note_wk_level(note)
-        counts[level] = counts.get(level, 0) + 1
-    return tuple(
-        VocabLockedByLevelRow(wk_level=level, locked_count=counts[level])
-        for level in sorted(counts)
-    )
-
-
-def _empty_jlpt_counts() -> Dict[str, int]:
-    return {bucket: 0 for bucket in WK_BUCKET_NAMES}
-
-
-def build_jlpt_bucket_rows(
-    notes: Sequence[NoteRow],
-    *,
+    immersion_subject_ids: Set[int],
     subject_kind: str,
-) -> Tuple[JlptBucketRow, ...]:
-    grouped: Dict[str, Dict[str, int]] = {jlpt: _empty_jlpt_counts() for jlpt in JLPT_LEVELS}
+) -> Optional[ImmersionCoreProgressRow]:
+    if not immersion_subject_ids:
+        return None
+    locked_count = 0
+    unseen_count = 0
+    reviewed_count = 0
     for note in notes:
         if note_subject_kind(note) != subject_kind:
             continue
-        jlpt = wk_level_to_jlpt(note_wk_level(note))
-        bucket = classify_wk_note(note)
-        grouped[jlpt][bucket] += 1
-
-    rows: List[JlptBucketRow] = []
-    for jlpt in JLPT_LEVELS:
-        counts = grouped[jlpt]
-        total = sum(counts.values())
-        if total == 0:
+        if note.wk_subject_id is None or note.wk_subject_id not in immersion_subject_ids:
             continue
-        rows.append(
-            JlptBucketRow(
-                jlpt=jlpt,
-                subject_kind=subject_kind,
-                unseen_count=counts["unseen"],
-                apprentice_count=counts["apprentice"],
-                guru_count=counts["guru"],
-                master_count=counts["master"],
-                locked_count=counts["locked"],
-                total_notes=total,
-            )
-        )
-    return tuple(rows)
+        bucket = classify_immersion_core_note(note)
+        if bucket == "locked":
+            locked_count += 1
+        elif bucket == "unseen":
+            unseen_count += 1
+        else:
+            reviewed_count += 1
+    total = locked_count + unseen_count + reviewed_count
+    if total == 0:
+        return None
+    return ImmersionCoreProgressRow(
+        subject_kind=subject_kind,
+        locked_count=locked_count,
+        unseen_count=unseen_count,
+        reviewed_count=reviewed_count,
+        total_notes=total,
+    )
 
 
 def build_notes_by_deck(notes: Sequence[NoteRow]) -> Dict[str, List[NoteRow]]:
@@ -435,6 +351,7 @@ def build_deck_stats_report(
     *,
     cards: Sequence[CardRow],
     notes: Sequence[NoteRow],
+    immersion_subject_ids: Optional[Set[int]] = None,
     generated_at: Optional[str] = None,
 ) -> DeckStatsReport:
     cards_by_deck = build_cards_by_deck(cards)
@@ -455,23 +372,43 @@ def build_deck_stats_report(
             standard_rows.append(build_standard_deck_row(deck_name, deck_cards))
 
     timestamp = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    core_notes = [note for note in notes if note_subject_kind(note) is not None]
-    mature_subject_ids = build_mature_subject_ids(core_notes)
+    linked_ids = immersion_subject_ids or set()
     return DeckStatsReport(
         generated_at=timestamp,
         wk_rows=tuple(wk_rows),
         standard_rows=tuple(standard_rows),
-        vocab_locked_by_wk_level=build_vocab_locked_by_wk_level(
-            core_notes,
-            mature_subject_ids=mature_subject_ids,
+        immersion_kanji=build_immersion_core_progress(
+            notes,
+            immersion_subject_ids=linked_ids,
+            subject_kind=SUBJECT_TAG_KANJI,
         ),
-        jlpt_kanji_rows=build_jlpt_bucket_rows(core_notes, subject_kind=SUBJECT_TAG_KANJI),
-        jlpt_vocab_rows=build_jlpt_bucket_rows(core_notes, subject_kind=SUBJECT_TAG_VOCABULARY),
+        immersion_vocab=build_immersion_core_progress(
+            notes,
+            immersion_subject_ids=linked_ids,
+            subject_kind=SUBJECT_TAG_VOCABULARY,
+        ),
     )
 
 
 def _pad(value: int, width: int) -> str:
     return str(value).rjust(width)
+
+
+def _format_immersion_progress(title: str, row: ImmersionCoreProgressRow) -> List[str]:
+    lines = [
+        title,
+        "=" * 48,
+        f"{'Locked':>8} {'Unseen':>8} {'Reviewed':>10} {'Total':>8}",
+        "-" * 48,
+        (
+            f"{_pad(row.locked_count, 8)} "
+            f"{_pad(row.unseen_count, 8)} "
+            f"{_pad(row.reviewed_count, 10)} "
+            f"{_pad(row.total_notes, 8)}"
+        ),
+        "",
+    ]
+    return lines
 
 
 def format_deck_stats_report(report: DeckStatsReport) -> str:
@@ -524,48 +461,26 @@ def format_deck_stats_report(report: DeckStatsReport) -> str:
         )
         lines.append("")
 
-    if report.vocab_locked_by_wk_level:
+    if report.immersion_kanji or report.immersion_vocab:
         lines.append(
-            "Vocabulary locked by unmet kanji prerequisites (wk-locked/suspended, PrerequisiteIds not mature)"
+            "Immersion-linked core (Satori/Shadowing WkSubjectId + PrerequisiteIds — "
+            "Locked / Unseen / Reviewed ≥1)"
         )
-        lines.append("=" * 40)
-        lines.append(f"{'WK Level':>8} {'Locked':>8}")
-        lines.append("-" * 40)
-        total_locked = 0
-        for row in report.vocab_locked_by_wk_level:
-            lines.append(f"{_pad(row.wk_level, 8)} {_pad(row.locked_count, 8)}")
-            total_locked += row.locked_count
-        lines.append("-" * 40)
-        lines.append(f"{'Total':>8} {_pad(total_locked, 8)}")
         lines.append("")
-
-    if report.jlpt_kanji_rows or report.jlpt_vocab_rows:
-        lines.append("JLPT breakdown — kanji and vocabulary core (by WK level → JLPT band)")
-        lines.append("=" * 84)
-        for title, rows in (
-            ("Kanji", report.jlpt_kanji_rows),
-            ("Vocabulary", report.jlpt_vocab_rows),
-        ):
-            if not rows:
-                continue
-            lines.append(title)
-            header = (
-                f"{'JLPT':<5} {'Unseen':>6} {'Appr':>5} {'Guru':>6} "
-                f"{'Master':>7} {'Locked':>7} {'Total':>6}"
-            )
-            lines.append(header)
-            lines.append("-" * 84)
-            for row in rows:
-                lines.append(
-                    f"{row.jlpt:<5} "
-                    f"{_pad(row.unseen_count, 6)} "
-                    f"{_pad(row.apprentice_count, 5)} "
-                    f"{_pad(row.guru_count, 6)} "
-                    f"{_pad(row.master_count, 7)} "
-                    f"{_pad(row.locked_count, 7)} "
-                    f"{_pad(row.total_notes, 6)}"
+        if report.immersion_kanji:
+            lines.extend(
+                _format_immersion_progress(
+                    "WK Core Kanji (in Satori or Shadowing)",
+                    report.immersion_kanji,
                 )
-            lines.append("")
+            )
+        if report.immersion_vocab:
+            lines.extend(
+                _format_immersion_progress(
+                    "WK Core Vocabulary (in Satori or Shadowing)",
+                    report.immersion_vocab,
+                )
+            )
 
     if report.standard_rows:
         lines.append("Other decks (cards — Anki new / learning / review)")

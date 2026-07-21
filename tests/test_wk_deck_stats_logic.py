@@ -26,20 +26,17 @@ ANKI_CARD_TYPE_NEW = logic.ANKI_CARD_TYPE_NEW
 ANKI_CARD_TYPE_REVIEW = logic.ANKI_CARD_TYPE_REVIEW
 ANKI_QUEUE_SUSPENDED = logic.ANKI_QUEUE_SUSPENDED
 CORE_KANJI_DECK = logic.CORE_KANJI_DECK
-CORE_RADICALS_DECK = logic.CORE_RADICALS_DECK
 CORE_VOCABULARY_DECK = logic.CORE_VOCABULARY_DECK
 CardRow = logic.CardRow
 NoteRow = logic.NoteRow
 WK_LOCKED_TAG = logic.WK_LOCKED_TAG
 build_deck_stats_report = logic.build_deck_stats_report
-build_jlpt_bucket_rows = logic.build_jlpt_bucket_rows
-build_mature_subject_ids = logic.build_mature_subject_ids
-build_vocab_locked_by_wk_level = logic.build_vocab_locked_by_wk_level
+build_immersion_core_progress = logic.build_immersion_core_progress
+classify_immersion_core_note = logic.classify_immersion_core_note
 classify_wk_note = logic.classify_wk_note
+collect_immersion_subject_ids = logic.collect_immersion_subject_ids
 format_deck_stats_report = logic.format_deck_stats_report
-is_vocab_locked_by_kanji_prereq = logic.is_vocab_locked_by_kanji_prereq
 sort_deck_names = logic.sort_deck_names
-wk_level_to_jlpt = logic.wk_level_to_jlpt
 
 
 def _card(**kwargs) -> CardRow:
@@ -92,6 +89,26 @@ class WkDeckStatsLogicTests(unittest.TestCase):
         )
         self.assertEqual(
             classify_wk_note(_note(cards=(_card(queue=ANKI_QUEUE_SUSPENDED, ivl=30, reps=4),))),
+            "locked",
+        )
+
+    def test_classify_immersion_core_note_buckets(self) -> None:
+        self.assertEqual(
+            classify_immersion_core_note(_note(cards=(_card(ivl=0, reps=0),))),
+            "unseen",
+        )
+        self.assertEqual(
+            classify_immersion_core_note(_note(cards=(_card(ivl=2, reps=3),))),
+            "reviewed",
+        )
+        self.assertEqual(
+            classify_immersion_core_note(_note(cards=(_card(ivl=40, reps=8),))),
+            "reviewed",
+        )
+        self.assertEqual(
+            classify_immersion_core_note(
+                _note(tags=(WK_LOCKED_TAG,), cards=(_card(ivl=0, reps=0),))
+            ),
             "locked",
         )
 
@@ -187,232 +204,127 @@ class WkDeckStatsLogicTests(unittest.TestCase):
         self.assertIn(CORE_KANJI_DECK, text)
         self.assertIn("Core total", text)
 
-    def test_wk_level_to_jlpt_thresholds(self) -> None:
-        self.assertEqual(wk_level_to_jlpt(3), "N5")
-        self.assertEqual(wk_level_to_jlpt(15), "N4")
-        self.assertEqual(wk_level_to_jlpt(50), "N1")
-
-    def test_vocab_locked_by_kanji_prereq_requires_unmet_kanji(self) -> None:
-        mature_kanji = _note(
-            note_id=20,
-            wk_subject_id=100,
-            cards=(_card(card_id=20, note_id=20, ivl=10, reps=4),),
-        )
-        mature_ids = build_mature_subject_ids([mature_kanji])
-        locked_vocab = _note(
-            note_id=30,
-            deck_name=CORE_VOCABULARY_DECK,
-            tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-3"),
-            wk_subject_id=200,
-            prerequisite_ids=(999,),
-            wk_level=3,
-            is_kanji=False,
-            is_vocabulary=True,
-            cards=(
-                _card(
-                    card_id=30,
-                    note_id=30,
-                    deck_name=CORE_VOCABULARY_DECK,
-                    queue=ANKI_QUEUE_SUSPENDED,
-                    ivl=0,
-                    reps=0,
-                ),
-            ),
-        )
-        self.assertTrue(
-            is_vocab_locked_by_kanji_prereq(locked_vocab, mature_subject_ids=mature_ids)
-        )
-
-        locked_vocab_met = _note(
-            note_id=31,
-            deck_name=CORE_VOCABULARY_DECK,
-            tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-3"),
-            wk_subject_id=201,
-            prerequisite_ids=(100,),
-            wk_level=3,
-            is_kanji=False,
-            is_vocabulary=True,
-            cards=(
-                _card(
-                    card_id=31,
-                    note_id=31,
-                    deck_name=CORE_VOCABULARY_DECK,
-                    queue=ANKI_QUEUE_SUSPENDED,
-                    ivl=0,
-                    reps=0,
-                ),
-            ),
-        )
-        self.assertFalse(
-            is_vocab_locked_by_kanji_prereq(
-                locked_vocab_met,
-                mature_subject_ids=mature_ids,
-            )
-        )
-
-        locked_no_prereq = _note(
-            note_id=32,
-            deck_name=CORE_VOCABULARY_DECK,
-            tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-3"),
-            wk_subject_id=202,
-            prerequisite_ids=(),
-            wk_level=3,
-            is_kanji=False,
-            is_vocabulary=True,
-            cards=(
-                _card(
-                    card_id=32,
-                    note_id=32,
-                    deck_name=CORE_VOCABULARY_DECK,
-                    queue=ANKI_QUEUE_SUSPENDED,
-                    ivl=0,
-                    reps=0,
-                ),
-            ),
-        )
-        self.assertFalse(
-            is_vocab_locked_by_kanji_prereq(locked_no_prereq, mature_subject_ids=set())
-        )
-
-    def test_vocab_locked_by_wk_level_groups_counts(self) -> None:
-        mature_kanji = _note(note_id=20, wk_subject_id=100, cards=(_card(card_id=20, note_id=20, ivl=10, reps=4),))
-        mature_ids = build_mature_subject_ids([mature_kanji])
-        notes = [
-            _note(
-                note_id=30,
-                deck_name=CORE_VOCABULARY_DECK,
-                tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-3"),
+    def test_collect_immersion_subject_ids(self) -> None:
+        immersion_notes = [
+            NoteRow(
+                note_id=1,
+                deck_name="Immersion · Satori",
+                tags=("satori-mining",),
+                cards=(),
                 wk_subject_id=200,
-                prerequisite_ids=(999,),
-                wk_level=3,
-                is_vocabulary=True,
-                is_kanji=False,
-                cards=(
-                    _card(
-                        card_id=30,
-                        note_id=30,
-                        deck_name=CORE_VOCABULARY_DECK,
-                        queue=ANKI_QUEUE_SUSPENDED,
-                        ivl=0,
-                        reps=0,
-                    ),
-                ),
+                prerequisite_ids=(10, 11),
             ),
-            _note(
-                note_id=31,
-                deck_name=CORE_VOCABULARY_DECK,
-                tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-5"),
+            NoteRow(
+                note_id=2,
+                deck_name="Immersion · Shadowing",
+                tags=("shadowing-mining",),
+                cards=(),
                 wk_subject_id=201,
-                prerequisite_ids=(999,),
-                wk_level=5,
-                is_vocabulary=True,
-                is_kanji=False,
-                cards=(
-                    _card(
-                        card_id=31,
-                        note_id=31,
-                        deck_name=CORE_VOCABULARY_DECK,
-                        queue=ANKI_QUEUE_SUSPENDED,
-                        ivl=0,
-                        reps=0,
-                    ),
-                ),
-            ),
-            _note(
-                note_id=32,
-                deck_name=CORE_VOCABULARY_DECK,
-                tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-5"),
-                wk_subject_id=202,
-                prerequisite_ids=(999,),
-                wk_level=5,
-                is_vocabulary=True,
-                is_kanji=False,
-                cards=(
-                    _card(
-                        card_id=32,
-                        note_id=32,
-                        deck_name=CORE_VOCABULARY_DECK,
-                        queue=ANKI_QUEUE_SUSPENDED,
-                        ivl=0,
-                        reps=0,
-                    ),
-                ),
+                prerequisite_ids=(11,),
             ),
         ]
-        rows = build_vocab_locked_by_wk_level(notes, mature_subject_ids=mature_ids)
-        self.assertEqual(rows, (
-            logic.VocabLockedByLevelRow(wk_level=3, locked_count=1),
-            logic.VocabLockedByLevelRow(wk_level=5, locked_count=2),
-        ))
+        self.assertEqual(collect_immersion_subject_ids(immersion_notes), {200, 201, 10, 11})
 
-    def test_jlpt_bucket_rows_for_kanji_and_vocab(self) -> None:
+    def test_immersion_core_progress_filters_linked_subjects(self) -> None:
         notes = [
             _note(
                 note_id=1,
-                wk_level=3,
-                tags=("wk-core", "kanji", "wk-level-3"),
+                wk_subject_id=10,
                 cards=(_card(card_id=1, note_id=1, ivl=0, reps=0),),
             ),
             _note(
                 note_id=2,
-                wk_level=3,
-                tags=(WK_LOCKED_TAG, "wk-core", "kanji", "wk-level-3"),
+                wk_subject_id=11,
+                tags=(WK_LOCKED_TAG, "wk-core", "kanji"),
                 cards=(_card(card_id=2, note_id=2, queue=ANKI_QUEUE_SUSPENDED, ivl=0, reps=0),),
             ),
             _note(
                 note_id=3,
+                wk_subject_id=99,
+                cards=(_card(card_id=3, note_id=3, ivl=10, reps=4),),
+            ),
+            _note(
+                note_id=4,
                 deck_name=CORE_VOCABULARY_DECK,
-                wk_level=15,
-                tags=("wk-core", "vocabulary", "wk-level-15"),
+                wk_subject_id=200,
+                tags=("wk-core", "vocabulary"),
                 is_kanji=False,
                 is_vocabulary=True,
-                cards=(_card(card_id=3, note_id=3, deck_name=CORE_VOCABULARY_DECK, ivl=10, reps=3),),
+                cards=(_card(card_id=4, note_id=4, deck_name=CORE_VOCABULARY_DECK, ivl=5, reps=2),),
             ),
-        ]
-        kanji_rows = build_jlpt_bucket_rows(notes, subject_kind="kanji")
-        self.assertEqual(len(kanji_rows), 1)
-        self.assertEqual(kanji_rows[0].jlpt, "N5")
-        self.assertEqual(kanji_rows[0].unseen_count, 1)
-        self.assertEqual(kanji_rows[0].locked_count, 1)
-        self.assertEqual(kanji_rows[0].total_notes, 2)
-
-        vocab_rows = build_jlpt_bucket_rows(notes, subject_kind="vocabulary")
-        self.assertEqual(len(vocab_rows), 1)
-        self.assertEqual(vocab_rows[0].jlpt, "N4")
-        self.assertEqual(vocab_rows[0].guru_count, 1)
-
-    def test_report_includes_enhanced_stats(self) -> None:
-        mature_kanji = _note(note_id=20, wk_subject_id=100, cards=(_card(card_id=20, note_id=20, ivl=10, reps=4),))
-        locked_vocab = _note(
-            note_id=30,
-            deck_name=CORE_VOCABULARY_DECK,
-            tags=(WK_LOCKED_TAG, "wk-core", "vocabulary", "wk-level-3"),
-            wk_subject_id=200,
-            prerequisite_ids=(999,),
-            wk_level=3,
-            is_vocabulary=True,
-            is_kanji=False,
-            cards=(
-                _card(
-                    card_id=30,
-                    note_id=30,
-                    deck_name=CORE_VOCABULARY_DECK,
-                    queue=ANKI_QUEUE_SUSPENDED,
-                    ivl=0,
-                    reps=0,
+            _note(
+                note_id=5,
+                deck_name=CORE_VOCABULARY_DECK,
+                wk_subject_id=201,
+                tags=("wk-core", "vocabulary"),
+                is_kanji=False,
+                is_vocabulary=True,
+                cards=(
+                    _card(
+                        card_id=5,
+                        note_id=5,
+                        deck_name=CORE_VOCABULARY_DECK,
+                        ivl=0,
+                        reps=0,
+                    ),
                 ),
             ),
+        ]
+        immersion_ids = {10, 11, 200}
+        kanji = build_immersion_core_progress(
+            notes,
+            immersion_subject_ids=immersion_ids,
+            subject_kind="kanji",
         )
-        notes = [mature_kanji, locked_vocab]
+        assert kanji is not None
+        self.assertEqual(kanji.unseen_count, 1)
+        self.assertEqual(kanji.locked_count, 1)
+        self.assertEqual(kanji.reviewed_count, 0)
+        self.assertEqual(kanji.total_notes, 2)
+
+        vocab = build_immersion_core_progress(
+            notes,
+            immersion_subject_ids=immersion_ids,
+            subject_kind="vocabulary",
+        )
+        assert vocab is not None
+        self.assertEqual(vocab.reviewed_count, 1)
+        self.assertEqual(vocab.unseen_count, 0)
+        self.assertEqual(vocab.total_notes, 1)
+
+    def test_report_includes_immersion_core_progress(self) -> None:
+        notes = [
+            _note(
+                note_id=1,
+                wk_subject_id=10,
+                cards=(_card(card_id=1, note_id=1, ivl=0, reps=0),),
+            ),
+            _note(
+                note_id=2,
+                deck_name=CORE_VOCABULARY_DECK,
+                wk_subject_id=200,
+                tags=("wk-core", "vocabulary"),
+                is_kanji=False,
+                is_vocabulary=True,
+                cards=(_card(card_id=2, note_id=2, deck_name=CORE_VOCABULARY_DECK, ivl=8, reps=3),),
+            ),
+        ]
         cards = [card for note in notes for card in note.cards]
-        report = build_deck_stats_report(cards=cards, notes=notes, generated_at="t")
-        self.assertEqual(len(report.vocab_locked_by_wk_level), 1)
-        self.assertEqual(report.vocab_locked_by_wk_level[0].wk_level, 3)
-        self.assertEqual(report.jlpt_kanji_rows[0].jlpt, "N5")
-        self.assertEqual(report.jlpt_vocab_rows[0].locked_count, 1)
+        report = build_deck_stats_report(
+            cards=cards,
+            notes=notes,
+            immersion_subject_ids={10, 200},
+            generated_at="t",
+        )
+        assert report.immersion_kanji is not None
+        assert report.immersion_vocab is not None
+        self.assertEqual(report.immersion_kanji.unseen_count, 1)
+        self.assertEqual(report.immersion_vocab.reviewed_count, 1)
         text = format_deck_stats_report(report)
-        self.assertIn("Vocabulary locked by unmet kanji prerequisites", text)
-        self.assertIn("JLPT breakdown", text)
+        self.assertIn("WK Core Kanji (in Satori or Shadowing)", text)
+        self.assertIn("WK Core Vocabulary (in Satori or Shadowing)", text)
+        self.assertNotIn("JLPT breakdown", text)
+        self.assertNotIn("Vocabulary locked by unmet kanji prerequisites", text)
 
 
 if __name__ == "__main__":

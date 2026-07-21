@@ -6,7 +6,7 @@ Tools → WK Deck Stats
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Set
 
 from aqt import gui_hooks, mw
 from aqt.qt import (
@@ -23,10 +23,13 @@ from aqt.utils import showWarning
 
 from .logic import (
     CORE_DECK_NAMES,
+    IMMERSION_TAGS,
     CardRow,
+    ImmersionCoreProgressRow,
     NoteRow,
     WK_CORE_TAG,
     build_deck_stats_report,
+    collect_immersion_subject_ids,
     field_flag_is_true,
     format_deck_stats_report,
     parse_prerequisite_ids,
@@ -137,6 +140,36 @@ def gather_note_rows(col, cards: List[CardRow]) -> List[NoteRow]:
     return note_rows
 
 
+def gather_immersion_subject_ids(col) -> Set[int]:
+    """Subject ids from Satori/Shadowing notes (WkSubjectId + PrerequisiteIds)."""
+    if not IMMERSION_TAGS:
+        return set()
+    if len(IMMERSION_TAGS) == 1:
+        query = f"tag:{IMMERSION_TAGS[0]}"
+    else:
+        query = "(" + " OR ".join(f"tag:{tag}" for tag in IMMERSION_TAGS) + ")"
+
+    immersion_notes: List[NoteRow] = []
+    for note_id in col.find_notes(query):
+        note = col.get_note(int(note_id))
+        field_map = _note_field_map(note)
+        immersion_notes.append(
+            NoteRow(
+                note_id=int(note_id),
+                deck_name="",
+                tags=tuple(str(tag) for tag in note.tags),
+                cards=(),
+                wk_subject_id=parse_wk_subject_id(
+                    _note_field_value(note, field_map, "WkSubjectId")
+                ),
+                prerequisite_ids=parse_prerequisite_ids(
+                    _note_field_value(note, field_map, "PrerequisiteIds")
+                ),
+            )
+        )
+    return collect_immersion_subject_ids(immersion_notes)
+
+
 class DeckStatsDialog(QDialog):
     def __init__(self, report_text: str, report, parent=None) -> None:
         super().__init__(parent)
@@ -170,47 +203,19 @@ class DeckStatsDialog(QDialog):
                 total_row=_sum_wk_rows(report.wk_rows),
             ))
 
-        if report.vocab_locked_by_wk_level:
+        for title, row in (
+            ("WK Core Kanji (in Satori or Shadowing)", report.immersion_kanji),
+            ("WK Core Vocabulary (in Satori or Shadowing)", report.immersion_vocab),
+        ):
+            if row is None:
+                continue
             layout.addWidget(
                 QLabel(
-                    "Vocabulary locked by unmet kanji prerequisites "
-                    "(wk-locked/suspended with immature PrerequisiteIds)"
+                    f"{title} — Locked / Unseen / Reviewed ≥1 "
+                    "(via immersion WkSubjectId + PrerequisiteIds)"
                 )
             )
-            layout.addWidget(_make_table(
-                ["WK Level", "Locked"],
-                [
-                    [row.wk_level, row.locked_count]
-                    for row in report.vocab_locked_by_wk_level
-                ],
-                total_row=[
-                    "Total",
-                    sum(row.locked_count for row in report.vocab_locked_by_wk_level),
-                ],
-            ))
-
-        for title, rows in (
-            ("JLPT · Kanji", report.jlpt_kanji_rows),
-            ("JLPT · Vocabulary", report.jlpt_vocab_rows),
-        ):
-            if not rows:
-                continue
-            layout.addWidget(QLabel(f"{title} (WK level → JLPT band)"))
-            layout.addWidget(_make_table(
-                ["JLPT", "Unseen", "Appr", "Guru", "Master", "Locked", "Total"],
-                [
-                    [
-                        row.jlpt,
-                        row.unseen_count,
-                        row.apprentice_count,
-                        row.guru_count,
-                        row.master_count,
-                        row.locked_count,
-                        row.total_notes,
-                    ]
-                    for row in rows
-                ],
-            ))
+            layout.addWidget(_make_immersion_progress_table(row))
 
         if report.standard_rows:
             layout.addWidget(QLabel("Other decks (cards — Anki new / learning / review)"))
@@ -252,6 +257,20 @@ def _sum_wk_rows(rows) -> List[object]:
     ]
 
 
+def _make_immersion_progress_table(row: ImmersionCoreProgressRow) -> QTableWidget:
+    return _make_table(
+        ["Locked", "Unseen", "Reviewed", "Total"],
+        [
+            [
+                row.locked_count,
+                row.unseen_count,
+                row.reviewed_count,
+                row.total_notes,
+            ]
+        ],
+    )
+
+
 def _make_table(
     headers: List[str],
     rows: List[List[object]],
@@ -276,7 +295,7 @@ def _make_table(
     for row_index, row in enumerate(body):
         for column_index, value in enumerate(row):
             item = QTableWidgetItem(str(value))
-            if column_index > 0:
+            if column_index > 0 or isinstance(value, int):
                 item.setTextAlignment(int(0x0004 | 0x0080))  # AlignRight | AlignVCenter
             if total_row is not None and row_index == len(body) - 1:
                 font = item.font()
@@ -294,7 +313,12 @@ def run_deck_stats() -> None:
     col = mw.col
     cards = gather_card_rows(col)
     notes = gather_note_rows(col, cards)
-    report = build_deck_stats_report(cards=cards, notes=notes)
+    immersion_subject_ids = gather_immersion_subject_ids(col)
+    report = build_deck_stats_report(
+        cards=cards,
+        notes=notes,
+        immersion_subject_ids=immersion_subject_ids,
+    )
     text = format_deck_stats_report(report)
     dialog = DeckStatsDialog(text, report, mw)
     dialog.exec()

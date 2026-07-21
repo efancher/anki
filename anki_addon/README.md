@@ -176,6 +176,19 @@ Note-level buckets aligned with WaniKani intervals:
 
 Cards studied in **WK::** filtered queues still count toward the core home deck.
 
+### Immersion-linked core (Satori / Shadowing)
+
+Two summary tables for **WK Core Kanji** and **WK Core Vocabulary** whose
+`WkSubjectId` appears on a Satori (`satori-mining`) or Shadowing
+(`shadowing-mining`) note — either as `WkSubjectId` or in `PrerequisiteIds`:
+
+| Column | Meaning |
+|--------|---------|
+| **Locked** | `wk-locked` or all cards suspended |
+| **Unseen** | Unlocked, active, **reps = 0** |
+| **Reviewed** | Reviewed at least once (apprentice / guru / master) |
+| **Total** | Immersion-linked notes of that kind |
+
 ### Other decks (grammar, conjugations, immersion, …)
 
 Card-level Anki counts: **New / Learn / Review / Susp / Total**.
