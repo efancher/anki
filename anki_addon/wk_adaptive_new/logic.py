@@ -244,3 +244,166 @@ def sorted_new_card_ids(
         ),
     )
     return [card_id for _subject_id, _score, card_id in ordered]
+
+
+# --- Immersion-linked Core filtered decks (Kanji/Vocab only) -----------------
+
+SUBJECT_KIND_KANJI = "kanji"
+SUBJECT_KIND_VOCABULARY = "vocabulary"
+SUBJECT_KIND_RADICAL = "radical"
+
+IMMERSION_CORE_TAG_PREFIX = "immersion-core"
+IMMERSION_CORE_TAG_SATORI = f"{IMMERSION_CORE_TAG_PREFIX}::satori"
+IMMERSION_CORE_TAG_SHADOWING = f"{IMMERSION_CORE_TAG_PREFIX}::shadowing"
+IMMERSION_CORE_TAG_CANDIDATES = f"{IMMERSION_CORE_TAG_PREFIX}::candidates"
+
+IMMERSION_CORE_TAGS: Tuple[str, ...] = (
+    IMMERSION_CORE_TAG_SATORI,
+    IMMERSION_CORE_TAG_SHADOWING,
+    IMMERSION_CORE_TAG_CANDIDATES,
+)
+
+SATORI_MINING_TAG = "satori-mining"
+SHADOWING_MINING_TAG = "shadowing-mining"
+SHADOWING_CANDIDATE_TAG = "shadowing-candidate"
+
+# Source key → (immersion note tag, core note tag)
+IMMERSION_CORE_SOURCE_SPECS: Tuple[Tuple[str, str, str], ...] = (
+    ("satori", SATORI_MINING_TAG, IMMERSION_CORE_TAG_SATORI),
+    ("shadowing", SHADOWING_MINING_TAG, IMMERSION_CORE_TAG_SHADOWING),
+    ("candidates", SHADOWING_CANDIDATE_TAG, IMMERSION_CORE_TAG_CANDIDATES),
+)
+
+IMMERSION_CORE_FILTERED_LIMIT = 100
+
+# (filtered deck name, core home deck, immersion-core tag)
+IMMERSION_CORE_FILTERED_DECKS: Tuple[Tuple[str, str, str], ...] = (
+    ("Immersion Core · Satori · Kanji", CORE_KANJI_DECK, IMMERSION_CORE_TAG_SATORI),
+    (
+        "Immersion Core · Satori · Vocabulary",
+        CORE_VOCABULARY_DECK,
+        IMMERSION_CORE_TAG_SATORI,
+    ),
+    (
+        "Immersion Core · Shadowing · Kanji",
+        CORE_KANJI_DECK,
+        IMMERSION_CORE_TAG_SHADOWING,
+    ),
+    (
+        "Immersion Core · Shadowing · Vocabulary",
+        CORE_VOCABULARY_DECK,
+        IMMERSION_CORE_TAG_SHADOWING,
+    ),
+    (
+        "Immersion Core · Candidates · Kanji",
+        CORE_KANJI_DECK,
+        IMMERSION_CORE_TAG_CANDIDATES,
+    ),
+    (
+        "Immersion Core · Candidates · Vocabulary",
+        CORE_VOCABULARY_DECK,
+        IMMERSION_CORE_TAG_CANDIDATES,
+    ),
+)
+
+
+def immersion_core_filtered_search(home_deck: str, immersion_core_tag: str) -> str:
+    """Browse search used by an Immersion Core filtered deck."""
+    return (
+        f'deck:"{home_deck}" tag:{immersion_core_tag} is:new -is:suspended'
+    )
+
+
+def filter_non_radical_subject_ids(
+    subject_ids: Set[int],
+    kind_by_id: Mapping[int, str],
+) -> Set[int]:
+    """Keep kanji and vocabulary subject ids; drop radicals and unknown kinds."""
+    kept: Set[int] = set()
+    for subject_id in subject_ids:
+        kind = kind_by_id.get(subject_id)
+        if kind in (SUBJECT_KIND_KANJI, SUBJECT_KIND_VOCABULARY):
+            kept.add(subject_id)
+    return kept
+
+
+def wk_linked_immersion_core_ids(
+    seed_ids: Set[int],
+    prereq_map: Mapping[int, Sequence[int]],
+    kind_by_id: Mapping[int, str],
+) -> Set[int]:
+    """Expand immersion seeds over prerequisites, then drop radicals."""
+    closure = expand_immersion_closure(seed_ids, prereq_map)
+    return filter_non_radical_subject_ids(closure, kind_by_id)
+
+
+def candidate_linked_subject_ids(
+    candidate_expressions: Sequence[str],
+    core_vocab_expr_to_id: Mapping[str, int],
+    core_kanji_char_to_id: Mapping[str, int],
+    *,
+    prereq_map: Optional[Mapping[int, Sequence[int]]] = None,
+    kind_by_id: Optional[Mapping[int, str]] = None,
+) -> Set[int]:
+    """Link Shadowing Candidate expressions to Core Kanji/Vocab subject ids.
+
+    - Exact Expression match → Core Vocabulary
+    - Any Core Kanji character appearing in the expression → Core Kanji
+    - Optionally expand matched vocab over prerequisites (kanji only kept)
+    """
+    linked: Set[int] = set()
+    for raw in candidate_expressions:
+        expression = (raw or "").strip()
+        if not expression:
+            continue
+        vocab_id = core_vocab_expr_to_id.get(expression)
+        if vocab_id is not None:
+            linked.add(vocab_id)
+        for char in expression:
+            kanji_id = core_kanji_char_to_id.get(char)
+            if kanji_id is not None:
+                linked.add(kanji_id)
+
+    if prereq_map and kind_by_id is not None and linked:
+        return wk_linked_immersion_core_ids(linked, prereq_map, kind_by_id)
+    if kind_by_id is not None:
+        return filter_non_radical_subject_ids(linked, kind_by_id)
+    return linked
+
+
+@dataclass(frozen=True)
+class TagSyncAction:
+    note_id: int
+    add_tags: Tuple[str, ...]
+    remove_tags: Tuple[str, ...]
+
+
+def immersion_core_tag_sync_actions(
+    notes: Sequence[Tuple[int, Optional[int], Sequence[str]]],
+    subject_ids_by_core_tag: Mapping[str, Set[int]],
+) -> List[TagSyncAction]:
+    """Compute tag add/remove for core notes given desired subject-id sets.
+
+    ``notes`` is ``(note_id, wk_subject_id, current_tags)``.
+    Only the three ``immersion-core::*`` tags are managed.
+    """
+    managed = set(IMMERSION_CORE_TAGS)
+    actions: List[TagSyncAction] = []
+    for note_id, subject_id, current_tags in notes:
+        present = {tag for tag in current_tags if tag in managed}
+        desired: Set[str] = set()
+        if subject_id is not None:
+            for core_tag, subject_ids in subject_ids_by_core_tag.items():
+                if subject_id in subject_ids:
+                    desired.add(core_tag)
+        add_tags = tuple(sorted(desired - present))
+        remove_tags = tuple(sorted(present - desired))
+        if add_tags or remove_tags:
+            actions.append(
+                TagSyncAction(
+                    note_id=note_id,
+                    add_tags=add_tags,
+                    remove_tags=remove_tags,
+                )
+            )
+    return actions

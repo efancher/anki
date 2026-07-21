@@ -84,6 +84,31 @@ then restart Anki.
 Runs automatically on collection load, after apkg import, and after sync when
 `auto_run_on_load` is true (default). The Tools menu is always a manual backstop.
 
+## Immersion Core filtered decks
+
+Six filtered decks let you study **Core Kanji / Vocabulary** that appear in
+immersion expressions **in parallel** with Satori / Shadowing, without waiting
+for the home-deck new queue:
+
+| Deck | Source |
+|------|--------|
+| `Immersion Core · Satori · Kanji` / `… · Vocabulary` | `satori-mining` (`WkSubjectId` + prereqs, no radicals) |
+| `Immersion Core · Shadowing · Kanji` / `… · Vocabulary` | `shadowing-mining` (same) |
+| `Immersion Core · Candidates · Kanji` / `… · Vocabulary` | `shadowing-candidate` (Expression / kanji-char match) |
+
+Core notes get tags `immersion-core::satori`, `immersion-core::shadowing`,
+`immersion-core::candidates`. Decks rebuild on **WK Adjust New Limits** (and
+auto-refresh), or via **Tools → WK Rebuild Immersion Core Decks**.
+
+Candidate→Vocabulary matches are rare (candidates are non-WK lemmas); Candidate
+Kanji decks fill from kanji characters inside those expressions. Studying these
+filtered decks pulls new cards when you open them — they do not wait on the
+home deck’s daily new budget the same way.
+
+**WK Deck Stats “Unseen”** on Core Radicals is the full never-reviewed backlog
+(reps=0), not “new remaining today.” A high new limit only sets capacity if you
+study that deck.
+
 ## Optional config
 
 | Key | Default | Effect |

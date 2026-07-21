@@ -29,16 +29,31 @@ from .logic import (
     DEFAULT_IMMERSION_TAG,
     DEFAULT_IMMERSION_TAGS,
     DEFAULT_IMMERSION_UNSUSPEND_ENABLED,
+    IMMERSION_CORE_FILTERED_DECKS,
+    IMMERSION_CORE_FILTERED_LIMIT,
+    IMMERSION_CORE_SOURCE_SPECS,
+    IMMERSION_CORE_TAG_CANDIDATES,
+    IMMERSION_CORE_TAG_SATORI,
+    IMMERSION_CORE_TAG_SHADOWING,
+    IMMERSION_CORE_TAGS,
+    SHADOWING_CANDIDATE_TAG,
+    SUBJECT_KIND_KANJI,
+    SUBJECT_KIND_RADICAL,
+    SUBJECT_KIND_VOCABULARY,
     TierAvailability,
     UNRANKED_BASELINE_SCORE,
     WkAdaptiveNewConfig,
     build_tier_plan,
+    candidate_linked_subject_ids,
     effective_immersion_tags,
     immersion_cards_to_unsuspend,
+    immersion_core_filtered_search,
+    immersion_core_tag_sync_actions,
     parse_subject_ids,
     preset_name_for_suffix,
     ranked_immersion_closure,
     sorted_new_card_ids,
+    wk_linked_immersion_core_ids,
 )
 
 ADDON_NAME = "WK Adaptive New"
@@ -362,6 +377,229 @@ def build_immersion_priority_ranks(
     )
 
 
+def _core_subject_kind_from_note(note: Any, deck_name: str = "") -> Optional[str]:
+    if _note_field_value(note, "IsVocabulary").strip() == "1":
+        return SUBJECT_KIND_VOCABULARY
+    if _note_field_value(note, "IsKanji").strip() == "1":
+        return SUBJECT_KIND_KANJI
+    tags = {str(tag) for tag in note.tags}
+    if SUBJECT_KIND_VOCABULARY in tags or deck_name == CORE_VOCABULARY_DECK:
+        return SUBJECT_KIND_VOCABULARY
+    if SUBJECT_KIND_KANJI in tags or deck_name == CORE_KANJI_DECK:
+        return SUBJECT_KIND_KANJI
+    if SUBJECT_KIND_RADICAL in tags or deck_name == CORE_RADICALS_DECK:
+        return SUBJECT_KIND_RADICAL
+    return None
+
+
+def _home_deck_name_for_note(col: Any, note_id: int) -> str:
+    if hasattr(col, "card_ids_of_note"):
+        card_ids = list(col.card_ids_of_note(note_id))
+    else:
+        card_ids = list(col.cards_of_note(note_id))
+    if not card_ids:
+        return ""
+    card = col.get_card(int(card_ids[0]))
+    odid = int(getattr(card, "odid", 0) or 0)
+    deck_id = odid if odid else int(card.did)
+    return col.decks.name(deck_id)
+
+
+def gather_core_subject_indexes(
+    col: Any,
+) -> Tuple[Dict[int, str], Dict[str, int], Dict[str, int], Dict[int, List[int]]]:
+    """Return kind_by_id, vocab Expression→id, kanji Expression→id, prereq_map."""
+    kind_by_id: Dict[int, str] = {}
+    vocab_expr_to_id: Dict[str, int] = {}
+    kanji_char_to_id: Dict[str, int] = {}
+    prereq_map: Dict[int, List[int]] = {}
+    for note_id in col.find_notes(CORE_NOTE_SCOPE):
+        note = col.get_note(int(note_id))
+        subject_id = _wk_subject_id_from_note(note)
+        if subject_id is None:
+            continue
+        deck_name = _home_deck_name_for_note(col, int(note_id))
+        kind = _core_subject_kind_from_note(note, deck_name)
+        if kind is None:
+            continue
+        kind_by_id[subject_id] = kind
+        prereq_map[subject_id] = parse_subject_ids(_note_field_value(note, "PrerequisiteIds"))
+        expression = _note_field_value(note, "Expression")
+        if not expression:
+            continue
+        if kind == SUBJECT_KIND_VOCABULARY:
+            vocab_expr_to_id.setdefault(expression, subject_id)
+        elif kind == SUBJECT_KIND_KANJI:
+            kanji_char_to_id.setdefault(expression, subject_id)
+    return kind_by_id, vocab_expr_to_id, kanji_char_to_id, prereq_map
+
+
+def collect_candidate_expressions(col: Any) -> List[str]:
+    expressions: List[str] = []
+    for note_id in col.find_notes(f"tag:{SHADOWING_CANDIDATE_TAG}"):
+        note = col.get_note(int(note_id))
+        expression = _note_field_value(note, "Expression")
+        if expression:
+            expressions.append(expression)
+    return expressions
+
+
+def build_immersion_core_subject_ids_by_tag(col: Any) -> Dict[str, Set[int]]:
+    """Per immersion-core::* tag: kanji/vocab subject ids linked from that source."""
+    kind_by_id, vocab_expr_to_id, kanji_char_to_id, prereq_map = gather_core_subject_indexes(
+        col
+    )
+    by_tag: Dict[str, Set[int]] = {tag: set() for tag in IMMERSION_CORE_TAGS}
+
+    for _source_key, immersion_tag, core_tag in IMMERSION_CORE_SOURCE_SPECS:
+        if immersion_tag == SHADOWING_CANDIDATE_TAG:
+            by_tag[core_tag] = candidate_linked_subject_ids(
+                collect_candidate_expressions(col),
+                vocab_expr_to_id,
+                kanji_char_to_id,
+                prereq_map=prereq_map,
+                kind_by_id=kind_by_id,
+            )
+            continue
+        seeds = collect_immersion_seed_ids(col, (immersion_tag,))
+        by_tag[core_tag] = wk_linked_immersion_core_ids(seeds, prereq_map, kind_by_id)
+    return by_tag
+
+
+def sync_immersion_core_tags(col: Any) -> Tuple[int, Dict[str, Set[int]]]:
+    """Add/remove immersion-core::* tags on core notes. Returns (changed, ids_by_tag)."""
+    subject_ids_by_tag = build_immersion_core_subject_ids_by_tag(col)
+    notes: List[Tuple[int, Optional[int], Sequence[str]]] = []
+    for note_id in col.find_notes(CORE_NOTE_SCOPE):
+        note = col.get_note(int(note_id))
+        notes.append(
+            (
+                int(note_id),
+                _wk_subject_id_from_note(note),
+                tuple(str(tag) for tag in note.tags),
+            )
+        )
+    actions = immersion_core_tag_sync_actions(notes, subject_ids_by_tag)
+    for action in actions:
+        note = col.get_note(action.note_id)
+        tag_set = set(str(tag) for tag in note.tags)
+        for tag in action.remove_tags:
+            tag_set.discard(tag)
+        for tag in action.add_tags:
+            tag_set.add(tag)
+        note.tags = sorted(tag_set)
+        col.update_note(note)
+    return len(actions), subject_ids_by_tag
+
+
+def _filtered_deck_id_by_name(col: Any, name: str) -> Optional[int]:
+    deck_id = _deck_id_for_name(col.decks, name)
+    if not deck_id:
+        return None
+    deck_obj = col.decks.get(deck_id)
+    if not deck_obj or not deck_obj.get("dyn"):
+        return None
+    return int(deck_id)
+
+
+def _set_filtered_deck_search(
+    filtered: Any,
+    *,
+    name: str,
+    search: str,
+    limit: int = IMMERSION_CORE_FILTERED_LIMIT,
+) -> None:
+    from anki.decks import FilteredDeckConfig
+
+    filtered.name = name
+    # Always create/keep the deck even when no cards match yet (e.g. still
+    # suspended, or already introduced). Rebuild fills it later.
+    if hasattr(filtered, "allow_empty"):
+        filtered.allow_empty = True
+    config = filtered.config
+    config.reschedule = True
+    terms = [
+        FilteredDeckConfig.SearchTerm(
+            search=search,
+            limit=int(limit),
+            order=0,  # oldest seen first
+        )
+    ]
+    del config.search_terms[:]
+    config.search_terms.extend(terms)
+
+
+def ensure_immersion_core_filtered_deck(
+    col: Any,
+    *,
+    name: str,
+    home_deck: str,
+    immersion_core_tag: str,
+) -> int:
+    """Create or update one Immersion Core filtered deck; return deck id."""
+    from anki.decks import DeckId
+
+    search = immersion_core_filtered_search(home_deck, immersion_core_tag)
+    existing_id = _filtered_deck_id_by_name(col, name)
+    if existing_id is not None:
+        filtered = col.sched.get_or_create_filtered_deck(DeckId(existing_id))
+    else:
+        filtered = col.sched.get_or_create_filtered_deck(DeckId(0))
+    _set_filtered_deck_search(filtered, name=name, search=search)
+    result = col.sched.add_or_update_filtered_deck(filtered)
+    deck_id = int(getattr(result, "id", 0) or 0)
+    if not deck_id and existing_id is not None:
+        deck_id = existing_id
+    if not deck_id:
+        # Fallback: resolve by name after create (some Anki builds omit id).
+        deck_id = _filtered_deck_id_by_name(col, name) or 0
+    if deck_id:
+        try:
+            col.sched.rebuild_filtered_deck(DeckId(deck_id))
+        except Exception:
+            # Empty rebuild can still raise on older builds; deck exists.
+            pass
+    return deck_id
+
+
+def rebuild_immersion_core_filtered_decks(col: Any) -> List[str]:
+    """Ensure all six Immersion Core filtered decks exist and are rebuilt."""
+    lines: List[str] = []
+    errors: List[str] = []
+    for name, home_deck, core_tag in IMMERSION_CORE_FILTERED_DECKS:
+        try:
+            deck_id = ensure_immersion_core_filtered_deck(
+                col,
+                name=name,
+                home_deck=home_deck,
+                immersion_core_tag=core_tag,
+            )
+            card_count = len(col.find_cards(f'deck:"{name}"')) if deck_id else 0
+            if deck_id:
+                lines.append(f"{name}: {card_count} card(s)")
+            else:
+                errors.append(f"{name}: create returned no deck id")
+        except Exception as exc:  # noqa: BLE001 — report per-deck failures
+            errors.append(f"{name}: {exc}")
+    if errors:
+        lines.append("Errors:")
+        lines.extend(f"  - {err}" for err in errors)
+    return lines
+
+
+def refresh_immersion_core_study_queues(col: Any) -> List[str]:
+    """Sync immersion-core tags and rebuild the six filtered decks."""
+    changed, subject_ids_by_tag = sync_immersion_core_tags(col)
+    lines = [
+        f"Immersion core tags: updated {changed} note(s) "
+        f"(satori={len(subject_ids_by_tag.get(IMMERSION_CORE_TAG_SATORI, ()))}, "
+        f"shadowing={len(subject_ids_by_tag.get(IMMERSION_CORE_TAG_SHADOWING, ()))}, "
+        f"candidates={len(subject_ids_by_tag.get(IMMERSION_CORE_TAG_CANDIDATES, ()))})"
+    ]
+    lines.extend(rebuild_immersion_core_filtered_decks(col))
+    return lines
+
+
 def unsuspend_immersion_cards(col: Any, immersion_ids: Set[int]) -> int:
     """Unsuspend suspended new core cards in the immersion closure.
 
@@ -520,6 +758,11 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
             )
             if reordered:
                 lines.append(f"{deck_name}: reordered {reordered} new ({order_label})")
+    try:
+        lines.extend(refresh_immersion_core_study_queues(col))
+    except Exception as exc:  # noqa: BLE001 — filtered decks must not block new limits
+        print(f"WK adaptive new: immersion core filtered decks skipped ({exc})")
+        lines.append(f"Immersion core filtered decks: skipped ({exc})")
     summary_lines = [
         f"Review load ({config.review_count_scope}): {review_load}",
         f"New budget: {budget}",
@@ -587,6 +830,9 @@ def setup_menu() -> None:
     action = QAction("WK Adjust New Limits", mw)
     action.triggered.connect(_menu_adjust)
     mw.form.menuTools.addAction(action)
+    immersion_action = QAction("WK Rebuild Immersion Core Decks", mw)
+    immersion_action.triggered.connect(_menu_rebuild_immersion_core)
+    mw.form.menuTools.addAction(immersion_action)
 
 
 def _menu_adjust() -> None:
@@ -599,6 +845,20 @@ def _menu_adjust() -> None:
         showWarning(str(exc))
         return
     showInfo("WK adaptive new limits updated.\n\n" + "\n".join(lines))
+
+
+def _menu_rebuild_immersion_core() -> None:
+    if mw is None or mw.col is None:
+        showWarning("Open a collection first.")
+        return
+    try:
+        lines = refresh_immersion_core_study_queues(mw.col)
+    except Exception as exc:  # noqa: BLE001
+        showWarning(str(exc))
+        return
+    if mw is not None:
+        mw.reset()
+    showInfo("Immersion Core filtered decks rebuilt.\n\n" + "\n".join(lines))
 
 
 gui_hooks.collection_did_load.append(on_collection_did_load)

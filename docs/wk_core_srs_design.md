@@ -1,17 +1,17 @@
 # WaniKani → Anki Core SRS — Design & Implementation Tracker
 
 **Status:** Core kanji/vocab Review re-enabled; new-card order driven by immersion (Satori) mining + prerequisite closure via `wk_adaptive_new`  
-**Last updated:** 2026-07-19
+**Last updated:** 2026-07-21
 **Owner intent:** Replace WaniKani’s review queue with Anki + FSRS. One-time WK schedule import. All unlock/availability logic runs **inside Anki** (no weekly Python script for progress).
 
-### Current snapshot (2026-07-10)
+### Current snapshot (2026-07-21)
 
 | Area | State |
 |------|--------|
 | **Generator** | `python wk_decks.py --from-config` — default `generate_decks` includes `core-radical`, `core-kanji`, `core-vocabulary`, `kanji-meaning` |
 | **Kanji path** | **Kanji Meaning Anchor** (kanji → English); readings via cloze / phonetic / immersion |
 | **New-card order** | `wk_adaptive_new` reorders core new queues: **immersion (Satori) mined vocab + prereq closure lead**, then JLPT/WK-level baseline (`wk_study_priority.json`) |
-| **Study queues** | Study directly from home decks; `WK::` filtered decks and `wk_filtered_decks` are retired |
+| **Study queues** | Home decks + six **Immersion Core** filtered decks (Kanji/Vocab × Satori/Shadowing/Candidates); legacy `WK::` filtered decks remain retired |
 | **Unlock** | `wk_unlock` — conjugations, verb/adj types, vocab cloze/dictation/sentence via kanji meaning `PrerequisiteIds` (Guru+); phonetic = reviewed once |
 | **Immersion** | Migaku + Satori (`scripts/import_satori.py`) cloze decks |
 | **User docs** | [wk_anki_runbook.md](../wk_anki_runbook.md), [satori_mining.md](satori_mining.md) |
@@ -451,6 +451,7 @@ normal study queues; `wk_adaptive_new` controls new limits and core ordering.
 | 2026-06-28 | Phase 3: root radical auto-unlock (`prerequisites_met` empty→True), core filtered decks, phonetic/verb-type/conjugation-reverse on wk-locked gating + `WkSubjectId`. |
 | 2026-07-10 | Retire default core kanji/vocab dual Review; conjugations + verb/adj types unlock via kanji meaning `PrerequisiteIds`; add Immersion · Satori CSV import. |
 | 2026-07-15 | Re-enable `core-kanji` + `core-vocabulary` in config. `wk_adaptive_new` now floats immersion (Satori) mined vocab + its prerequisite closure to the front of core new queues ahead of the JLPT/level baseline; computed live from the collection and refreshed on collection load, apkg import (`operation_did_execute`), and sync. Config keys `immersion_priority_enabled` / `immersion_tag`. New pure-logic tests. |
+| 2026-07-21 | Immersion Core filtered decks: tag Core Kanji/Vocab linked from Satori/Shadowing/Candidates (`immersion-core::*`, no radicals) and rebuild six filtered decks from `wk_adaptive_new` (Adjust New Limits + Tools → WK Rebuild Immersion Core Decks). |
 
 ## Related docs
 

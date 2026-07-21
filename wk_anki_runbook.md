@@ -427,6 +427,17 @@ Study core from the three **WaniKani Core ·** home decks; Anki’s per-deck
 
 **Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab tagged `satori-mining` or `shadowing-mining` plus its full prerequisite tree (vocab → kanji → radicals) jump to the **front** of the core new queues, ahead of the JLPT/level baseline. The set is read live from the collection, so **re-importing** immersion `.apkg` files re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
 
+**Immersion Core filtered decks (parallel study):** the same refresh also tags
+Core Kanji/Vocabulary linked from immersion and rebuilds six filtered decks —
+`Immersion Core · {Satori,Shadowing,Candidates} · {Kanji,Vocabulary}`. Open those
+to introduce immersion-linked core cards immediately (Satori/Shadowing via
+`WkSubjectId` + kanji prereqs; Candidates via Expression / kanji-char match; no
+radicals). Manual rebuild: **Tools → WK Rebuild Immersion Core Decks**.
+
+**Unseen vs new limit:** in WK Deck Stats, **Unseen** = unlocked notes with
+reps=0 (backlog), not “new left today.” A high radicals new/day only matters if
+you study Core Radicals.
+
 ### New cards: protect core (manual alternative)
 
 If you are **not** using `wk_adaptive_new`, the **WK FSRS** preset defaults to **15 new/day** shared across all decks using that preset. Grammar and supplementary decks can steal capacity from core.

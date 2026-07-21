@@ -166,5 +166,89 @@ class ImmersionConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(logic.effective_immersion_tags(config), ("custom-mining",))
 
 
+class ImmersionCoreFilteredLogicTests(unittest.TestCase):
+    def test_filter_non_radical_subject_ids(self) -> None:
+        kind_by_id = {
+            100: logic.SUBJECT_KIND_RADICAL,
+            400: logic.SUBJECT_KIND_KANJI,
+            900: logic.SUBJECT_KIND_VOCABULARY,
+        }
+        kept = logic.filter_non_radical_subject_ids({100, 400, 900, 999}, kind_by_id)
+        self.assertEqual(kept, {400, 900})
+
+    def test_wk_linked_immersion_core_ids_drops_radicals(self) -> None:
+        prereq_map = {900: [400], 400: [100, 101]}
+        kind_by_id = {
+            100: logic.SUBJECT_KIND_RADICAL,
+            101: logic.SUBJECT_KIND_RADICAL,
+            400: logic.SUBJECT_KIND_KANJI,
+            900: logic.SUBJECT_KIND_VOCABULARY,
+        }
+        linked = logic.wk_linked_immersion_core_ids({900}, prereq_map, kind_by_id)
+        self.assertEqual(linked, {900, 400})
+
+    def test_candidate_linked_subject_ids_expression_and_kanji_chars(self) -> None:
+        linked = logic.candidate_linked_subject_ids(
+            ["食べる", "習慣"],
+            {"食べる": 900},
+            {"食": 400, "習": 401, "慣": 402},
+        )
+        self.assertEqual(linked, {900, 400, 401, 402})
+
+    def test_candidate_linked_expands_vocab_prereqs_without_radicals(self) -> None:
+        linked = logic.candidate_linked_subject_ids(
+            ["食べる"],
+            {"食べる": 900},
+            {"食": 400},
+            prereq_map={900: [400], 400: [100]},
+            kind_by_id={
+                100: logic.SUBJECT_KIND_RADICAL,
+                400: logic.SUBJECT_KIND_KANJI,
+                900: logic.SUBJECT_KIND_VOCABULARY,
+            },
+        )
+        self.assertEqual(linked, {900, 400})
+
+    def test_immersion_core_filtered_search(self) -> None:
+        search = logic.immersion_core_filtered_search(
+            logic.CORE_KANJI_DECK,
+            logic.IMMERSION_CORE_TAG_SATORI,
+        )
+        self.assertIn('deck:"WaniKani Core · Kanji"', search)
+        self.assertIn("tag:immersion-core::satori", search)
+        self.assertIn("is:new", search)
+        self.assertIn("-is:suspended", search)
+
+    def test_tag_sync_actions_add_and_remove(self) -> None:
+        actions = logic.immersion_core_tag_sync_actions(
+            [
+                (1, 900, ("wk-core",)),
+                (2, 400, ("wk-core", logic.IMMERSION_CORE_TAG_SATORI)),
+                (3, 401, ("wk-core", logic.IMMERSION_CORE_TAG_SHADOWING)),
+                (4, None, ("wk-core", logic.IMMERSION_CORE_TAG_CANDIDATES)),
+            ],
+            {
+                logic.IMMERSION_CORE_TAG_SATORI: {900},
+                logic.IMMERSION_CORE_TAG_SHADOWING: {400},
+                logic.IMMERSION_CORE_TAG_CANDIDATES: set(),
+            },
+        )
+        by_note = {action.note_id: action for action in actions}
+        self.assertEqual(by_note[1].add_tags, (logic.IMMERSION_CORE_TAG_SATORI,))
+        self.assertEqual(by_note[1].remove_tags, ())
+        self.assertEqual(by_note[2].add_tags, (logic.IMMERSION_CORE_TAG_SHADOWING,))
+        self.assertEqual(by_note[2].remove_tags, (logic.IMMERSION_CORE_TAG_SATORI,))
+        self.assertEqual(by_note[3].add_tags, ())
+        self.assertEqual(by_note[3].remove_tags, (logic.IMMERSION_CORE_TAG_SHADOWING,))
+        self.assertEqual(by_note[4].add_tags, ())
+        self.assertEqual(by_note[4].remove_tags, (logic.IMMERSION_CORE_TAG_CANDIDATES,))
+
+    def test_six_filtered_deck_definitions(self) -> None:
+        self.assertEqual(len(logic.IMMERSION_CORE_FILTERED_DECKS), 6)
+        names = [name for name, _home, _tag in logic.IMMERSION_CORE_FILTERED_DECKS]
+        self.assertIn("Immersion Core · Satori · Kanji", names)
+        self.assertIn("Immersion Core · Candidates · Vocabulary", names)
+
+
 if __name__ == "__main__":
     unittest.main()
