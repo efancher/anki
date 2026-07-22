@@ -314,7 +314,7 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Conjugation:** type-in forms via their WaniKani conjugation home decks; `--verify-conjugations-only` for rule checks. Unlock via kanji meaning `PrerequisiteIds`.
 
-**Phonetic families:** Keisei DB in `.wk_cache/keisei/`. Unlock when any family kanji reviewed once in the meaning anchor.
+**Phonetic families:** Keisei DB in `.wk_cache/keisei/`. Unlock when any family kanji reviewed once in the meaning anchor. Card backs lead with the phonetic component, then “usually signals” ordered most→least (with WK mnemonic keywords, e.g. `しょ - Show`), then a focus table of Reading / Started / Total by each family kanji’s primary on’yomi (rows sum to the footer). Regen: `python wk_decks.py --deck phonetic-families`. Live patch: `python3 scripts/patch_phonetic_readings_ankiconnect.py --from-cache`.
 
 **Kanji meaning anchor:** kanji character on front, primary WK meaning(s) on back — no reading required, **no import lock**. Primary kanji path. Guru a kanji here (≥ 7 day interval) to unlock conjugations / verb·adj types whose `PrerequisiteIds` include that kanji. `--deck kanji-meaning` to build standalone.
 
