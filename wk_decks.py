@@ -4822,6 +4822,306 @@ def kanji_meaning_mnemonic_raw(
     return str(mnemonic).strip()
 
 
+# Vocab meaning mnemonics that only point at the parent kanji.
+VOCAB_SAME_AS_KANJI_MEANING_RES: Tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:the\s+)?kanji and the word are exactly the same\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:the\s+)?word and the kanji are exactly the same\b",
+        re.IGNORECASE,
+    ),
+)
+
+# Reading mnemonics that point at another vocab/kanji reading story.
+READING_SAME_AS_JP_RE = re.compile(
+    r"same as\s+(?:the\s+)?"
+    r"(?:(?:vocab(?:ulary)?\s+)?word\s+)?"
+    r"(?:reading\s+(?:for|of)\s+)?"
+    r"(?P<jp>[一-龯ぁ-んァ-ヶー〜]+)",
+    re.IGNORECASE,
+)
+READING_DEFERS_TO_KANJI_RES: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"reading you learned with the kanji", re.IGNORECASE),
+    re.compile(
+        r"same as (?:the )?(?:one|reading) you learned",
+        re.IGNORECASE,
+    ),
+    re.compile(r"same as the single kanji", re.IGNORECASE),
+    re.compile(
+        r"kun['’]?yomi reading as you'd expect",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"if you know the readings of your kanji you'll know how to read this",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"jukugo word.{0,200}(?:know how to read this|already know how to read|"
+        r"should already know|should know how to read|should be able to read|"
+        r"you'll know how to read|means you should already know)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"you already know the reading from when you le",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"which you should already know from learning the kanji",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"the reading for this word is the same as the one you learned",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"reading you learned with the kanji is the same",
+        re.IGNORECASE,
+    ),
+)
+READING_STORY_HINT_RES: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"<reading>", re.IGNORECASE),
+    re.compile(r"here(?:'s| is) a mnemonic", re.IGNORECASE),
+    re.compile(
+        r"(?:let's|we'll|will) use a mnemonic|use a mnemonic to",
+        re.IGNORECASE,
+    ),
+    re.compile(r"[A-Za-z]{3,}\s*[（(][ぁ-んー]+[）)]"),
+)
+READING_STUB_EXTRA_NOTE_RE = re.compile(
+    r"\bnote\b:|also note|rendaku|pitch accent|shorten|irregular",
+    re.IGNORECASE,
+)
+_PURE_VOCAB_SAME_AS_KANJI_MEANING_MAX_LEN = 160
+_READING_MNEMONIC_JOIN = "\n\n"
+
+
+def subject_index_by_id(subjects: Sequence[dict]) -> Dict[int, dict]:
+    return {int(subject["id"]): subject for subject in subjects}
+
+
+def vocab_index_by_characters(subjects: Sequence[dict]) -> Dict[str, dict]:
+    index: Dict[str, dict] = {}
+    for subject in subjects:
+        if subject.get("object") not in ("vocabulary", "kana_vocabulary"):
+            continue
+        characters = (subject.get("data") or {}).get("characters")
+        if characters and str(characters) not in index:
+            index[str(characters)] = subject
+    return index
+
+
+def vocab_is_same_as_kanji_meaning(vocab: dict) -> bool:
+    mnemonic = (vocab.get("data") or {}).get("meaning_mnemonic") or ""
+    plain = strip_wk_mnemonic_tags(mnemonic)
+    return any(pattern.search(plain) for pattern in VOCAB_SAME_AS_KANJI_MEANING_RES)
+
+
+def reading_mnemonic_has_story(raw: Optional[str]) -> bool:
+    text = str(raw or "")
+    if not text.strip():
+        return False
+    return any(pattern.search(text) for pattern in READING_STORY_HINT_RES)
+
+
+def reading_same_as_characters(plain: str) -> List[str]:
+    return [
+        match.group("jp")
+        for match in READING_SAME_AS_JP_RE.finditer(plain or "")
+        if match.group("jp")
+    ]
+
+
+def reading_defers_to_kanji(plain: str) -> bool:
+    text = plain or ""
+    return any(pattern.search(text) for pattern in READING_DEFERS_TO_KANJI_RES)
+
+
+def reading_mnemonic_is_pure_stub(raw: Optional[str]) -> bool:
+    """True when WK only points elsewhere and has no reading story of its own."""
+    text = str(raw or "").strip()
+    if not text or reading_mnemonic_has_story(text):
+        return False
+    plain = strip_wk_mnemonic_tags(text)
+    if not (reading_same_as_characters(plain) or reading_defers_to_kanji(plain)):
+        return False
+    if READING_STUB_EXTRA_NOTE_RE.search(plain):
+        return False
+    if "\n\n" in plain and len(plain) > 200:
+        return False
+    return True
+
+
+def matching_component_subjects(
+    subject: dict,
+    subject_by_id: Optional[Mapping[int, dict]],
+    *,
+    object_types: Sequence[str],
+) -> List[dict]:
+    if not subject_by_id:
+        return []
+    allowed = set(object_types)
+    components: List[dict] = []
+    for component_id in (subject.get("data") or {}).get("component_subject_ids") or []:
+        component = subject_by_id.get(int(component_id))
+        if component is not None and component.get("object") in allowed:
+            components.append(component)
+    return components
+
+
+def vocab_meaning_mnemonic_raw(
+    vocab: dict,
+    *,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    radical_index: Optional[Mapping[int, dict]] = None,
+) -> Optional[str]:
+    """Vocab meaning mnemonic; borrows kanji story when WK says same-as-kanji."""
+    mnemonic = (vocab.get("data") or {}).get("meaning_mnemonic")
+    plain = strip_wk_mnemonic_tags(mnemonic or "")
+    if (
+        subject_by_id
+        and vocab_is_same_as_kanji_meaning(vocab)
+        and len(plain) <= _PURE_VOCAB_SAME_AS_KANJI_MEANING_MAX_LEN
+    ):
+        kanji_components = matching_component_subjects(
+            vocab, subject_by_id, object_types=("kanji",)
+        )
+        if len(kanji_components) == 1:
+            borrowed = kanji_meaning_mnemonic_raw(kanji_components[0], radical_index)
+            if borrowed:
+                return borrowed
+    if not mnemonic or not str(mnemonic).strip():
+        return None
+    return str(mnemonic).strip()
+
+
+def subject_meaning_mnemonic_raw(
+    subject: dict,
+    *,
+    radical_index: Optional[Mapping[int, dict]] = None,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+) -> Optional[str]:
+    obj = subject.get("object")
+    if obj == "kanji":
+        return kanji_meaning_mnemonic_raw(subject, radical_index)
+    if obj in ("vocabulary", "kana_vocabulary"):
+        return vocab_meaning_mnemonic_raw(
+            subject,
+            subject_by_id=subject_by_id,
+            radical_index=radical_index,
+        )
+    mnemonic = (subject.get("data") or {}).get("meaning_mnemonic")
+    if not mnemonic or not str(mnemonic).strip():
+        return None
+    return str(mnemonic).strip()
+
+
+def _lookup_same_as_reading_subject(
+    characters: str,
+    *,
+    vocab_by_characters: Optional[Mapping[str, dict]],
+    kanji_by_characters: Optional[Mapping[str, dict]],
+) -> Optional[dict]:
+    if vocab_by_characters:
+        vocab = vocab_by_characters.get(characters)
+        if vocab is not None:
+            return vocab
+    if kanji_by_characters:
+        return kanji_by_characters.get(characters)
+    return None
+
+
+def _format_labeled_reading_mnemonic(subject: dict, mnemonic: str) -> str:
+    characters = ((subject.get("data") or {}).get("characters") or "").strip()
+    text = mnemonic.strip()
+    if not characters or characters in strip_wk_mnemonic_tags(text)[:12]:
+        return text
+    obj = subject.get("object")
+    if obj == "kanji":
+        label = f"<kanji>{characters}</kanji>"
+    elif obj in ("vocabulary", "kana_vocabulary"):
+        label = f"<vocabulary>{characters}</vocabulary>"
+    else:
+        label = characters
+    return f"{label}: {text}"
+
+
+def subject_reading_mnemonic_raw(
+    subject: dict,
+    *,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    vocab_by_characters: Optional[Mapping[str, dict]] = None,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
+    _seen: Optional[Set[int]] = None,
+) -> Optional[str]:
+    """Reading mnemonic; expands same-as / on'yomi-kun'yomi stubs to related stories."""
+    mnemonic = (subject.get("data") or {}).get("reading_mnemonic")
+    original = str(mnemonic).strip() if mnemonic and str(mnemonic).strip() else None
+    subject_id = int(subject.get("id") or 0)
+    seen = set(_seen or ())
+    if subject_id:
+        if subject_id in seen:
+            return original
+        seen.add(subject_id)
+
+    if reading_mnemonic_has_story(original):
+        return original
+
+    plain = strip_wk_mnemonic_tags(original or "")
+    borrowed: List[str] = []
+
+    for characters in reading_same_as_characters(plain):
+        related = _lookup_same_as_reading_subject(
+            characters,
+            vocab_by_characters=vocab_by_characters,
+            kanji_by_characters=kanji_by_characters,
+        )
+        if related is None or int(related.get("id") or 0) == subject_id:
+            continue
+        related_raw = subject_reading_mnemonic_raw(
+            related,
+            subject_by_id=subject_by_id,
+            vocab_by_characters=vocab_by_characters,
+            kanji_by_characters=kanji_by_characters,
+            _seen=seen,
+        )
+        if related_raw and related_raw.strip() and related_raw.strip() != (original or ""):
+            borrowed.append(_format_labeled_reading_mnemonic(related, related_raw))
+
+    if not borrowed and reading_defers_to_kanji(plain):
+        for kanji in matching_component_subjects(
+            subject, subject_by_id, object_types=("kanji",)
+        ):
+            kanji_raw = subject_reading_mnemonic_raw(
+                kanji,
+                subject_by_id=subject_by_id,
+                vocab_by_characters=vocab_by_characters,
+                kanji_by_characters=kanji_by_characters,
+                _seen=seen,
+            )
+            if kanji_raw and kanji_raw.strip():
+                borrowed.append(_format_labeled_reading_mnemonic(kanji, kanji_raw))
+
+    # Deduplicate while preserving order.
+    unique_borrowed: List[str] = []
+    seen_text: Set[str] = set()
+    for part in borrowed:
+        key = strip_wk_mnemonic_tags(part)
+        if key in seen_text:
+            continue
+        seen_text.add(key)
+        unique_borrowed.append(part)
+
+    if not unique_borrowed:
+        return original
+
+    joined = _READING_MNEMONIC_JOIN.join(unique_borrowed)
+    if original and not reading_mnemonic_is_pure_stub(original):
+        return f"{original}{_READING_MNEMONIC_JOIN}{joined}"
+    return joined
+
+
 def radical_description_html(
     radical: dict,
     kanji_by_characters: Optional[Mapping[str, dict]] = None,
@@ -4885,10 +5185,33 @@ def kanji_radicals_front_html(
 def meaning_mnemonic_html(
     subject: dict,
     radical_index: Optional[Mapping[int, dict]] = None,
+    *,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
 ) -> str:
-    if subject.get("object") == "kanji":
-        return wk_mnemonic_html(kanji_meaning_mnemonic_raw(subject, radical_index))
-    return wk_mnemonic_html(subject["data"].get("meaning_mnemonic"))
+    return wk_mnemonic_html(
+        subject_meaning_mnemonic_raw(
+            subject,
+            radical_index=radical_index,
+            subject_by_id=subject_by_id,
+        )
+    )
+
+
+def reading_mnemonic_html(
+    subject: dict,
+    *,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    vocab_by_characters: Optional[Mapping[str, dict]] = None,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
+) -> str:
+    return wk_mnemonic_html(
+        subject_reading_mnemonic_raw(
+            subject,
+            subject_by_id=subject_by_id,
+            vocab_by_characters=vocab_by_characters,
+            kanji_by_characters=kanji_by_characters,
+        )
+    )
 
 
 def find_kanji_radical_breakdown(
@@ -7908,6 +8231,12 @@ def main() -> None:
 
         bootstrap = bool(args.bootstrap_wk_scheduling)
         suspend_unstarted = bool(args.core_suspend_unstarted)
+        core_mnemonic_kwargs = {
+            "radical_index": radical_index_by_id(subjects),
+            "subject_by_id": subject_index_by_id(subjects),
+            "vocab_by_characters": vocab_index_by_characters(subjects),
+            "kanji_by_characters": kanji_index_by_characters(subjects),
+        }
         reading_audio_kwargs = {
             "reading_audio": bool(args.reading_audio),
             "wk_voice": args.reading_voice,
@@ -7938,6 +8267,7 @@ def main() -> None:
                 suspend_unstarted=suspend_unstarted,
                 priority_index=core_priority_index,
                 include_grammar_role_tags=False,
+                **core_mnemonic_kwargs,
                 **reading_audio_kwargs,
             )
             created.append(path)
@@ -7952,6 +8282,7 @@ def main() -> None:
                 suspend_unstarted=suspend_unstarted,
                 priority_index=core_priority_index,
                 include_grammar_role_tags=False,
+                **core_mnemonic_kwargs,
                 **reading_audio_kwargs,
             )
             created.append(path)

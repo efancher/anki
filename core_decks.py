@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import genanki
 
@@ -32,9 +32,11 @@ from wk_decks import (
     primary_meanings,
     primary_readings,
     kanji_index_by_characters,
+    meaning_mnemonic_html,
     radical_description_html,
     radical_display,
     radical_subjects,
+    reading_mnemonic_html,
     readings_detail_html,
     stable_guid,
     subject_is_hidden,
@@ -42,7 +44,6 @@ from wk_decks import (
     subject_type_flags,
     subject_type_label,
     versioned_css,
-    wk_mnemonic_html,
     write_apkg,
     WK_SHARED_MEDIA_SUBDIR,
 )
@@ -239,6 +240,10 @@ def add_core_item_note(
     reading_audio_field: str = "",
     priority_entry: Optional[SubjectPriority] = None,
     include_grammar_role_tags: bool = False,
+    radical_index: Optional[Mapping[int, dict]] = None,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    vocab_by_characters: Optional[Mapping[str, dict]] = None,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
 ) -> str:
     data = subject["data"]
     expr = data.get("characters") or ""
@@ -253,8 +258,17 @@ def add_core_item_note(
             html.escape(reading),
             reading_audio_field,
             html.escape("; ".join(primary_meanings(subject))),
-            wk_mnemonic_html(data.get("meaning_mnemonic")),
-            wk_mnemonic_html(data.get("reading_mnemonic")),
+            meaning_mnemonic_html(
+                subject,
+                radical_index,
+                subject_by_id=subject_by_id,
+            ),
+            reading_mnemonic_html(
+                subject,
+                subject_by_id=subject_by_id,
+                vocab_by_characters=vocab_by_characters,
+                kanji_by_characters=kanji_by_characters,
+            ),
             html.escape(subject_type_label(subject)),
             readings_detail_html(subject),
             core_meta_html(subject, assignment_index),
@@ -373,6 +387,10 @@ def _populate_core_item_deck(
     tts_config: Optional["SentenceTtsConfig"] = None,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
+    radical_index: Optional[Mapping[int, dict]] = None,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    vocab_by_characters: Optional[Mapping[str, dict]] = None,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
 ) -> Dict[str, WkCardScheduleSpec]:
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
     media_files: List[str] = []
@@ -415,6 +433,10 @@ def _populate_core_item_deck(
             reading_audio_field=audio_field,
             priority_entry=(priority_index or {}).get(int(subject["id"])),
             include_grammar_role_tags=include_grammar_role_tags,
+            radical_index=radical_index,
+            subject_by_id=subject_by_id,
+            vocab_by_characters=vocab_by_characters,
+            kanji_by_characters=kanji_by_characters,
         )
         spec = _schedule_spec_for_subject(
             CORE_ITEM_KIND,
@@ -448,6 +470,10 @@ def build_core_kanji_deck(
     refresh_reading_audio: bool = False,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
+    radical_index: Optional[Mapping[int, dict]] = None,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    vocab_by_characters: Optional[Mapping[str, dict]] = None,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-kanji"], DECK_NAMES["core-kanji"])
     model = make_core_item_model()
@@ -476,6 +502,10 @@ def build_core_kanji_deck(
         refresh_reading_audio=refresh_reading_audio,
         priority_index=priority_index,
         include_grammar_role_tags=include_grammar_role_tags,
+        radical_index=radical_index,
+        subject_by_id=subject_by_id,
+        vocab_by_characters=vocab_by_characters,
+        kanji_by_characters=kanji_by_characters,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_kanji.apkg"
@@ -502,6 +532,10 @@ def build_core_vocab_deck(
     refresh_reading_audio: bool = False,
     priority_index: Optional[Dict[int, SubjectPriority]] = None,
     include_grammar_role_tags: bool = False,
+    radical_index: Optional[Mapping[int, dict]] = None,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+    vocab_by_characters: Optional[Mapping[str, dict]] = None,
+    kanji_by_characters: Optional[Mapping[str, dict]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-vocabulary"], DECK_NAMES["core-vocabulary"])
     model = make_core_item_model()
@@ -530,6 +564,10 @@ def build_core_vocab_deck(
         refresh_reading_audio=refresh_reading_audio,
         priority_index=priority_index,
         include_grammar_role_tags=include_grammar_role_tags,
+        radical_index=radical_index,
+        subject_by_id=subject_by_id,
+        vocab_by_characters=vocab_by_characters,
+        kanji_by_characters=kanji_by_characters,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_vocabulary.apkg"
