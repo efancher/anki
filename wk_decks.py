@@ -286,7 +286,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "grammar_cloze": "v4",
     "dictation": "v4",
     "core_radical": "v2",
-    "core_item": "v5",
+    "core_item": "v6",
     "rendaku": "v3",
     "mining": "v14",
     "kanji_contrast": "v3",
@@ -1593,6 +1593,110 @@ def kanji_shares_phonetic_reading(
         return False
     wk_onyomi = wk_onyomi_readings(subject)
     return bool(wk_onyomi) and reading in wk_onyomi
+
+
+def phonetic_component_for_char(
+    char: str,
+    keisei_kanji: Mapping[str, dict],
+) -> str:
+    """Keisei phonetic component for this kanji, or empty if none."""
+    if not char:
+        return ""
+    return str((keisei_kanji.get(char) or {}).get("phonetic") or "")
+
+
+def matching_phonetic_signal_onyomi(
+    kanji_subject: dict,
+    char: str,
+    keisei_kanji: Mapping[str, dict],
+    keisei_phonetic: Mapping[str, dict],
+    *,
+    card_readings: Optional[Sequence[str]] = None,
+) -> Tuple[str, List[str]]:
+    """Return (component, matched on'yomi) when card readings are phonetic signals.
+
+    ``card_readings`` defaults to the kanji's primary/accepted readings (what Core
+    Item tests). A match requires: Keisei phonetic component, WK on'yomi, and
+    membership in that component's signal readings.
+    """
+    comp = phonetic_component_for_char(char, keisei_kanji)
+    if not comp:
+        return "", []
+    signals = [r for r in ((keisei_phonetic.get(comp) or {}).get("readings") or []) if r]
+    if not signals:
+        return "", []
+    signal_set = set(signals)
+    onyomi = set(wk_onyomi_readings(kanji_subject))
+    if not onyomi:
+        return "", []
+    tested = list(card_readings) if card_readings is not None else primary_readings(kanji_subject)
+    matched = [reading for reading in tested if reading in onyomi and reading in signal_set]
+    # Preserve first-seen order; drop dupes.
+    ordered: List[str] = []
+    seen: Set[str] = set()
+    for reading in matched:
+        if reading in seen:
+            continue
+        seen.add(reading)
+        ordered.append(reading)
+    return (comp, ordered) if ordered else ("", [])
+
+
+def core_phonetic_hint_html(
+    subject: dict,
+    *,
+    keisei_kanji: Optional[Mapping[str, dict]] = None,
+    keisei_phonetic: Optional[Mapping[str, dict]] = None,
+    subject_by_id: Optional[Mapping[int, dict]] = None,
+) -> str:
+    """Compact back-of-card marker when Core reading is a phonetic on'yomi signal.
+
+    Kanji: uses the subject itself. Single-kanji vocabulary: uses its one kanji
+    component. Multi-kanji vocab returns empty (reading attribution is ambiguous).
+    """
+    if not keisei_kanji or not keisei_phonetic:
+        return ""
+    object_type = subject.get("object")
+    data = subject.get("data") or {}
+
+    if object_type == "kanji":
+        char = data.get("characters") or ""
+        kanji_subject = subject
+        card_readings = primary_readings(subject)
+    elif object_type == "vocabulary":
+        component_ids = [
+            int(component_id)
+            for component_id in (data.get("component_subject_ids") or [])
+            if component_id is not None
+        ]
+        if len(component_ids) != 1 or subject_by_id is None:
+            return ""
+        kanji_subject = subject_by_id.get(component_ids[0])
+        if not kanji_subject or kanji_subject.get("object") != "kanji":
+            return ""
+        char = (kanji_subject.get("data") or {}).get("characters") or ""
+        # Vocab card tests the word reading; require it to be that kanji's on'yomi signal.
+        card_readings = primary_readings(subject)
+    else:
+        return ""
+
+    comp, matched = matching_phonetic_signal_onyomi(
+        kanji_subject,
+        char,
+        keisei_kanji,
+        keisei_phonetic,
+        card_readings=card_readings,
+    )
+    if not comp or not matched:
+        return ""
+    reading_label = html.escape("、".join(matched))
+    return (
+        "<div class='phonetic-hint'>"
+        "<span class='meta'>Phonetic</span> "
+        f"<span class='jp'>{html.escape(comp)}</span> → "
+        f"<span class='reading'>{reading_label}</span>"
+        "</div>"
+    )
 
 
 def first_reading(subject: dict) -> str:
@@ -8473,6 +8577,8 @@ def main() -> None:
             "subject_by_id": subject_index_by_id(subjects),
             "vocab_by_characters": vocab_index_by_characters(subjects),
             "kanji_by_characters": kanji_index_by_characters(subjects),
+            "keisei_kanji": keisei_databases.get("kanji") or {},
+            "keisei_phonetic": keisei_databases.get("phonetic") or {},
         }
         reading_audio_kwargs = {
             "reading_audio": bool(args.reading_audio),

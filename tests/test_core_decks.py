@@ -74,6 +74,7 @@ class CoreDecksTests(unittest.TestCase):
         self.assertIn("PrerequisiteIds", radical_fields)
         self.assertIn("WkSubjectId", item_fields)
         self.assertIn("PrerequisiteIds", item_fields)
+        self.assertIn("PhoneticHint", item_fields)
 
     def test_core_item_model_has_single_review_template(self) -> None:
         model = make_core_item_model()

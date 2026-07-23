@@ -27,6 +27,7 @@ from wk_decks import (
     WkModel,
     all_wk_kanji_subjects,
     context_sentences_html,
+    core_phonetic_hint_html,
     ensure_radical_media_files,
     meta_html,
     primary_meanings,
@@ -151,6 +152,7 @@ def make_core_item_model() -> WkModel:
             {"name": "ReadingMnemonic"},
             {"name": "SubjectType"},
             {"name": "ReadingsDetail"},
+            {"name": "PhoneticHint"},
             {"name": "Meta"},
             {"name": "ContextSentences"},
             {"name": "StyleClass"},
@@ -181,6 +183,7 @@ def make_core_item_model() -> WkModel:
                 <div class="reading answer">{{Reading}}</div>
                 {{#ReadingAudio}}<div class="reading-audio">{{ReadingAudio}}</div>{{/ReadingAudio}}
                 {{#ReadingsDetail}}<div class="reading-detail">{{ReadingsDetail}}</div>{{/ReadingsDetail}}
+                {{#PhoneticHint}}{{PhoneticHint}}{{/PhoneticHint}}
                 {{#Mnemonic}}<h3>Meaning mnemonic</h3><div class="notes">{{Mnemonic}}</div>{{/Mnemonic}}
                 {{#ReadingMnemonic}}<h3>Reading mnemonic</h3><div class="notes">{{ReadingMnemonic}}</div>{{/ReadingMnemonic}}
                 {{#ContextSentences}}<h3>Context</h3>{{ContextSentences}}{{/ContextSentences}}
@@ -192,6 +195,14 @@ def make_core_item_model() -> WkModel:
             COMMON_CSS
             + """
 .type-answer { margin: 16px auto; max-width: 520px; font-size: 28px; }
+.phonetic-hint {
+  font-size: 15px;
+  color: #aaa;
+  margin: 8px auto 4px;
+  max-width: 760px;
+}
+.phonetic-hint .jp { font-size: 22px; margin: 0 4px; }
+.phonetic-hint .reading { font-size: 18px; color: #d8d8d8; font-weight: 500; }
 """
             + READING_AUDIO_CSS
             + WK_MNEMONIC_CSS,
@@ -244,6 +255,8 @@ def add_core_item_note(
     subject_by_id: Optional[Mapping[int, dict]] = None,
     vocab_by_characters: Optional[Mapping[str, dict]] = None,
     kanji_by_characters: Optional[Mapping[str, dict]] = None,
+    keisei_kanji: Optional[Mapping[str, dict]] = None,
+    keisei_phonetic: Optional[Mapping[str, dict]] = None,
 ) -> str:
     data = subject["data"]
     expr = data.get("characters") or ""
@@ -271,6 +284,12 @@ def add_core_item_note(
             ),
             html.escape(subject_type_label(subject)),
             readings_detail_html(subject),
+            core_phonetic_hint_html(
+                subject,
+                keisei_kanji=keisei_kanji,
+                keisei_phonetic=keisei_phonetic,
+                subject_by_id=subject_by_id,
+            ),
             core_meta_html(subject, assignment_index),
             context_sentences_html(subject),
             subject_style_class(subject),
@@ -391,6 +410,8 @@ def _populate_core_item_deck(
     subject_by_id: Optional[Mapping[int, dict]] = None,
     vocab_by_characters: Optional[Mapping[str, dict]] = None,
     kanji_by_characters: Optional[Mapping[str, dict]] = None,
+    keisei_kanji: Optional[Mapping[str, dict]] = None,
+    keisei_phonetic: Optional[Mapping[str, dict]] = None,
 ) -> Dict[str, WkCardScheduleSpec]:
     schedule_specs: Dict[str, WkCardScheduleSpec] = {}
     media_files: List[str] = []
@@ -437,6 +458,8 @@ def _populate_core_item_deck(
             subject_by_id=subject_by_id,
             vocab_by_characters=vocab_by_characters,
             kanji_by_characters=kanji_by_characters,
+            keisei_kanji=keisei_kanji,
+            keisei_phonetic=keisei_phonetic,
         )
         spec = _schedule_spec_for_subject(
             CORE_ITEM_KIND,
@@ -474,6 +497,8 @@ def build_core_kanji_deck(
     subject_by_id: Optional[Mapping[int, dict]] = None,
     vocab_by_characters: Optional[Mapping[str, dict]] = None,
     kanji_by_characters: Optional[Mapping[str, dict]] = None,
+    keisei_kanji: Optional[Mapping[str, dict]] = None,
+    keisei_phonetic: Optional[Mapping[str, dict]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-kanji"], DECK_NAMES["core-kanji"])
     model = make_core_item_model()
@@ -506,6 +531,8 @@ def build_core_kanji_deck(
         subject_by_id=subject_by_id,
         vocab_by_characters=vocab_by_characters,
         kanji_by_characters=kanji_by_characters,
+        keisei_kanji=keisei_kanji,
+        keisei_phonetic=keisei_phonetic,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_kanji.apkg"
@@ -536,6 +563,8 @@ def build_core_vocab_deck(
     subject_by_id: Optional[Mapping[int, dict]] = None,
     vocab_by_characters: Optional[Mapping[str, dict]] = None,
     kanji_by_characters: Optional[Mapping[str, dict]] = None,
+    keisei_kanji: Optional[Mapping[str, dict]] = None,
+    keisei_phonetic: Optional[Mapping[str, dict]] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(DECK_IDS["core-vocabulary"], DECK_NAMES["core-vocabulary"])
     model = make_core_item_model()
@@ -568,6 +597,8 @@ def build_core_vocab_deck(
         subject_by_id=subject_by_id,
         vocab_by_characters=vocab_by_characters,
         kanji_by_characters=kanji_by_characters,
+        keisei_kanji=keisei_kanji,
+        keisei_phonetic=keisei_phonetic,
     )
     _attach_schedule_specs(deck, schedule_specs, bootstrap_scheduling=bootstrap_scheduling)
     out = output_dir / "wk_core_vocabulary.apkg"

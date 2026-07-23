@@ -316,6 +316,8 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Phonetic families:** Keisei DB in `.wk_cache/keisei/`. Unlock when any family kanji reviewed once in the meaning anchor. Card backs lead with the phonetic component, then “usually signals” ordered most→least (with WK mnemonic keywords, e.g. `しょ - Show`), then a focus table of Reading / Started / Total by each family kanji’s primary on’yomi (rows sum to the footer). Regen: `python wk_decks.py --deck phonetic-families`. Live patch: `python3 scripts/patch_phonetic_readings_ankiconnect.py --from-cache`.
 
+**Core Item phonetic hint:** when a Core Kanji (or single-kanji vocab) card tests an on’yomi that the kanji’s phonetic component usually signals, the back shows e.g. `Phonetic 寺 → じ`. Multi-kanji vocab is skipped. Regen with core decks, or live patch: `python3 scripts/patch_core_phonetic_hint_ankiconnect.py --from-cache`.
+
 **Kanji meaning anchor:** kanji character on front, primary WK meaning(s) on back — no reading required, **no import lock**. Primary kanji path. Guru a kanji here (≥ 7 day interval) to unlock conjugations / verb·adj types whose `PrerequisiteIds` include that kanji. `--deck kanji-meaning` to build standalone.
 
 **Yomitan immersion:** Sentence cloze on front — type the reading in kana; sentence audio + pitch on back; second **Shadow → pitch** card for speaking practice. Native YouTube clips via `scripts/extract_immersion_clip.py`. Setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
