@@ -434,6 +434,12 @@ to introduce immersion-linked core cards immediately (Satori/Shadowing via
 `WkSubjectId` + kanji prereqs; Candidates via Expression / kanji-char match; no
 radicals). Manual rebuild: **Tools → WK Rebuild Immersion Core Decks**.
 
+Keep **Reschedule cards based on my answers** on (the addon sets this). Do not
+rebuild/empty while cards are still in learning — Anki turns those back into
+**new**. If that already happened: Browse the cards → **Cards → Set Due Date → 0**
+(converts new → review due today). The addon also salvages graduated-but-new
+cards before rebuild and skips rebuild while learning cards are present.
+
 **Unseen vs new limit:** in WK Deck Stats, **Unseen** = unlocked notes with
 reps=0 (backlog), not “new left today.” A high radicals new/day only matters if
 you study Core Radicals.

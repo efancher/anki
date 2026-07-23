@@ -314,6 +314,39 @@ def immersion_core_filtered_search(home_deck: str, immersion_core_tag: str) -> s
     )
 
 
+# Anki card queues: learning / day-learning. Emptying a filtered deck while cards
+# are in these queues resets them to new (Anki scheduler behavior).
+ANKI_QUEUE_LEARN = 1
+ANKI_QUEUE_DAY_LEARN = 3
+
+
+def filtered_deck_has_learning_queues(queues: Sequence[int]) -> bool:
+    """True when any card queue is learn or day-learn."""
+    return any(queue in (ANKI_QUEUE_LEARN, ANKI_QUEUE_DAY_LEARN) for queue in queues)
+
+
+def graduated_but_new_card_ids(
+    card_types_by_id: Mapping[int, int],
+    last_revlog_ivl_by_id: Mapping[int, int],
+    *,
+    new_type: int = 0,
+) -> List[int]:
+    """Card ids that are still new but whose latest revlog interval is a graduation.
+
+    Used to salvage cards after a filtered-deck rebuild reset learning → new.
+    Positive revlog ``ivl`` is days (graduation / review); negative is seconds
+    (still in learning steps).
+    """
+    salvaged: List[int] = []
+    for card_id, card_type in card_types_by_id.items():
+        if card_type != new_type:
+            continue
+        if last_revlog_ivl_by_id.get(card_id, 0) > 0:
+            salvaged.append(int(card_id))
+    salvaged.sort()
+    return salvaged
+
+
 def filter_non_radical_subject_ids(
     subject_ids: Set[int],
     kind_by_id: Mapping[int, str],

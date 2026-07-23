@@ -249,6 +249,19 @@ class ImmersionCoreFilteredLogicTests(unittest.TestCase):
         self.assertIn("Immersion Core · Satori · Kanji", names)
         self.assertIn("Immersion Core · Candidates · Vocabulary", names)
 
+    def test_filtered_deck_has_learning_queues(self) -> None:
+        self.assertFalse(logic.filtered_deck_has_learning_queues([0, 2, -1]))
+        self.assertTrue(logic.filtered_deck_has_learning_queues([0, 1, 2]))
+        self.assertTrue(logic.filtered_deck_has_learning_queues([3]))
+
+    def test_graduated_but_new_card_ids(self) -> None:
+        types = {10: 0, 11: 0, 12: 2, 13: 0}
+        last_ivl = {10: 1, 11: -600, 12: 1, 13: 0}
+        self.assertEqual(
+            logic.graduated_but_new_card_ids(types, last_ivl),
+            [10],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

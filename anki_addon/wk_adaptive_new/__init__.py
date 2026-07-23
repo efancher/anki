@@ -47,6 +47,8 @@ from .logic import (
     candidate_linked_subject_ids,
     effective_immersion_tags,
     immersion_cards_to_unsuspend,
+    filtered_deck_has_learning_queues,
+    graduated_but_new_card_ids,
     immersion_core_filtered_search,
     immersion_core_tag_sync_actions,
     parse_subject_ids,
@@ -517,6 +519,7 @@ def _set_filtered_deck_search(
     if hasattr(filtered, "allow_empty"):
         filtered.allow_empty = True
     config = filtered.config
+    # Must stay on: off = preview mode (answers log but home scheduling unchanged).
     config.reschedule = True
     terms = [
         FilteredDeckConfig.SearchTerm(
@@ -529,18 +532,62 @@ def _set_filtered_deck_search(
     config.search_terms.extend(terms)
 
 
+def _filtered_deck_card_queues(col: Any, deck_id: int) -> List[int]:
+    rows = col.db.all("select queue from cards where did = ?", deck_id)
+    return [int(row[0]) for row in rows]
+
+
+def _salvage_graduated_new_cards_in_filtered_deck(col: Any, deck_id: int) -> int:
+    """Reintroduce new cards that already graduated (filtered rebuild casualty)."""
+    rows = col.db.all("select id, type from cards where did = ?", deck_id)
+    if not rows:
+        return 0
+    types_by_id = {int(card_id): int(card_type) for card_id, card_type in rows}
+    last_ivl_by_id: Dict[int, int] = {}
+    for card_id in types_by_id:
+        ivl_row = col.db.first(
+            "select ivl from revlog where cid = ? order by id desc limit 1",
+            card_id,
+        )
+        if ivl_row is not None:
+            last_ivl_by_id[card_id] = int(ivl_row[0])
+    salvage_ids = graduated_but_new_card_ids(types_by_id, last_ivl_by_id)
+    if not salvage_ids:
+        return 0
+    # Converts new → review due today (same as Browse → Cards → Set Due Date → 0).
+    col.set_due_date(salvage_ids, "0")
+    return len(salvage_ids)
+
+
 def ensure_immersion_core_filtered_deck(
     col: Any,
     *,
     name: str,
     home_deck: str,
     immersion_core_tag: str,
-) -> int:
-    """Create or update one Immersion Core filtered deck; return deck id."""
+) -> Tuple[int, str]:
+    """Create or update one Immersion Core filtered deck.
+
+    Returns ``(deck_id, status)`` where status is a short human note about
+    salvage / skipped rebuild / rebuilt.
+    """
     from anki.decks import DeckId
 
     search = immersion_core_filtered_search(home_deck, immersion_core_tag)
     existing_id = _filtered_deck_id_by_name(col, name)
+    status_bits: List[str] = []
+
+    if existing_id is not None:
+        salvaged = _salvage_graduated_new_cards_in_filtered_deck(col, existing_id)
+        if salvaged:
+            status_bits.append(f"salvaged {salvaged} graduated-new")
+        queues = _filtered_deck_card_queues(col, existing_id)
+        if filtered_deck_has_learning_queues(queues):
+            # Updating/rebuilding empties the deck; Anki turns learning cards
+            # back into new. Leave in-progress study alone.
+            status_bits.append("skipped rebuild (learning cards present)")
+            return existing_id, "; ".join(status_bits)
+
     if existing_id is not None:
         filtered = col.sched.get_or_create_filtered_deck(DeckId(existing_id))
     else:
@@ -556,10 +603,11 @@ def ensure_immersion_core_filtered_deck(
     if deck_id:
         try:
             col.sched.rebuild_filtered_deck(DeckId(deck_id))
+            status_bits.append("rebuilt")
         except Exception:
             # Empty rebuild can still raise on older builds; deck exists.
-            pass
-    return deck_id
+            status_bits.append("rebuild skipped (anki error)")
+    return deck_id, "; ".join(status_bits) or "ok"
 
 
 def rebuild_immersion_core_filtered_decks(col: Any) -> List[str]:
@@ -568,7 +616,7 @@ def rebuild_immersion_core_filtered_decks(col: Any) -> List[str]:
     errors: List[str] = []
     for name, home_deck, core_tag in IMMERSION_CORE_FILTERED_DECKS:
         try:
-            deck_id = ensure_immersion_core_filtered_deck(
+            deck_id, status = ensure_immersion_core_filtered_deck(
                 col,
                 name=name,
                 home_deck=home_deck,
@@ -576,7 +624,10 @@ def rebuild_immersion_core_filtered_decks(col: Any) -> List[str]:
             )
             card_count = len(col.find_cards(f'deck:"{name}"')) if deck_id else 0
             if deck_id:
-                lines.append(f"{name}: {card_count} card(s)")
+                detail = f"{card_count} card(s)"
+                if status:
+                    detail = f"{detail}; {status}"
+                lines.append(f"{name}: {detail}")
             else:
                 errors.append(f"{name}: create returned no deck id")
         except Exception as exc:  # noqa: BLE001 — report per-deck failures
