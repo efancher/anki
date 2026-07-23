@@ -1,7 +1,7 @@
 """
 Pure deck stats logic for wk_deck_stats (testable without Anki runtime).
 
-WK core decks use note-level WaniKani-style buckets (interval thresholds).
+WK core decks use note-level immersion-first buckets: Locked / New / Reviewed.
 All other decks use card-level Anki queue counts.
 """
 
@@ -16,9 +16,6 @@ ANKI_CARD_TYPE_LEARN = 1
 ANKI_CARD_TYPE_REVIEW = 2
 ANKI_CARD_TYPE_RELEARN = 3
 ANKI_QUEUE_SUSPENDED = -1
-
-GURU_MIN_INTERVAL_DAYS = 7  # WaniKani Guru I (srs_stage 5)
-MASTER_MIN_INTERVAL_DAYS = 30  # WaniKani Master (srs_stage 7)
 
 CORE_RADICALS_DECK = "WaniKani Core · Radicals"
 CORE_KANJI_DECK = "WaniKani Core · Kanji"
@@ -56,7 +53,6 @@ SUPPLEMENTARY_DECK_ORDER: Tuple[str, ...] = (
     "Immersion · Satori",
     "Immersion · Shadowing",
     "Immersion · Shadowing Candidates",
-
     "WaniKani Leech Fixes",
     "WaniKani Pitch Leeches",
     "WaniKani Verb Pair Contrasts",
@@ -92,11 +88,9 @@ class NoteRow:
 @dataclass(frozen=True)
 class WkDeckRow:
     deck_name: str
-    unseen_count: int
-    apprentice_count: int
-    guru_count: int
-    master_count: int
     locked_count: int
+    new_count: int
+    reviewed_count: int
     total_notes: int
 
 
@@ -116,7 +110,7 @@ class ImmersionCoreProgressRow:
 
     subject_kind: str
     locked_count: int
-    unseen_count: int
+    new_count: int
     reviewed_count: int
     total_notes: int
 
@@ -142,38 +136,29 @@ def note_has_tag(note: NoteRow, tag: str) -> bool:
     return tag in note.tags or any(item.startswith(f"{tag}::") for item in note.tags)
 
 
-def note_never_reviewed(note: NoteRow) -> bool:
+def note_is_new(note: NoteRow) -> bool:
+    """True when every active card is still in the Anki new queue (is:new)."""
     active = [card for card in note.cards if is_active_card(card)]
     if not active:
         return False
-    return all(card.reps <= 0 for card in active)
+    return all(card.card_type == ANKI_CARD_TYPE_NEW for card in active)
 
 
 def classify_wk_note(note: NoteRow) -> str:
-    """Return one of: locked, unseen, apprentice, guru, master."""
+    """Return one of: locked, new, reviewed (immersion-first core buckets)."""
     if note_has_tag(note, WK_LOCKED_TAG):
         return "locked"
     active = [card for card in note.cards if is_active_card(card)]
     if not active:
         return "locked"
-    if note_never_reviewed(note):
-        return "unseen"
-    max_ivl = max(card.ivl for card in active)
-    if max_ivl >= MASTER_MIN_INTERVAL_DAYS:
-        return "master"
-    if max_ivl >= GURU_MIN_INTERVAL_DAYS:
-        return "guru"
-    return "apprentice"
+    if note_is_new(note):
+        return "new"
+    return "reviewed"
 
 
 def classify_immersion_core_note(note: NoteRow) -> str:
-    """Return one of: locked, unseen, reviewed."""
-    bucket = classify_wk_note(note)
-    if bucket == "locked":
-        return "locked"
-    if bucket == "unseen":
-        return "unseen"
-    return "reviewed"
+    """Return one of: locked, new, reviewed."""
+    return classify_wk_note(note)
 
 
 def parse_prerequisite_ids(value: Optional[str]) -> Tuple[int, ...]:
@@ -250,7 +235,7 @@ def build_immersion_core_progress(
     if not immersion_subject_ids:
         return None
     locked_count = 0
-    unseen_count = 0
+    new_count = 0
     reviewed_count = 0
     for note in notes:
         if note_subject_kind(note) != subject_kind:
@@ -260,17 +245,17 @@ def build_immersion_core_progress(
         bucket = classify_immersion_core_note(note)
         if bucket == "locked":
             locked_count += 1
-        elif bucket == "unseen":
-            unseen_count += 1
+        elif bucket == "new":
+            new_count += 1
         else:
             reviewed_count += 1
-    total = locked_count + unseen_count + reviewed_count
+    total = locked_count + new_count + reviewed_count
     if total == 0:
         return None
     return ImmersionCoreProgressRow(
         subject_kind=subject_kind,
         locked_count=locked_count,
-        unseen_count=unseen_count,
+        new_count=new_count,
         reviewed_count=reviewed_count,
         total_notes=total,
     )
@@ -291,19 +276,15 @@ def build_cards_by_deck(cards: Sequence[CardRow]) -> Dict[str, List[CardRow]]:
 
 
 def build_wk_deck_row(deck_name: str, notes: Sequence[NoteRow]) -> WkDeckRow:
-    counts = {"unseen": 0, "apprentice": 0, "guru": 0, "master": 0, "locked": 0}
+    counts = {"locked": 0, "new": 0, "reviewed": 0}
     for note in notes:
-        bucket = classify_wk_note(note)
-        counts[bucket] += 1
-    total = len(notes)
+        counts[classify_wk_note(note)] += 1
     return WkDeckRow(
         deck_name=deck_name,
-        unseen_count=counts["unseen"],
-        apprentice_count=counts["apprentice"],
-        guru_count=counts["guru"],
-        master_count=counts["master"],
         locked_count=counts["locked"],
-        total_notes=total,
+        new_count=counts["new"],
+        reviewed_count=counts["reviewed"],
+        total_notes=len(notes),
     )
 
 
@@ -398,11 +379,11 @@ def _format_immersion_progress(title: str, row: ImmersionCoreProgressRow) -> Lis
     lines = [
         title,
         "=" * 48,
-        f"{'Locked':>8} {'Unseen':>8} {'Reviewed':>10} {'Total':>8}",
+        f"{'Locked':>8} {'New':>8} {'Reviewed':>10} {'Total':>8}",
         "-" * 48,
         (
             f"{_pad(row.locked_count, 8)} "
-            f"{_pad(row.unseen_count, 8)} "
+            f"{_pad(row.new_count, 8)} "
             f"{_pad(row.reviewed_count, 10)} "
             f"{_pad(row.total_notes, 8)}"
         ),
@@ -416,47 +397,33 @@ def format_deck_stats_report(report: DeckStatsReport) -> str:
 
     if report.wk_rows:
         lines.append(
-            "WaniKani core (notes — Unseen reps=0 · Apprentice <7d · Guru 7–29d · Master ≥30d)"
+            "WaniKani core (notes — Locked / New is:new / Reviewed introduced)"
         )
-        lines.append("=" * 84)
+        lines.append("=" * 72)
         header = (
-            f"{'Deck':<30} {'Unseen':>6} {'Appr':>5} {'Guru':>6} "
-            f"{'Master':>7} {'Locked':>7} {'Total':>6}"
+            f"{'Deck':<30} {'Locked':>7} {'New':>6} {'Reviewed':>9} {'Total':>6}"
         )
         lines.append(header)
-        lines.append("-" * 84)
-        totals = {
-            "unseen": 0,
-            "apprentice": 0,
-            "guru": 0,
-            "master": 0,
-            "locked": 0,
-            "total": 0,
-        }
+        lines.append("-" * 72)
+        totals = {"locked": 0, "new": 0, "reviewed": 0, "total": 0}
         for row in report.wk_rows:
             lines.append(
                 f"{row.deck_name:<30} "
-                f"{_pad(row.unseen_count, 6)} "
-                f"{_pad(row.apprentice_count, 5)} "
-                f"{_pad(row.guru_count, 6)} "
-                f"{_pad(row.master_count, 7)} "
                 f"{_pad(row.locked_count, 7)} "
+                f"{_pad(row.new_count, 6)} "
+                f"{_pad(row.reviewed_count, 9)} "
                 f"{_pad(row.total_notes, 6)}"
             )
-            totals["unseen"] += row.unseen_count
-            totals["apprentice"] += row.apprentice_count
-            totals["guru"] += row.guru_count
-            totals["master"] += row.master_count
             totals["locked"] += row.locked_count
+            totals["new"] += row.new_count
+            totals["reviewed"] += row.reviewed_count
             totals["total"] += row.total_notes
-        lines.append("-" * 84)
+        lines.append("-" * 72)
         lines.append(
             f"{'Core total':<30} "
-            f"{_pad(totals['unseen'], 6)} "
-            f"{_pad(totals['apprentice'], 5)} "
-            f"{_pad(totals['guru'], 6)} "
-            f"{_pad(totals['master'], 7)} "
             f"{_pad(totals['locked'], 7)} "
+            f"{_pad(totals['new'], 6)} "
+            f"{_pad(totals['reviewed'], 9)} "
             f"{_pad(totals['total'], 6)}"
         )
         lines.append("")
@@ -464,7 +431,7 @@ def format_deck_stats_report(report: DeckStatsReport) -> str:
     if report.immersion_kanji or report.immersion_vocab:
         lines.append(
             "Immersion-linked core (Satori/Shadowing WkSubjectId + PrerequisiteIds — "
-            "Locked / Unseen / Reviewed ≥1)"
+            "Locked / New / Reviewed)"
         )
         lines.append("")
         if report.immersion_kanji:
@@ -506,7 +473,8 @@ def format_deck_stats_report(report: DeckStatsReport) -> str:
         lines.append("No cards found in the collection.")
 
     lines.append(
-        "Core buckets use home deck (cards in WK:: filtered queues count toward core). "
-        f"Guru ≥ {GURU_MIN_INTERVAL_DAYS}d interval; Master ≥ {MASTER_MIN_INTERVAL_DAYS}d."
+        "Core buckets: Locked = wk-locked/suspended; New = is:new; "
+        "Reviewed = learning or review (including WK-seeded schedules). "
+        "Cards in filtered queues count toward the home deck."
     )
     return "\n".join(lines)

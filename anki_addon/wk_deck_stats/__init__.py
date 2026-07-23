@@ -182,20 +182,17 @@ class DeckStatsDialog(QDialog):
         if report.wk_rows:
             layout.addWidget(
                 QLabel(
-                    "WaniKani core (notes — Unseen reps=0 · Apprentice <7d · "
-                    "Guru 7–29d · Master ≥30d)"
+                    "WaniKani core (notes — Locked / New is:new / Reviewed introduced)"
                 )
             )
             layout.addWidget(_make_table(
-                ["Deck", "Unseen", "Appr", "Guru", "Master", "Locked", "Total"],
+                ["Deck", "Locked", "New", "Reviewed", "Total"],
                 [
                     [
                         row.deck_name,
-                        row.unseen_count,
-                        row.apprentice_count,
-                        row.guru_count,
-                        row.master_count,
                         row.locked_count,
+                        row.new_count,
+                        row.reviewed_count,
                         row.total_notes,
                     ]
                     for row in report.wk_rows
@@ -211,7 +208,7 @@ class DeckStatsDialog(QDialog):
                 continue
             layout.addWidget(
                 QLabel(
-                    f"{title} — Locked / Unseen / Reviewed ≥1 "
+                    f"{title} — Locked / New / Reviewed "
                     "(via immersion WkSubjectId + PrerequisiteIds)"
                 )
             )
@@ -235,8 +232,9 @@ class DeckStatsDialog(QDialog):
             ))
 
         footer = (
-            f"Guru ≥ 7d interval; Master ≥ 30d. "
-            "Cards in WK:: filtered queues count toward home deck."
+            "Core: Locked = wk-locked/suspended; New = is:new; "
+            "Reviewed = learning or review. "
+            "Cards in filtered queues count toward home deck."
         )
         layout.addWidget(QLabel(footer))
         self._report_text = report_text
@@ -248,22 +246,20 @@ class DeckStatsDialog(QDialog):
 def _sum_wk_rows(rows) -> List[object]:
     return [
         "Core total",
-        sum(row.unseen_count for row in rows),
-        sum(row.apprentice_count for row in rows),
-        sum(row.guru_count for row in rows),
-        sum(row.master_count for row in rows),
         sum(row.locked_count for row in rows),
+        sum(row.new_count for row in rows),
+        sum(row.reviewed_count for row in rows),
         sum(row.total_notes for row in rows),
     ]
 
 
 def _make_immersion_progress_table(row: ImmersionCoreProgressRow) -> QTableWidget:
     return _make_table(
-        ["Locked", "Unseen", "Reviewed", "Total"],
+        ["Locked", "New", "Reviewed", "Total"],
         [
             [
                 row.locked_count,
-                row.unseen_count,
+                row.new_count,
                 row.reviewed_count,
                 row.total_notes,
             ]

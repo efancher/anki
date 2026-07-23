@@ -188,18 +188,16 @@ then restart Anki.
 
 ### WaniKani core (Radicals / Kanji / Vocabulary)
 
-Note-level buckets aligned with WaniKani intervals:
+Note-level buckets for an immersion-first flow:
 
 | Column | Meaning |
 |--------|---------|
-| **Unseen** | Unlocked, active, **reps = 0** (never reviewed) |
-| **Appr** | Reviewed at least once, max interval &lt; 7 days (apprentice) |
-| **Guru** | Interval 7–29 days |
-| **Master** | Interval ≥ 30 days |
 | **Locked** | `wk-locked` or all cards suspended |
+| **New** | Unlocked and still in the Anki new queue (`is:new`) |
+| **Reviewed** | Introduced (learning or review), including WK-seeded schedules |
 | **Total** | Notes in that home deck |
 
-Cards studied in **WK::** filtered queues still count toward the core home deck.
+Cards studied in filtered queues still count toward the core home deck.
 
 ### Immersion-linked core (Satori / Shadowing)
 
@@ -210,8 +208,8 @@ Two summary tables for **WK Core Kanji** and **WK Core Vocabulary** whose
 | Column | Meaning |
 |--------|---------|
 | **Locked** | `wk-locked` or all cards suspended |
-| **Unseen** | Unlocked, active, **reps = 0** |
-| **Reviewed** | Reviewed at least once (apprentice / guru / master) |
+| **New** | Unlocked and still `is:new` |
+| **Reviewed** | Introduced (learning or review) |
 | **Total** | Immersion-linked notes of that kind |
 
 ### Other decks (grammar, conjugations, immersion, …)

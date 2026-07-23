@@ -53,6 +53,17 @@ def _card(**kwargs) -> CardRow:
     return CardRow(**defaults)
 
 
+def _new_card(**kwargs) -> CardRow:
+    defaults = {
+        "card_type": ANKI_CARD_TYPE_NEW,
+        "queue": 0,
+        "ivl": 0,
+        "reps": 0,
+    }
+    defaults.update(kwargs)
+    return _card(**defaults)
+
+
 def _note(**kwargs) -> NoteRow:
     defaults = {
         "note_id": 10,
@@ -73,56 +84,61 @@ def _note(**kwargs) -> NoteRow:
 class WkDeckStatsLogicTests(unittest.TestCase):
     def test_classify_wk_note_buckets(self) -> None:
         self.assertEqual(
-            classify_wk_note(_note(cards=(_card(ivl=0, reps=0),))),
-            "unseen",
+            classify_wk_note(_note(cards=(_new_card(),))),
+            "new",
+        )
+        self.assertEqual(
+            classify_wk_note(_note(cards=(_card(card_type=ANKI_CARD_TYPE_LEARN, queue=1, ivl=0, reps=1),))),
+            "reviewed",
         )
         self.assertEqual(
             classify_wk_note(_note(cards=(_card(ivl=2, reps=3),))),
-            "apprentice",
+            "reviewed",
         )
-        self.assertEqual(classify_wk_note(_note(cards=(_card(ivl=7, reps=4),))), "guru")
-        self.assertEqual(classify_wk_note(_note(cards=(_card(ivl=29, reps=4),))), "guru")
-        self.assertEqual(classify_wk_note(_note(cards=(_card(ivl=30, reps=4),))), "master")
+        # WK-seeded review with reps=0 counts as reviewed (not new).
         self.assertEqual(
-            classify_wk_note(_note(tags=(WK_LOCKED_TAG,), cards=(_card(ivl=30, reps=4),))),
+            classify_wk_note(_note(cards=(_card(ivl=119, reps=0),))),
+            "reviewed",
+        )
+        self.assertEqual(
+            classify_wk_note(_note(tags=(WK_LOCKED_TAG,), cards=(_new_card(),))),
             "locked",
         )
         self.assertEqual(
-            classify_wk_note(_note(cards=(_card(queue=ANKI_QUEUE_SUSPENDED, ivl=30, reps=4),))),
+            classify_wk_note(
+                _note(cards=(_card(queue=ANKI_QUEUE_SUSPENDED, ivl=30, reps=4),))
+            ),
             "locked",
         )
 
     def test_classify_immersion_core_note_buckets(self) -> None:
         self.assertEqual(
-            classify_immersion_core_note(_note(cards=(_card(ivl=0, reps=0),))),
-            "unseen",
+            classify_immersion_core_note(_note(cards=(_new_card(),))),
+            "new",
         )
         self.assertEqual(
             classify_immersion_core_note(_note(cards=(_card(ivl=2, reps=3),))),
             "reviewed",
         )
         self.assertEqual(
-            classify_immersion_core_note(_note(cards=(_card(ivl=40, reps=8),))),
-            "reviewed",
-        )
-        self.assertEqual(
             classify_immersion_core_note(
-                _note(tags=(WK_LOCKED_TAG,), cards=(_card(ivl=0, reps=0),))
+                _note(tags=(WK_LOCKED_TAG,), cards=(_new_card(),))
             ),
             "locked",
         )
 
     def test_core_deck_report_aggregates_notes(self) -> None:
         notes = [
-            _note(note_id=1, cards=(_card(card_id=1, note_id=1, ivl=0, reps=0),)),
+            _note(note_id=1, cards=(_new_card(card_id=1, note_id=1),)),
             _note(note_id=2, cards=(_card(card_id=2, note_id=2, ivl=2, reps=2),)),
             _note(note_id=3, cards=(_card(card_id=3, note_id=3, ivl=10, reps=5),)),
-            _note(note_id=4, cards=(_card(card_id=4, note_id=4, ivl=40, reps=8),)),
             _note(
-                note_id=5,
+                note_id=4,
                 deck_name=CORE_VOCABULARY_DECK,
                 tags=(WK_LOCKED_TAG, "wk-core"),
-                cards=(_card(card_id=5, note_id=5, deck_name=CORE_VOCABULARY_DECK, ivl=0, reps=0),),
+                cards=(
+                    _new_card(card_id=4, note_id=4, deck_name=CORE_VOCABULARY_DECK),
+                ),
             ),
         ]
         cards = [card for note in notes for card in note.cards]
@@ -132,11 +148,10 @@ class WkDeckStatsLogicTests(unittest.TestCase):
             generated_at="2026-07-05 12:00 UTC",
         )
         kanji = next(row for row in report.wk_rows if row.deck_name == CORE_KANJI_DECK)
-        self.assertEqual(kanji.unseen_count, 1)
-        self.assertEqual(kanji.apprentice_count, 1)
-        self.assertEqual(kanji.guru_count, 1)
-        self.assertEqual(kanji.master_count, 1)
-        self.assertEqual(kanji.total_notes, 4)
+        self.assertEqual(kanji.new_count, 1)
+        self.assertEqual(kanji.reviewed_count, 2)
+        self.assertEqual(kanji.locked_count, 0)
+        self.assertEqual(kanji.total_notes, 3)
         vocab = next(row for row in report.wk_rows if row.deck_name == CORE_VOCABULARY_DECK)
         self.assertEqual(vocab.locked_count, 1)
 
@@ -200,7 +215,10 @@ class WkDeckStatsLogicTests(unittest.TestCase):
         )
         text = format_deck_stats_report(report)
         self.assertIn("WaniKani core", text)
-        self.assertIn("Unseen", text)
+        self.assertIn("New", text)
+        self.assertIn("Reviewed", text)
+        self.assertNotIn("Appr", text)
+        self.assertNotIn("Guru", text)
         self.assertIn(CORE_KANJI_DECK, text)
         self.assertIn("Core total", text)
 
@@ -230,13 +248,19 @@ class WkDeckStatsLogicTests(unittest.TestCase):
             _note(
                 note_id=1,
                 wk_subject_id=10,
-                cards=(_card(card_id=1, note_id=1, ivl=0, reps=0),),
+                cards=(_new_card(card_id=1, note_id=1),),
             ),
             _note(
                 note_id=2,
                 wk_subject_id=11,
                 tags=(WK_LOCKED_TAG, "wk-core", "kanji"),
-                cards=(_card(card_id=2, note_id=2, queue=ANKI_QUEUE_SUSPENDED, ivl=0, reps=0),),
+                cards=(
+                    _new_card(
+                        card_id=2,
+                        note_id=2,
+                        queue=ANKI_QUEUE_SUSPENDED,
+                    ),
+                ),
             ),
             _note(
                 note_id=3,
@@ -250,7 +274,15 @@ class WkDeckStatsLogicTests(unittest.TestCase):
                 tags=("wk-core", "vocabulary"),
                 is_kanji=False,
                 is_vocabulary=True,
-                cards=(_card(card_id=4, note_id=4, deck_name=CORE_VOCABULARY_DECK, ivl=5, reps=2),),
+                cards=(
+                    _card(
+                        card_id=4,
+                        note_id=4,
+                        deck_name=CORE_VOCABULARY_DECK,
+                        ivl=5,
+                        reps=2,
+                    ),
+                ),
             ),
             _note(
                 note_id=5,
@@ -260,12 +292,10 @@ class WkDeckStatsLogicTests(unittest.TestCase):
                 is_kanji=False,
                 is_vocabulary=True,
                 cards=(
-                    _card(
+                    _new_card(
                         card_id=5,
                         note_id=5,
                         deck_name=CORE_VOCABULARY_DECK,
-                        ivl=0,
-                        reps=0,
                     ),
                 ),
             ),
@@ -277,7 +307,7 @@ class WkDeckStatsLogicTests(unittest.TestCase):
             subject_kind="kanji",
         )
         assert kanji is not None
-        self.assertEqual(kanji.unseen_count, 1)
+        self.assertEqual(kanji.new_count, 1)
         self.assertEqual(kanji.locked_count, 1)
         self.assertEqual(kanji.reviewed_count, 0)
         self.assertEqual(kanji.total_notes, 2)
@@ -289,7 +319,7 @@ class WkDeckStatsLogicTests(unittest.TestCase):
         )
         assert vocab is not None
         self.assertEqual(vocab.reviewed_count, 1)
-        self.assertEqual(vocab.unseen_count, 0)
+        self.assertEqual(vocab.new_count, 0)
         self.assertEqual(vocab.total_notes, 1)
 
     def test_report_includes_immersion_core_progress(self) -> None:
@@ -297,7 +327,7 @@ class WkDeckStatsLogicTests(unittest.TestCase):
             _note(
                 note_id=1,
                 wk_subject_id=10,
-                cards=(_card(card_id=1, note_id=1, ivl=0, reps=0),),
+                cards=(_new_card(card_id=1, note_id=1),),
             ),
             _note(
                 note_id=2,
@@ -306,7 +336,15 @@ class WkDeckStatsLogicTests(unittest.TestCase):
                 tags=("wk-core", "vocabulary"),
                 is_kanji=False,
                 is_vocabulary=True,
-                cards=(_card(card_id=2, note_id=2, deck_name=CORE_VOCABULARY_DECK, ivl=8, reps=3),),
+                cards=(
+                    _card(
+                        card_id=2,
+                        note_id=2,
+                        deck_name=CORE_VOCABULARY_DECK,
+                        ivl=8,
+                        reps=3,
+                    ),
+                ),
             ),
         ]
         cards = [card for note in notes for card in note.cards]
@@ -318,7 +356,7 @@ class WkDeckStatsLogicTests(unittest.TestCase):
         )
         assert report.immersion_kanji is not None
         assert report.immersion_vocab is not None
-        self.assertEqual(report.immersion_kanji.unseen_count, 1)
+        self.assertEqual(report.immersion_kanji.new_count, 1)
         self.assertEqual(report.immersion_vocab.reviewed_count, 1)
         text = format_deck_stats_report(report)
         self.assertIn("WK Core Kanji (in Satori or Shadowing)", text)
