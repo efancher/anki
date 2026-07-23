@@ -25,6 +25,7 @@ from .logic import (
     NoteUnlockState,
     UnlockAction,
     WkUnlockConfig,
+    DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY,
     build_mature_subject_ids,
     build_reviewed_once_subject_ids,
     mining_hint_updates_for_notes,
@@ -70,6 +71,12 @@ def load_unlock_config() -> WkUnlockConfig:
             mature_min_interval_days=int(payload.get("mature_min_interval_days", 7)),
             mature_require_all_card_types=bool(payload.get("mature_require_all_card_types", True)),
             burned_interval_days=int(payload.get("burned_interval_days", 365)),
+            retire_kanji_radical_phonetic_study=bool(
+                payload.get(
+                    "retire_kanji_radical_phonetic_study",
+                    DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY,
+                )
+            ),
         )
     return WkUnlockConfig()
 

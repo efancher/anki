@@ -11,6 +11,9 @@ ANKI_QUEUE_SUSPENDED = -1
 
 DEFAULT_MATURE_MIN_INTERVAL_DAYS = 7  # WaniKani Guru I (srs_stage 5) — “guru’d at least once”
 DEFAULT_BURNED_INTERVAL_DAYS = 365
+# When True: unlock Core Vocabulary without Core Kanji maturity; never unlock
+# Core Radicals/Kanji (those decks stay suspended under retire mode).
+DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY = True
 
 WK_LOCKED_TAG = "wk-locked"
 WK_DEPS_MET_TAG = "wk-deps-met"
@@ -18,12 +21,30 @@ WK_MATURE_TAG = "wk-mature"
 WK_CORE_TAG = "wk-core"
 PHONETIC_FAMILY_TAG = "phonetic-family"
 
+# Conjugation / type drills unlock from Core Vocabulary maturity (WkSubjectId),
+# not from Kanji Meaning Anchor PrerequisiteIds.
+VOCAB_GATED_SUPPLEMENTARY_TAGS = frozenset(
+    {
+        "conjugation-verb",
+        "conjugation-adjective",
+        "conjugation-reverse",
+        "verb-type",
+        "adjective-type",
+        "satori-conjugation",
+    }
+)
+
+SUBJECT_KIND_VOCABULARY = "vocabulary"
+SUBJECT_KIND_KANJI = "kanji"
+SUBJECT_KIND_RADICAL = "radical"
+
 
 @dataclass(frozen=True)
 class WkUnlockConfig:
     mature_min_interval_days: int = DEFAULT_MATURE_MIN_INTERVAL_DAYS
     mature_require_all_card_types: bool = True
     burned_interval_days: int = DEFAULT_BURNED_INTERVAL_DAYS
+    retire_kanji_radical_phonetic_study: bool = DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY
 
 
 @dataclass(frozen=True)
@@ -118,6 +139,23 @@ def any_prerequisites_met(
     return any(prerequisite_id in subject_ids for prerequisite_id in prerequisite_ids)
 
 
+def core_subject_kind_from_tags(tags: Sequence[str]) -> Optional[str]:
+    """Infer radical/kanji/vocabulary from note tags."""
+    tag_set = {str(tag) for tag in tags}
+    if SUBJECT_KIND_VOCABULARY in tag_set:
+        return SUBJECT_KIND_VOCABULARY
+    if SUBJECT_KIND_KANJI in tag_set:
+        return SUBJECT_KIND_KANJI
+    if SUBJECT_KIND_RADICAL in tag_set:
+        return SUBJECT_KIND_RADICAL
+    return None
+
+
+def uses_core_vocab_unlock(tags: Sequence[str]) -> bool:
+    """True for conjugation / verb·adj type notes gated by Core Vocabulary."""
+    return bool(VOCAB_GATED_SUPPLEMENTARY_TAGS.intersection(tags))
+
+
 def subject_reviewed_once(cards: Sequence[CardState]) -> bool:
     active = [card for card in cards if card.queue != ANKI_QUEUE_SUSPENDED]
     if not active:
@@ -158,7 +196,16 @@ def unlock_actions_for_notes(
             add_tags.append(WK_MATURE_TAG)
 
         waiting_on_deps = WK_LOCKED_TAG in tag_set or any(card.queue == ANKI_QUEUE_SUSPENDED for card in note.cards)
-        if waiting_on_deps and prerequisites_met(note.prerequisite_ids, mature_ids):
+        kind = core_subject_kind_from_tags(note.tags)
+        if config.retire_kanji_radical_phonetic_study:
+            # Vocab unlocks without Core Kanji maturity; radicals/kanji stay suspended.
+            if kind == SUBJECT_KIND_VOCABULARY and waiting_on_deps:
+                unsuspend = True
+                if WK_LOCKED_TAG in tag_set:
+                    remove_tags.append(WK_LOCKED_TAG)
+                if WK_DEPS_MET_TAG not in tag_set:
+                    add_tags.append(WK_DEPS_MET_TAG)
+        elif waiting_on_deps and prerequisites_met(note.prerequisite_ids, mature_ids):
             unsuspend = True
             if WK_LOCKED_TAG in tag_set:
                 remove_tags.append(WK_LOCKED_TAG)
@@ -190,6 +237,9 @@ def supplementary_unlock_actions_for_notes(
     Phonetic-family notes unlock when any kanji in PrerequisiteIds has been reviewed
     once (reps > 0) in Kanji Meaning Anchor (or leftover core kanji).
 
+    Conjugation / verb·adj type notes unlock when their linked ``WkSubjectId``
+    vocabulary is Guru+ in Core Vocabulary (PrerequisiteIds kanji are ignored).
+
     Other notes with PrerequisiteIds unlock when those kanji are Guru+ in Kanji
     Meaning Anchor. Remaining supplementary notes unlock when WkSubjectId is mature
     in core.
@@ -209,6 +259,8 @@ def supplementary_unlock_actions_for_notes(
             continue
         if PHONETIC_FAMILY_TAG in tag_set and note.prerequisite_ids:
             deps_met = any_prerequisites_met(note.prerequisite_ids, reviewed_once_ids)
+        elif uses_core_vocab_unlock(note.tags):
+            deps_met = note.wk_subject_id in core_mature_subject_ids
         elif note.prerequisite_ids:
             deps_met = prerequisites_met(note.prerequisite_ids, kanji_meaning_mature_subject_ids)
         else:

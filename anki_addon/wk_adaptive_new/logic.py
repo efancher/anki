@@ -27,6 +27,8 @@ DEFAULT_IMMERSION_TAGS = ("satori-mining", "shadowing-mining")
 # actually enter the new queue, not just get reordered within already-unlocked
 # cards. Paced by each tier's new/day limit, so this does not flood reviews.
 DEFAULT_IMMERSION_UNSUSPEND_ENABLED = True
+# Suspend Core Radicals/Kanji + Phonetic Families; study vocab immersion-first.
+DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY = True
 
 # Sort rank for subjects outside every configured immersion source.
 IMMERSION_RANK_REST = 1_000_000
@@ -36,11 +38,19 @@ UNRANKED_BASELINE_SCORE = 999_999_999
 CORE_RADICALS_DECK = "WaniKani Core · Radicals"
 CORE_KANJI_DECK = "WaniKani Core · Kanji"
 CORE_VOCABULARY_DECK = "WaniKani Core · Vocabulary"
+PHONETIC_FAMILIES_DECK = "WaniKani Phonetic Families"
 
 DEFAULT_CORE_TIERS = (
     CORE_RADICALS_DECK,
     CORE_KANJI_DECK,
     CORE_VOCABULARY_DECK,
+)
+
+# Home + Immersion Core Kanji filtered decks suspended when retire mode is on.
+RETIRED_STUDY_HOME_DECKS: Tuple[str, ...] = (
+    CORE_RADICALS_DECK,
+    CORE_KANJI_DECK,
+    PHONETIC_FAMILIES_DECK,
 )
 
 
@@ -59,6 +69,7 @@ class WkAdaptiveNewConfig:
     # Preferred multi-source seed tags (Satori + Shadowing by default).
     immersion_tags: Sequence[str] = field(default_factory=lambda: DEFAULT_IMMERSION_TAGS)
     immersion_unsuspend: bool = DEFAULT_IMMERSION_UNSUSPEND_ENABLED
+    retire_kanji_radical_phonetic_study: bool = DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY
 
 
 def effective_immersion_tags(config: WkAdaptiveNewConfig) -> Tuple[str, ...]:
@@ -75,6 +86,13 @@ def effective_immersion_tags(config: WkAdaptiveNewConfig) -> Tuple[str, ...]:
         return tuple(ordered)
     legacy = str(config.immersion_tag or "").strip()
     return (legacy,) if legacy else ()
+
+
+def effective_core_tiers(config: WkAdaptiveNewConfig) -> Tuple[str, ...]:
+    """Core decks that still receive new/day budget and reorder."""
+    if config.retire_kanji_radical_phonetic_study:
+        return (CORE_VOCABULARY_DECK,)
+    return tuple(config.core_tiers)
 
 
 @dataclass(frozen=True)
@@ -305,6 +323,46 @@ IMMERSION_CORE_FILTERED_DECKS: Tuple[Tuple[str, str, str], ...] = (
         IMMERSION_CORE_TAG_CANDIDATES,
     ),
 )
+
+IMMERSION_CORE_KANJI_FILTERED_DECKS: Tuple[str, ...] = tuple(
+    name for name, home, _tag in IMMERSION_CORE_FILTERED_DECKS if home == CORE_KANJI_DECK
+)
+
+
+def active_immersion_core_filtered_decks(
+    *,
+    retire_kanji_radical_phonetic_study: bool = False,
+) -> Tuple[Tuple[str, str, str], ...]:
+    """Filtered decks to create/rebuild. Vocab-only when kanji study is retired."""
+    if not retire_kanji_radical_phonetic_study:
+        return IMMERSION_CORE_FILTERED_DECKS
+    return tuple(
+        entry
+        for entry in IMMERSION_CORE_FILTERED_DECKS
+        if entry[1] == CORE_VOCABULARY_DECK
+    )
+
+
+def retired_study_deck_names(
+    *,
+    retire_kanji_radical_phonetic_study: bool = True,
+) -> Tuple[str, ...]:
+    """Decks whose cards should stay suspended when retire mode is on."""
+    if not retire_kanji_radical_phonetic_study:
+        return ()
+    return RETIRED_STUDY_HOME_DECKS + IMMERSION_CORE_KANJI_FILTERED_DECKS
+
+
+def filter_vocabulary_subject_ids(
+    subject_ids: Set[int],
+    kind_by_id: Mapping[int, str],
+) -> Set[int]:
+    """Keep vocabulary subject ids only."""
+    kept: Set[int] = set()
+    for subject_id in subject_ids:
+        if kind_by_id.get(subject_id) == SUBJECT_KIND_VOCABULARY:
+            kept.add(subject_id)
+    return kept
 
 
 def immersion_core_filtered_search(home_deck: str, immersion_core_tag: str) -> str:

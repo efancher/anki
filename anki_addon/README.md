@@ -26,10 +26,12 @@ export WK_DECK_OPTIONS_JSON="$HOME/anki/out/anki_deck_options.json"
 
 # WK Unlock (core SRS prerequisites)
 
-Enforces radical → kanji → vocab unlock order inside Anki. Unsuspends `wk-locked`
-core notes when all `PrerequisiteIds` are mature; unsuspends supplementary notes
-(vocab cloze, dictation, conjugation) when their linked `WkSubjectId` vocab is mature in core.
-Tags `wk-mature` / `wk-deps-met`.
+With **retire mode** on (default): unlocks **Core Vocabulary** without waiting for
+Core Kanji maturity; leaves Core Radicals/Kanji suspended. **Conjugations** and
+verb/adj types unlock when linked Core Vocabulary is Guru+. Other supplementary
+notes with kanji `PrerequisiteIds` still use **Kanji Meaning Anchor** Guru+. Tags
+`wk-mature` / `wk-deps-met`. Set `retire_kanji_radical_phonetic_study: false` for
+classic radical → kanji → vocab gating.
 
 ## Install once
 
@@ -49,7 +51,8 @@ Create `out/wk_unlock_config.json` (or set `WK_UNLOCK_CONFIG`):
 {
   "mature_min_interval_days": 7,
   "mature_require_all_card_types": true,
-  "burned_interval_days": 365
+  "burned_interval_days": 365,
+  "retire_kanji_radical_phonetic_study": true
 }
 ```
 
@@ -61,15 +64,17 @@ Migration playbook (one-time WK → Anki core SRS): [wk_anki_runbook.md](../wk_a
 
 # WK Adaptive New (review-aware lesson limits)
 
-Scales daily **new cards/day** per deck tier based on due review load. Priority:
-radicals → kanji → vocabulary → supplementary.
+Scales daily **new cards/day** per deck tier based on due review load.
 
-**Immersion-driven new order:** within each core deck, vocabulary mined from
-immersion (Satori, tag `satori-mining`) and its full prerequisite tree
-(vocab → kanji → radicals) lead the new-card queue, ahead of the JLPT/WK-level
-baseline. The set is read **live from the collection** on load, after apkg
-import, and after sync — so re-importing or newly mining Satori cards
-reprioritizes automatically (no generator re-run).
+**Retire mode (default):** Core Radicals, Core Kanji, Immersion Core · \* · Kanji, and
+Phonetic Families stay suspended. All core new budget goes to **Vocabulary**;
+immersion unsuspend is vocab-only. One-shot suspend:
+`python scripts/retire_kanji_radical_study_ankiconnect.py`.
+
+**Immersion-driven new order:** within Core Vocabulary, vocab mined from immersion
+(Satori / Shadowing) leads the new-card queue; non-immersion vocab stays at lowest
+priority. The set is read **live from the collection** on load, after apkg import,
+and after sync.
 
 ## Install once
 
@@ -86,33 +91,28 @@ Runs automatically on collection load, after apkg import, and after sync when
 
 ## Immersion Core filtered decks
 
-Six filtered decks let you study **Core Kanji / Vocabulary** that appear in
-immersion expressions **in parallel** with Satori / Shadowing, without waiting
-for the home-deck new queue:
+With retire mode on, three **Vocabulary** filtered decks let you study Core
+Vocabulary that appears in immersion expressions **in parallel** with Satori /
+Shadowing (Kanji filtered decks are not rebuilt; cards stay suspended):
 
 | Deck | Source |
 |------|--------|
-| `Immersion Core · Satori · Kanji` / `… · Vocabulary` | `satori-mining` (`WkSubjectId` + prereqs, no radicals) |
-| `Immersion Core · Shadowing · Kanji` / `… · Vocabulary` | `shadowing-mining` (same) |
-| `Immersion Core · Candidates · Kanji` / `… · Vocabulary` | `shadowing-candidate` (Expression / kanji-char match) |
+| `Immersion Core · Satori · Vocabulary` | `satori-mining` (`WkSubjectId` + prereqs, no radicals) |
+| `Immersion Core · Shadowing · Vocabulary` | `shadowing-mining` (same) |
+| `Immersion Core · Candidates · Vocabulary` | `shadowing-candidate` (Expression / kanji-char match) |
 
-Core notes get tags `immersion-core::satori`, `immersion-core::shadowing`,
+Core notes still get tags `immersion-core::satori`, `immersion-core::shadowing`,
 `immersion-core::candidates`. Decks rebuild on **WK Adjust New Limits** (and
 auto-refresh), or via **Tools → WK Rebuild Immersion Core Decks**.
 
-Candidate→Vocabulary matches are rare (candidates are non-WK lemmas); Candidate
-Kanji decks fill from kanji characters inside those expressions. Studying these
-filtered decks pulls new cards when you open them — they do not wait on the
-home deck’s daily new budget the same way.
-
-**WK Deck Stats “Unseen”** on Core Radicals is the full never-reviewed backlog
-(reps=0), not “new remaining today.” A high new limit only sets capacity if you
-study that deck.
+Studying these filtered decks pulls new cards when you open them — they do not
+wait on the home deck’s daily new budget the same way.
 
 ## Optional config
 
 | Key | Default | Effect |
 |-----|---------|--------|
+| `retire_kanji_radical_phonetic_study` | `true` | Suspend radicals/kanji/phonetic; vocab-only new budget + immersion unsuspend; skip Immersion Core Kanji rebuilds |
 | `immersion_priority_enabled` | `true` | Float immersion-mined subjects + prereqs to the front of the core new queue |
 | `immersion_tags` | `["satori-mining", "shadowing-mining"]` | Priority-ordered tags whose subjects/prerequisites seed the boost (Satori leads Shadowing by default) |
 | `immersion_tag` | `satori-mining` | Legacy single-tag fallback when `immersion_tags` is absent |
@@ -127,6 +127,7 @@ Create `out/wk_adaptive_new_config.json` (or set `WK_ADAPTIVE_NEW_CONFIG`):
   "supplementary_max_new": 5,
   "review_count_scope": "tag:wk-core",
   "auto_run_on_load": true,
+  "retire_kanji_radical_phonetic_study": true,
   "immersion_priority_enabled": true,
   "immersion_tags": ["satori-mining", "shadowing-mining"],
   "immersion_unsuspend": true

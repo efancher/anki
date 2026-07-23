@@ -33,6 +33,9 @@ subject_is_mature = logic.subject_is_mature
 unlock_actions_for_notes = logic.unlock_actions_for_notes
 supplementary_unlock_actions_for_notes = logic.supplementary_unlock_actions_for_notes
 
+# Classic radical→kanji→vocab maturity path (retire mode off).
+CLASSIC_UNLOCK = WkUnlockConfig(retire_kanji_radical_phonetic_study=False)
+
 
 class WkUnlockLogicTests(unittest.TestCase):
     def test_parse_prerequisite_ids(self) -> None:
@@ -73,11 +76,13 @@ class WkUnlockLogicTests(unittest.TestCase):
             tags=("wk-core", "wk-locked"),
             cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED), CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED)),
         )
-        mature_ids = build_mature_subject_ids([radical, kanji], config=WkUnlockConfig())
+        mature_ids = build_mature_subject_ids([radical, kanji], config=CLASSIC_UNLOCK)
         self.assertEqual(mature_ids, {10})
         self.assertTrue(prerequisites_met((10,), mature_ids))
 
-        actions = unlock_actions_for_notes([radical, kanji], config=WkUnlockConfig(), mature_subject_ids=mature_ids)
+        actions = unlock_actions_for_notes(
+            [radical, kanji], config=CLASSIC_UNLOCK, mature_subject_ids=mature_ids
+        )
         kanji_action = next(action for action in actions if action.note_id == 2)
         self.assertTrue(kanji_action.unsuspend)
         self.assertIn("wk-deps-met", kanji_action.add_tags)
@@ -91,7 +96,9 @@ class WkUnlockLogicTests(unittest.TestCase):
             tags=("wk-core",),
             cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
         )
-        actions = unlock_actions_for_notes([radical], config=WkUnlockConfig(), mature_subject_ids=set())
+        actions = unlock_actions_for_notes(
+            [radical], config=CLASSIC_UNLOCK, mature_subject_ids=set()
+        )
         self.assertEqual(len(actions), 1)
         self.assertTrue(actions[0].unsuspend)
         self.assertIn("wk-deps-met", actions[0].add_tags)
@@ -104,7 +111,47 @@ class WkUnlockLogicTests(unittest.TestCase):
             tags=("wk-core", "wk-locked"),
             cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
         )
-        actions = unlock_actions_for_notes([kanji], config=WkUnlockConfig(), mature_subject_ids=set())
+        actions = unlock_actions_for_notes(
+            [kanji], config=CLASSIC_UNLOCK, mature_subject_ids=set()
+        )
+        self.assertEqual(actions, [])
+
+    def test_retire_mode_unlocks_vocab_without_kanji_maturity(self) -> None:
+        vocab = NoteUnlockState(
+            note_id=3,
+            wk_subject_id=900,
+            prerequisite_ids=(20,),
+            tags=("wk-core", "vocabulary", "wk-locked"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        config = WkUnlockConfig(retire_kanji_radical_phonetic_study=True)
+        actions = unlock_actions_for_notes(
+            [vocab], config=config, mature_subject_ids=set()
+        )
+        self.assertEqual(len(actions), 1)
+        self.assertTrue(actions[0].unsuspend)
+        self.assertIn("wk-locked", actions[0].remove_tags)
+        self.assertIn("wk-deps-met", actions[0].add_tags)
+
+    def test_retire_mode_does_not_unlock_kanji_or_radicals(self) -> None:
+        radical = NoteUnlockState(
+            note_id=1,
+            wk_subject_id=10,
+            prerequisite_ids=(),
+            tags=("wk-core", "radical"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        kanji = NoteUnlockState(
+            note_id=2,
+            wk_subject_id=20,
+            prerequisite_ids=(10,),
+            tags=("wk-core", "kanji", "wk-locked"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        config = WkUnlockConfig(retire_kanji_radical_phonetic_study=True)
+        actions = unlock_actions_for_notes(
+            [radical, kanji], config=config, mature_subject_ids={10}
+        )
         self.assertEqual(actions, [])
 
     def test_supplementary_unlock_when_kanji_meaning_prereqs_mature(self) -> None:
@@ -140,12 +187,52 @@ class WkUnlockLogicTests(unittest.TestCase):
         )
         self.assertEqual(actions, [])
 
+    def test_conjugation_unlocks_from_core_vocab_not_kanji_meaning(self) -> None:
+        conjugation = NoteUnlockState(
+            note_id=3,
+            wk_subject_id=100,
+            prerequisite_ids=(10, 20),
+            tags=("wanikani", "conjugation-verb", "wk-locked"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        # Kanji meaning mature alone is not enough.
+        actions = supplementary_unlock_actions_for_notes(
+            [conjugation],
+            core_mature_subject_ids=set(),
+            kanji_meaning_mature_subject_ids={10, 20},
+        )
+        self.assertEqual(actions, [])
+        # Linked Core Vocabulary Guru unlocks even if kanji meaning is empty.
+        actions = supplementary_unlock_actions_for_notes(
+            [conjugation],
+            core_mature_subject_ids={100},
+            kanji_meaning_mature_subject_ids=set(),
+        )
+        self.assertEqual(len(actions), 1)
+        self.assertTrue(actions[0].unsuspend)
+
+    def test_verb_type_unlocks_from_core_vocab(self) -> None:
+        verb_type = NoteUnlockState(
+            note_id=4,
+            wk_subject_id=100,
+            prerequisite_ids=(10,),
+            tags=("wanikani", "verb-type", "wk-locked"),
+            cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
+        )
+        actions = supplementary_unlock_actions_for_notes(
+            [verb_type],
+            core_mature_subject_ids={100},
+            kanji_meaning_mature_subject_ids=set(),
+        )
+        self.assertEqual(len(actions), 1)
+        self.assertTrue(actions[0].unsuspend)
+
     def test_supplementary_unlock_when_linked_vocab_mature_in_core_without_prereqs(self) -> None:
         conjugation = NoteUnlockState(
             note_id=3,
             wk_subject_id=100,
             prerequisite_ids=(),
-            tags=("wanikani", "conjugation", "wk-locked"),
+            tags=("wanikani", "conjugation-verb", "wk-locked"),
             cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
         )
         actions = supplementary_unlock_actions_for_notes(
@@ -161,7 +248,7 @@ class WkUnlockLogicTests(unittest.TestCase):
             note_id=3,
             wk_subject_id=100,
             prerequisite_ids=(),
-            tags=("wanikani", "conjugation", "wk-locked"),
+            tags=("wanikani", "conjugation-verb", "wk-locked"),
             cards=(CardState(ivl=0, queue=ANKI_QUEUE_SUSPENDED),),
         )
         actions = supplementary_unlock_actions_for_notes(

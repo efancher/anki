@@ -249,6 +249,47 @@ class ImmersionCoreFilteredLogicTests(unittest.TestCase):
         self.assertIn("Immersion Core · Satori · Kanji", names)
         self.assertIn("Immersion Core · Candidates · Vocabulary", names)
 
+    def test_active_filtered_decks_vocab_only_when_retired(self) -> None:
+        all_decks = logic.active_immersion_core_filtered_decks(
+            retire_kanji_radical_phonetic_study=False
+        )
+        self.assertEqual(len(all_decks), 6)
+        vocab_only = logic.active_immersion_core_filtered_decks(
+            retire_kanji_radical_phonetic_study=True
+        )
+        self.assertEqual(len(vocab_only), 3)
+        self.assertTrue(all(home == logic.CORE_VOCABULARY_DECK for _n, home, _t in vocab_only))
+
+    def test_retired_study_deck_names(self) -> None:
+        names = logic.retired_study_deck_names(
+            retire_kanji_radical_phonetic_study=True
+        )
+        self.assertIn(logic.CORE_RADICALS_DECK, names)
+        self.assertIn(logic.CORE_KANJI_DECK, names)
+        self.assertIn(logic.PHONETIC_FAMILIES_DECK, names)
+        self.assertIn("Immersion Core · Satori · Kanji", names)
+        self.assertEqual(
+            logic.retired_study_deck_names(retire_kanji_radical_phonetic_study=False),
+            (),
+        )
+
+    def test_effective_core_tiers_vocab_only_when_retired(self) -> None:
+        retired = logic.WkAdaptiveNewConfig(retire_kanji_radical_phonetic_study=True)
+        self.assertEqual(logic.effective_core_tiers(retired), (logic.CORE_VOCABULARY_DECK,))
+        classic = logic.WkAdaptiveNewConfig(retire_kanji_radical_phonetic_study=False)
+        self.assertEqual(len(logic.effective_core_tiers(classic)), 3)
+
+    def test_filter_vocabulary_subject_ids(self) -> None:
+        kept = logic.filter_vocabulary_subject_ids(
+            {100, 400, 900},
+            {
+                100: logic.SUBJECT_KIND_RADICAL,
+                400: logic.SUBJECT_KIND_KANJI,
+                900: logic.SUBJECT_KIND_VOCABULARY,
+            },
+        )
+        self.assertEqual(kept, {900})
+
     def test_filtered_deck_has_learning_queues(self) -> None:
         self.assertFalse(logic.filtered_deck_has_learning_queues([0, 2, -1]))
         self.assertTrue(logic.filtered_deck_has_learning_queues([0, 1, 2]))

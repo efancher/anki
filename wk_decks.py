@@ -1835,7 +1835,7 @@ def vocab_kanji_prerequisite_ids(vocab: dict) -> str:
 
 
 def vocab_supplementary_import_tags(vocab: dict) -> List[str]:
-    """Lock vocab supplementary notes until kanji meaning anchor prereqs are Guru+ in Anki."""
+    """Lock vocab supplementary notes until linked Core Vocabulary is Guru+ in Anki."""
     if vocab_kanji_prerequisite_ids(vocab):
         return [WK_LOCKED_TAG]
     return []

@@ -29,7 +29,7 @@ from .logic import (
     DEFAULT_IMMERSION_TAG,
     DEFAULT_IMMERSION_TAGS,
     DEFAULT_IMMERSION_UNSUSPEND_ENABLED,
-    IMMERSION_CORE_FILTERED_DECKS,
+    DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY,
     IMMERSION_CORE_FILTERED_LIMIT,
     IMMERSION_CORE_SOURCE_SPECS,
     IMMERSION_CORE_TAG_CANDIDATES,
@@ -43,8 +43,10 @@ from .logic import (
     TierAvailability,
     UNRANKED_BASELINE_SCORE,
     WkAdaptiveNewConfig,
+    active_immersion_core_filtered_decks,
     build_tier_plan,
     candidate_linked_subject_ids,
+    effective_core_tiers,
     effective_immersion_tags,
     immersion_cards_to_unsuspend,
     filtered_deck_has_learning_queues,
@@ -54,6 +56,7 @@ from .logic import (
     parse_subject_ids,
     preset_name_for_suffix,
     ranked_immersion_closure,
+    retired_study_deck_names,
     sorted_new_card_ids,
     wk_linked_immersion_core_ids,
 )
@@ -148,6 +151,12 @@ def load_adaptive_config() -> WkAdaptiveNewConfig:
             immersion_tags=_parse_immersion_tags(payload),
             immersion_unsuspend=bool(
                 payload.get("immersion_unsuspend", DEFAULT_IMMERSION_UNSUSPEND_ENABLED)
+            ),
+            retire_kanji_radical_phonetic_study=bool(
+                payload.get(
+                    "retire_kanji_radical_phonetic_study",
+                    DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY,
+                )
             ),
         )
     return WkAdaptiveNewConfig()
@@ -610,11 +619,21 @@ def ensure_immersion_core_filtered_deck(
     return deck_id, "; ".join(status_bits) or "ok"
 
 
-def rebuild_immersion_core_filtered_decks(col: Any) -> List[str]:
-    """Ensure all six Immersion Core filtered decks exist and are rebuilt."""
+def rebuild_immersion_core_filtered_decks(
+    col: Any,
+    *,
+    retire_kanji_radical_phonetic_study: bool = False,
+) -> List[str]:
+    """Ensure Immersion Core filtered decks exist and are rebuilt.
+
+    When retire mode is on, only Vocabulary filtered decks are rebuilt.
+    """
     lines: List[str] = []
     errors: List[str] = []
-    for name, home_deck, core_tag in IMMERSION_CORE_FILTERED_DECKS:
+    decks = active_immersion_core_filtered_decks(
+        retire_kanji_radical_phonetic_study=retire_kanji_radical_phonetic_study
+    )
+    for name, home_deck, core_tag in decks:
         try:
             deck_id, status = ensure_immersion_core_filtered_deck(
                 col,
@@ -638,8 +657,12 @@ def rebuild_immersion_core_filtered_decks(col: Any) -> List[str]:
     return lines
 
 
-def refresh_immersion_core_study_queues(col: Any) -> List[str]:
-    """Sync immersion-core tags and rebuild the six filtered decks."""
+def refresh_immersion_core_study_queues(
+    col: Any,
+    *,
+    retire_kanji_radical_phonetic_study: bool = False,
+) -> List[str]:
+    """Sync immersion-core tags and rebuild active Immersion Core filtered decks."""
     changed, subject_ids_by_tag = sync_immersion_core_tags(col)
     lines = [
         f"Immersion core tags: updated {changed} note(s) "
@@ -647,19 +670,81 @@ def refresh_immersion_core_study_queues(col: Any) -> List[str]:
         f"shadowing={len(subject_ids_by_tag.get(IMMERSION_CORE_TAG_SHADOWING, ()))}, "
         f"candidates={len(subject_ids_by_tag.get(IMMERSION_CORE_TAG_CANDIDATES, ()))})"
     ]
-    lines.extend(rebuild_immersion_core_filtered_decks(col))
+    lines.extend(
+        rebuild_immersion_core_filtered_decks(
+            col,
+            retire_kanji_radical_phonetic_study=retire_kanji_radical_phonetic_study,
+        )
+    )
     return lines
 
 
-def unsuspend_immersion_cards(col: Any, immersion_ids: Set[int]) -> int:
+def suspend_retired_study_decks(col: Any, config: WkAdaptiveNewConfig) -> int:
+    """Suspend all cards in retired radical/kanji/phonetic decks (idempotent)."""
+    deck_names = retired_study_deck_names(
+        retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study
+    )
+    if not deck_names:
+        return 0
+    suspended = 0
+    for deck_name in deck_names:
+        card_ids = col.find_cards(f'deck:"{deck_name}" -is:suspended')
+        for card_id in card_ids:
+            card = col.get_card(card_id)
+            if int(card.queue) == ANKI_QUEUE_SUSPENDED:
+                continue
+            card.queue = ANKI_QUEUE_SUSPENDED
+            col.update_card(card)
+            suspended += 1
+    return suspended
+
+
+def zero_retired_core_new_limits(col: Any, config: WkAdaptiveNewConfig) -> List[str]:
+    """Force new/day=0 on Core Radicals/Kanji when those tiers are retired."""
+    if not config.retire_kanji_radical_phonetic_study:
+        return []
+    decks = col.decks
+    base_conf_id = _find_config_id(decks, config.base_preset_name)
+    if base_conf_id is None:
+        return []
+    base_conf = decks.get_config(base_conf_id)
+    lines: List[str] = []
+    for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK):
+        suffix = TIER_SUFFIX_BY_DECK.get(deck_name)
+        if suffix is None:
+            continue
+        deck_id = _deck_id_for_name(decks, deck_name)
+        if not deck_id:
+            continue
+        conf_id = ensure_tier_preset(decks, base_conf, suffix)
+        conf = decks.get_config(conf_id)
+        _set_new_per_day(conf, 0)
+        decks.update_config(conf)
+        _assign_deck_config(decks, deck_id, conf_id)
+        lines.append(f"{deck_name}: new/day=0 (retired)")
+    return lines
+
+
+def unsuspend_immersion_cards(
+    col: Any,
+    immersion_ids: Set[int],
+    *,
+    vocabulary_only: bool = False,
+) -> int:
     """Unsuspend suspended new core cards in the immersion closure.
 
     Mirrors wk_unlock (queue → new); wk_unlock only ever unsuspends, so the two
     add-ons do not fight. Daily new/day limits still pace how many are served.
+
+    When ``vocabulary_only`` is set (retire mode), only Core Vocabulary cards
+    are considered so radicals/kanji stay suspended.
     """
     if not immersion_ids:
         return 0
-    card_ids = col.find_cards(f"{CORE_NOTE_SCOPE} is:new is:suspended")
+    if vocabulary_only:
+        card_ids = col.find_cards(f'deck:"{CORE_VOCABULARY_DECK}" is:new is:suspended')
+    else:
+        card_ids = col.find_cards(f"{CORE_NOTE_SCOPE} is:new is:suspended")
     if not card_ids:
         return 0
     entries: List[Tuple[Optional[int], int]] = []
@@ -709,7 +794,7 @@ def count_available_new(col: Any, deck_name: str) -> int:
 
 def build_tier_availability(col: Any, config: WkAdaptiveNewConfig) -> List[TierAvailability]:
     tiers: List[TierAvailability] = []
-    for deck_name in config.core_tiers:
+    for deck_name in effective_core_tiers(config):
         suffix = TIER_SUFFIX_BY_DECK.get(deck_name)
         if suffix is None:
             continue
@@ -747,7 +832,7 @@ def apply_allocations(
     base_conf = decks.get_config(base_conf_id)
     lines: List[str] = []
 
-    for deck_name in config.core_tiers:
+    for deck_name in effective_core_tiers(config):
         suffix = TIER_SUFFIX_BY_DECK.get(deck_name)
         if suffix is None:
             continue
@@ -789,6 +874,12 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
     budget, allocations = build_tier_plan(review_load, tiers, config=config)
     supplementary_decks = load_supplementary_deck_names()
     lines = apply_allocations(col, config, allocations, supplementary_decks)
+    lines.extend(zero_retired_core_new_limits(col, config))
+    suspended_retired = suspend_retired_study_decks(col, config)
+    if suspended_retired:
+        lines.append(f"Retired study: suspended {suspended_retired} card(s)")
+    elif config.retire_kanji_radical_phonetic_study:
+        lines.append("Retired study: radicals/kanji/phonetic already suspended")
     priority_scores = load_priority_scores()
     immersion_priority = build_immersion_priority_ranks(col, config)
     immersion_ids = set(immersion_priority)
@@ -798,19 +889,28 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
             f"Immersion priority: {len(immersion_ids)} subjects (mined {tag_label} + prereqs)"
         )
         if config.immersion_unsuspend:
-            unsuspended = unsuspend_immersion_cards(col, immersion_ids)
+            unsuspended = unsuspend_immersion_cards(
+                col,
+                immersion_ids,
+                vocabulary_only=config.retire_kanji_radical_phonetic_study,
+            )
             if unsuspended:
                 lines.append(f"Immersion unlock: unsuspended {unsuspended} new card(s)")
     if priority_scores or immersion_ids:
         order_label = "immersion-first" if immersion_ids else "JLPT priority"
-        for deck_name in (CORE_RADICALS_DECK, CORE_KANJI_DECK, CORE_VOCABULARY_DECK):
+        for deck_name in effective_core_tiers(config):
             reordered = reposition_new_cards_by_priority(
                 col, deck_name, priority_scores, immersion_priority
             )
             if reordered:
                 lines.append(f"{deck_name}: reordered {reordered} new ({order_label})")
     try:
-        lines.extend(refresh_immersion_core_study_queues(col))
+        lines.extend(
+            refresh_immersion_core_study_queues(
+                col,
+                retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study,
+            )
+        )
     except Exception as exc:  # noqa: BLE001 — filtered decks must not block new limits
         print(f"WK adaptive new: immersion core filtered decks skipped ({exc})")
         lines.append(f"Immersion core filtered decks: skipped ({exc})")
@@ -903,7 +1003,11 @@ def _menu_rebuild_immersion_core() -> None:
         showWarning("Open a collection first.")
         return
     try:
-        lines = refresh_immersion_core_study_queues(mw.col)
+        config = load_adaptive_config()
+        lines = refresh_immersion_core_study_queues(
+            mw.col,
+            retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study,
+        )
     except Exception as exc:  # noqa: BLE001
         showWarning(str(exc))
         return

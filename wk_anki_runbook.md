@@ -9,8 +9,8 @@ Generator: `wk_decks.py` (WaniKani decks) + `grammar_decks.py` (JLPT grammar fro
 **Done — meaning-anchor curriculum.** WK study lives in Anki + FSRS via:
 
 - **Kanji Meaning Anchor** — primary kanji path (kanji → English); no import lock
-- **Core · Radicals / Kanji / Vocabulary** — generated with reading audio on (`reading_audio: true`); kanji readings use Voicevox when available
-- `wk_unlock` **add-on** — conjugations / verb·adj types unlock when kanji components are Guru+ in the meaning anchor; phonetic families unlock on reviewed-once
+- **Core · Vocabulary** — immersion-first study (radicals/kanji/phonetic decks suspended by default retire mode); reading audio on
+- `wk_unlock` **add-on** — vocab unlocks without Core Kanji maturity under retire mode; conjugations unlock when linked Core Vocabulary is Guru+
 - `no_wk_progress_filter` — import full supplementary catalog; gate with `wk-locked` in Anki
 - **Immersion** — Yomitan mining + Satori Reader CSV (`scripts/import_satori.py`) + Shadowing projects (`scripts/import_shadowing.py`)
 - **TTS on for core readings** — `reading_audio: true` (vocab = WK native clips; kanji = Voicevox when the engine is running, else edge-tts)
@@ -172,18 +172,31 @@ This replaces the old “Phase 2 migration” — it **is implemented**; these a
 
 ### Core SRS (main queue)
 
-Study directly from **WaniKani Core · Radicals**, **WaniKani Core · Kanji**,
-**WaniKani Core · Vocabulary**, and **WaniKani Kanji Meaning Anchor** as desired.
-Kanji Meaning is meaning-only (no reading). **WK Adjust New Limits** controls
-per-deck new limits and places Satori-linked subjects first in each core queue.
+**Active study decks** (retire mode on by default):
+
+- **WaniKani Core · Vocabulary** — immersion-linked new cards first; other vocab at lowest priority
+- **Immersion Core · \* · Vocabulary** filtered decks — parallel immersion vocab
+- **WaniKani Kanji Meaning Anchor** — ungated meaning-only kanji path (primary for kanji)
+
+**Suspended (not studied):** Core · Radicals, Core · Kanji, Immersion Core · \* · Kanji,
+and **WaniKani Phonetic Families**. **WK Adjust New Limits** re-suspends them each run
+so rebuilds cannot sneak cards back. One-shot without waiting:
+`python scripts/retire_kanji_radical_study_ankiconnect.py`.
+
+Set `retire_kanji_radical_phonetic_study: false` in `wk_adaptive_new_config.json` /
+`wk_unlock_config.json` to restore classic radical→kanji→vocab study.
+
+**WK Adjust New Limits** puts the full core new budget on Vocabulary and places
+Satori/Shadowing-linked subjects first in that queue.
 
 ### Supplementary decks
 
-**Conjugations** and **verb/adjective types** import with `tag:wk-locked` and `PrerequisiteIds` listing the vocab word's kanji components. **wk_unlock** unsuspends them when every listed kanji is Guru I+ (≥ 7 day interval) in **WaniKani Kanji Meaning Anchor**. **Phonetic families** unlock when any family kanji has been reviewed once in the meaning anchor. **Grammar context** is not `wk-locked` — see [Grammar gated by kanji](#grammar-gated-by-kanji-planned).
+**Conjugations** and **verb/adjective types** import with `tag:wk-locked` and `WkSubjectId` pointing at the vocab word (kanji ids may still appear in `PrerequisiteIds` for reference). **wk_unlock** unsuspends them when that vocab is Guru I+ (≥ 7 day interval) in **WaniKani Core · Vocabulary**. **Phonetic families** unlock when any family kanji has been reviewed once in the meaning anchor (deck stays suspended under retire mode). **Grammar context** is not `wk-locked` — see [Grammar gated by kanji](#grammar-gated-by-kanji-planned).
 
 **Kanji Meaning Anchor** has **no** import-time lock — study any kanji freely. It is the primary kanji path.
 
-**Core radicals** still generate. Core kanji/vocab Review decks are opt-in only (`--deck core-kanji` / `core-vocabulary`).
+With retire mode on, **Core Vocabulary** unlocks without waiting for Core Kanji maturity
+(classic radical→kanji gating is skipped for vocab only).
 
 Open **desktop Anki periodically** if you study on mobile, so unlock passes sync.
 
@@ -210,11 +223,11 @@ Study directly from **Japanese Grammar Context**.
 
 ### Suggested daily order
 
-1. **WaniKani Kanji Meaning Anchor** — optional meaning-only jumpstart.
-2. **WaniKani Core · Radicals / Kanji / Vocabulary** — primary core SRS.
+1. **WaniKani Kanji Meaning Anchor** — primary kanji (meaning-only).
+2. **WaniKani Core · Vocabulary** / Immersion Core Vocabulary filtered decks — immersion-first.
 3. Conjugation home decks (verbs → adjectives → reverse/types as you like).
 4. **Immersion · Yomitan Mining** / **Immersion · Satori** for cloze reading practice.
-5. **Japanese Grammar Context** / **WaniKani Phonetic Families** when you have energy.
+5. **Japanese Grammar Context** when you have energy.
 
 Grammar is **not** gated by kanji maturity today (see [§12](#12-tips--tuning)); use `grammar.max_jlpt` and `max_unknown_kanji` at generate time instead.
 
@@ -270,9 +283,10 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 
 | Deck                           | Purpose                                   |
 | ------------------------------ | ----------------------------------------- |
-| **WaniKani Core · Radicals**   | Meaning; root unlock via empty prereqs    |
 | **WaniKani Kanji Meaning Anchor** | Kanji → English only (primary kanji path) |
-| **WaniKani Core · Kanji / Vocabulary** | *Retired from default* — dual Review; opt-in via `--deck core-kanji` / `core-vocabulary` |
+| **WaniKani Core · Vocabulary** | Immersion-first new; non-immersion lowest priority |
+| **WaniKani Core · Radicals / Kanji** | Suspended under retire mode (not studied) |
+| **WaniKani Phonetic Families** | Suspended under retire mode (not studied) |
 
 
 
@@ -282,7 +296,7 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 
 | Deck                                                                     | Gating                                                                         |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| Conjugations, Verb/Adj Types | `WkSubjectId` + `PrerequisiteIds` (kanji) + `wk-locked` until kanji meaning anchor Guru+ |
+| Conjugations, Verb/Adj Types | `WkSubjectId` + `wk-locked` until linked Core Vocabulary Guru+ |
 | Kanji Meaning Anchor | `WkSubjectId` only — no `wk-locked` |
 | Phonetic Families | `PrerequisiteIds` (family kanji) + `wk-locked` until any family kanji reviewed once |
 | Grammar Context                                                          | JLPT cap only at generate time; sentence TTS off                               |
@@ -312,13 +326,13 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Grammar:** `python wk_decks.py --deck grammar` — Hanabira clozes ordered by JLPT; browse by `tag:jlpt-n5`, etc.
 
-**Conjugation:** type-in forms via their WaniKani conjugation home decks; `--verify-conjugations-only` for rule checks. Unlock via kanji meaning `PrerequisiteIds`.
+**Conjugation:** type-in forms via their WaniKani conjugation home decks; `--verify-conjugations-only` for rule checks. Unlock when linked Core Vocabulary is Guru+.
 
 **Phonetic families:** Keisei DB in `.wk_cache/keisei/`. Unlock when any family kanji reviewed once in the meaning anchor. Card backs lead with the phonetic component, then “usually signals” ordered most→least (with WK mnemonic keywords, e.g. `しょ - Show`), then a focus table of Reading / Started / Total by each family kanji’s primary on’yomi (rows sum to the footer). Regen: `python wk_decks.py --deck phonetic-families`. Live patch: `python3 scripts/patch_phonetic_readings_ankiconnect.py --from-cache`.
 
 **Core Item phonetic hint:** when a Core Kanji (or single-kanji vocab) card tests an on’yomi that the kanji’s phonetic component usually signals, the back shows e.g. `Phonetic 寺 → じ`. Multi-kanji vocab is skipped. Regen with core decks, or live patch: `python3 scripts/patch_core_phonetic_hint_ankiconnect.py --from-cache`.
 
-**Kanji meaning anchor:** kanji character on front, primary WK meaning(s) on back — no reading required, **no import lock**. Primary kanji path. Guru a kanji here (≥ 7 day interval) to unlock conjugations / verb·adj types whose `PrerequisiteIds` include that kanji. `--deck kanji-meaning` to build standalone.
+**Kanji meaning anchor:** kanji character on front, primary WK meaning(s) on back — no reading required, **no import lock**. Primary kanji path. `--deck kanji-meaning` to build standalone.
 
 **Yomitan immersion:** Sentence cloze on front — type the reading in kana; sentence audio + pitch on back; second **Shadow → pitch** card for speaking practice. Native YouTube clips via `scripts/extract_immersion_clip.py`. Setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
 
@@ -357,7 +371,7 @@ Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs a
 
 **Templates not updating:** Always update note types on re-import. Current: conjugation v7, word class v5, kanji meaning v1, grammar cloze v4+, mining v14. If Anki reports thousands of notes could not be imported, live cards are on `NoteType+++` variants — see `scripts/patch_kanji_prereqs_ankiconnect.py`.
 
-**Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; check kanji meaning maturity (≥ **7** day interval, Guru I equivalent) for conjugations/types.
+**Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; conjugations/types need linked Core Vocabulary maturity (≥ **7** day interval, Guru I equivalent).
 
 **Legacy `WK::` decks still appear:** Run
 `python3 scripts/remove_wk_filtered_decks_ankiconnect.py`; it returns queued
@@ -425,16 +439,16 @@ Study core from the three **WaniKani Core ·** home decks; Anki’s per-deck
 | `jlpt-n5-prereq` | Radicals/kanji needed for N5 items      | import  |
 
 
-**WK Adjust New Limits** reorders new cards in all three core decks when that file is present.
+**WK Adjust New Limits** reorders new cards in Core Vocabulary when that file is present
+(radicals/kanji decks are suspended under retire mode).
 
-**Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab tagged `satori-mining` or `shadowing-mining` plus its full prerequisite tree (vocab → kanji → radicals) jump to the **front** of the core new queues, ahead of the JLPT/level baseline. The set is read live from the collection, so **re-importing** immersion `.apkg` files re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
+**Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab tagged `satori-mining` or `shadowing-mining` plus its prerequisite tree jump to the **front** of the Core Vocabulary new queue, ahead of the JLPT/level baseline. Non-immersion vocab stays available at lowest priority. The set is read live from the collection, so **re-importing** immersion `.apkg` files re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
 
-**Immersion Core filtered decks (parallel study):** the same refresh also tags
-Core Kanji/Vocabulary linked from immersion and rebuilds six filtered decks —
-`Immersion Core · {Satori,Shadowing,Candidates} · {Kanji,Vocabulary}`. Open those
-to introduce immersion-linked core cards immediately (Satori/Shadowing via
-`WkSubjectId` + kanji prereqs; Candidates via Expression / kanji-char match; no
-radicals). Manual rebuild: **Tools → WK Rebuild Immersion Core Decks**.
+**Immersion Core filtered decks (parallel study):** the same refresh tags Core
+Kanji/Vocabulary linked from immersion and rebuilds **Vocabulary** filtered decks —
+`Immersion Core · {Satori,Shadowing,Candidates} · Vocabulary` (Kanji filtered decks
+are not rebuilt while retire mode is on; their cards stay suspended). Manual rebuild:
+**Tools → WK Rebuild Immersion Core Decks**.
 
 Keep **Reschedule cards based on my answers** on (the addon sets this). Do not
 rebuild/empty while cards are still in learning — Anki turns those back into
@@ -443,8 +457,7 @@ rebuild/empty while cards are still in learning — Anki turns those back into
 cards before rebuild and skips rebuild while learning cards are present.
 
 **Unseen vs new limit:** in WK Deck Stats, core tables use **Locked / New / Reviewed**
-(New = `is:new`). A high radicals new/day only matters if you study Core Radicals
-or Immersion Core decks that still have new cards.
+(New = `is:new`). Locked counts rise for suspended radicals/kanji under retire mode.
 
 ### New cards: protect core (manual alternative)
 
@@ -468,7 +481,7 @@ Change in deck options on the **WK FSRS** preset; give FSRS ~a month before twea
 
 ### Unlock maturity (`wk_unlock`)
 
-Supplementary decks with `PrerequisiteIds` unsuspend when those kanji are Guru+ in **Kanji Meaning Anchor** (default: interval **≥ 7 days**). Phonetic families use **reviewed once**. Optional config at `out/wk_unlock_config.json` (or `WK_UNLOCK_CONFIG`):
+**Conjugations / verb·adj types** unsuspend when linked Core Vocabulary is Guru+ (default: interval **≥ 7 days**). Other supplementary notes with `PrerequisiteIds` still use **Kanji Meaning Anchor** Guru+. Phonetic families use **reviewed once**. Optional config at `out/wk_unlock_config.json` (or `WK_UNLOCK_CONFIG`):
 
 ```json
 {
