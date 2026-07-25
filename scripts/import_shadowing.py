@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 """
-Build Immersion · Shadowing Anki packages from a shadowmine project directory.
+Build Immersion · Shadowing Anki packages from a shadowmine project or a
+Glossbook mining ZIP.
 
 Works from any clone of this repo:
 
+  # Preferred: curated selections from Glossbook
+  python3 scripts/import_shadowing.py ~/Downloads/fixture.mining.zip
+
+  # Legacy: automatic WK matching from a shadowmine project directory
   python3 scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID
   python3 scripts/import_shadowing.py /path/to/project -o out/
   python3 scripts/import_shadowing.py /path/to/project --skip-auto-caption
 
 Requires out/wk_mining_vocab_index.json (or --wk-index) for WK matching.
 Optional: install fugashi + unidic-lite for better morphology / candidate POS
-filtering (the shadowing CLI venv already has these).
+filtering on legacy directory imports. Prefer the shadowing CLI venv:
+
+  ~/shadowing/cli/.venv/bin/python scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID
 
 Then import the .apkg files in Anki. Do not enable "Update existing notes"
-just to refresh templates — that can blank media fields.
+just to refresh templates — that can blank media fields. Full checklist:
+docs/shadowing_mining.md
 """
 
 from __future__ import annotations
@@ -31,7 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 from shadowing_decks import (  # noqa: E402
     build_shadowing_decks,
     load_default_wk_index,
-    load_shadowing_project,
+    load_shadowing_input,
 )
 
 
@@ -40,7 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "project",
         type=Path,
-        help="Shadowing project directory (contains source.json + sentences.json)",
+        help=(
+            "Shadowing project directory (source.json + sentences.json) "
+            "or a Glossbook .mining.zip package"
+        ),
     )
     parser.add_argument(
         "-o",
@@ -62,13 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    project_dir = args.project.expanduser().resolve()
-    if not project_dir.is_dir():
-        print(f"Project directory not found: {project_dir}", file=sys.stderr)
-        return 1
-
+    project_path = args.project.expanduser().resolve()
     try:
-        project = load_shadowing_project(project_dir)
+        project = load_shadowing_input(project_path)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Could not load project: {exc}", file=sys.stderr)
         return 1
@@ -91,11 +98,14 @@ def main(argv: list[str] | None = None) -> int:
         include_auto_caption=not args.skip_auto_caption,
     )
 
-    print(f"Source: {project.source.title} ({project.source.source_id})")
+    mode = "curated mining package" if project.curated else "automatic project import"
+    print(f"Source: {project.source.title} ({project.source.source_id}) [{mode}]")
     print(
         f"Sentences: {stats.sentences} · WK matches: {stats.wk_matches} · "
         f"WK notes: {stats.wk_notes} · candidates: {stats.candidate_notes}"
     )
+    if stats.curated_selections:
+        print(f"Curated selections: {stats.curated_selections}")
     if stats.missing_clips:
         print(f"Missing clips: {stats.missing_clips}", file=sys.stderr)
     if stats.skipped_auto_caption:

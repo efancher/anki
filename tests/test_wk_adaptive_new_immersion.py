@@ -249,20 +249,35 @@ class ImmersionCoreFilteredLogicTests(unittest.TestCase):
         self.assertIn("Immersion Core · Satori · Kanji", names)
         self.assertIn("Immersion Core · Candidates · Vocabulary", names)
 
+    def test_filtered_decks_retired_by_default(self) -> None:
+        self.assertFalse(logic.DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED)
+        self.assertFalse(
+            WkAdaptiveNewConfig().immersion_core_filtered_decks_enabled
+        )
+        for retired in (False, True):
+            with self.subTest(retire=retired):
+                self.assertEqual(
+                    logic.active_immersion_core_filtered_decks(
+                        retire_kanji_radical_phonetic_study=retired
+                    ),
+                    (),
+                )
+
     def test_active_filtered_decks_vocab_only_when_retired(self) -> None:
         all_decks = logic.active_immersion_core_filtered_decks(
-            retire_kanji_radical_phonetic_study=False
+            retire_kanji_radical_phonetic_study=False, enabled=True
         )
         self.assertEqual(len(all_decks), 6)
         vocab_only = logic.active_immersion_core_filtered_decks(
-            retire_kanji_radical_phonetic_study=True
+            retire_kanji_radical_phonetic_study=True, enabled=True
         )
         self.assertEqual(len(vocab_only), 3)
         self.assertTrue(all(home == logic.CORE_VOCABULARY_DECK for _n, home, _t in vocab_only))
 
     def test_retired_study_deck_names(self) -> None:
         names = logic.retired_study_deck_names(
-            retire_kanji_radical_phonetic_study=True
+            retire_kanji_radical_phonetic_study=True,
+            immersion_core_filtered_decks_enabled=True,
         )
         self.assertIn(logic.CORE_RADICALS_DECK, names)
         self.assertIn(logic.CORE_KANJI_DECK, names)
@@ -272,6 +287,13 @@ class ImmersionCoreFilteredLogicTests(unittest.TestCase):
             logic.retired_study_deck_names(retire_kanji_radical_phonetic_study=False),
             (),
         )
+
+    def test_retired_study_deck_names_skip_filtered_when_disabled(self) -> None:
+        names = logic.retired_study_deck_names(
+            retire_kanji_radical_phonetic_study=True
+        )
+        self.assertEqual(names, logic.RETIRED_STUDY_HOME_DECKS)
+        self.assertNotIn("Immersion Core · Satori · Kanji", names)
 
     def test_effective_core_tiers_vocab_only_when_retired(self) -> None:
         retired = logic.WkAdaptiveNewConfig(retire_kanji_radical_phonetic_study=True)

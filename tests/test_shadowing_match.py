@@ -142,7 +142,11 @@ class CandidateLemmaTests(unittest.TestCase):
         candidates = candidate_lemmas_in_sentence("電車と新幹線が速い。", index)
         lemmas = {c.lemma for c in candidates}
         self.assertNotIn("電車", lemmas)
-        self.assertIn("新幹線", lemmas)
+        # Fallback keeps the full kanji run; UniDic may split 新幹線 → 幹線.
+        self.assertTrue(
+            lemmas & {"新幹線", "幹線"},
+            f"expected a non-WK train word in {lemmas}",
+        )
 
     def test_excludes_stopwords_and_particles_when_tokenized_or_fallback(self) -> None:
         index = _index()
@@ -150,6 +154,52 @@ class CandidateLemmaTests(unittest.TestCase):
         lemmas = {c.lemma for c in candidates}
         self.assertNotIn("これ", lemmas)
         self.assertNotIn("です", lemmas)
+
+    def test_fallback_does_not_glue_wk_verb_onto_keigo(self) -> None:
+        """Without fugashi, 敬語使って must not become candidate 敬語使 / けいごつかっ."""
+        index = _index(
+            {
+                "id": 5647,
+                "expression": "敬語",
+                "reading": "けいご",
+                "meaning": "keigo",
+                "prerequisite_ids": "",
+            },
+            {
+                "id": 3088,
+                "expression": "使う",
+                "reading": "つかう",
+                "meaning": "to use",
+                "prerequisite_ids": "",
+            },
+        )
+        sentence = "私たちだって敬語使ってないしね。"
+        matches = match_wk_vocab_in_sentence(sentence, index)
+        candidates = candidate_lemmas_in_sentence(
+            sentence,
+            index,
+            wk_matched_expressions={m.expression for m in matches},
+            wk_matched_spans={(m.start, m.end) for m in matches},
+        )
+        lemmas = {c.lemma for c in candidates}
+        self.assertNotIn("敬語使", lemmas)
+        self.assertNotIn("敬語", lemmas)
+        self.assertTrue(
+            all(not c.reading.endswith("っ") for c in candidates),
+            candidates,
+        )
+
+    def test_reading_join_ignores_partial_token_overlap(self) -> None:
+        from shadowing_match import reading_for_surface_in_sentence, tokenize_japanese
+
+        sentence = "敬語使ってない"
+        if not tokenize_japanese(sentence):
+            self.skipTest("fugashi unavailable")
+        # Surface cut before っ must not absorb 使っ's reading つかっ.
+        self.assertNotEqual(
+            reading_for_surface_in_sentence(sentence, "敬語使"),
+            "けいごつかっ",
+        )
 
 
 if __name__ == "__main__":

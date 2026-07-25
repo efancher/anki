@@ -29,6 +29,10 @@ DEFAULT_IMMERSION_TAGS = ("satori-mining", "shadowing-mining")
 DEFAULT_IMMERSION_UNSUSPEND_ENABLED = True
 # Suspend Core Radicals/Kanji + Phonetic Families; study vocab immersion-first.
 DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY = True
+# Immersion Core filtered decks are retired: study from the home Core decks,
+# where immersion priority already orders the new queue. Browse the same sets
+# with tag:immersion-core::satori / ::shadowing / ::candidates.
+DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED = False
 
 # Sort rank for subjects outside every configured immersion source.
 IMMERSION_RANK_REST = 1_000_000
@@ -70,6 +74,9 @@ class WkAdaptiveNewConfig:
     immersion_tags: Sequence[str] = field(default_factory=lambda: DEFAULT_IMMERSION_TAGS)
     immersion_unsuspend: bool = DEFAULT_IMMERSION_UNSUSPEND_ENABLED
     retire_kanji_radical_phonetic_study: bool = DEFAULT_RETIRE_KANJI_RADICAL_PHONETIC_STUDY
+    immersion_core_filtered_decks_enabled: bool = (
+        DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED
+    )
 
 
 def effective_immersion_tags(config: WkAdaptiveNewConfig) -> Tuple[str, ...]:
@@ -332,8 +339,14 @@ IMMERSION_CORE_KANJI_FILTERED_DECKS: Tuple[str, ...] = tuple(
 def active_immersion_core_filtered_decks(
     *,
     retire_kanji_radical_phonetic_study: bool = False,
+    enabled: bool = DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED,
 ) -> Tuple[Tuple[str, str, str], ...]:
-    """Filtered decks to create/rebuild. Vocab-only when kanji study is retired."""
+    """Filtered decks to create/rebuild.
+
+    Empty unless explicitly enabled. Vocab-only when kanji study is retired.
+    """
+    if not enabled:
+        return ()
     if not retire_kanji_radical_phonetic_study:
         return IMMERSION_CORE_FILTERED_DECKS
     return tuple(
@@ -346,10 +359,15 @@ def active_immersion_core_filtered_decks(
 def retired_study_deck_names(
     *,
     retire_kanji_radical_phonetic_study: bool = True,
+    immersion_core_filtered_decks_enabled: bool = (
+        DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED
+    ),
 ) -> Tuple[str, ...]:
     """Decks whose cards should stay suspended when retire mode is on."""
     if not retire_kanji_radical_phonetic_study:
         return ()
+    if not immersion_core_filtered_decks_enabled:
+        return RETIRED_STUDY_HOME_DECKS
     return RETIRED_STUDY_HOME_DECKS + IMMERSION_CORE_KANJI_FILTERED_DECKS
 
 

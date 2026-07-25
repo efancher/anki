@@ -25,6 +25,7 @@ from .logic import (
     CORE_RADICALS_DECK,
     CORE_VOCABULARY_DECK,
     DEFAULT_BASE_PRESET_NAME,
+    DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED,
     DEFAULT_IMMERSION_PRIORITY_ENABLED,
     DEFAULT_IMMERSION_TAG,
     DEFAULT_IMMERSION_TAGS,
@@ -151,6 +152,12 @@ def load_adaptive_config() -> WkAdaptiveNewConfig:
             immersion_tags=_parse_immersion_tags(payload),
             immersion_unsuspend=bool(
                 payload.get("immersion_unsuspend", DEFAULT_IMMERSION_UNSUSPEND_ENABLED)
+            ),
+            immersion_core_filtered_decks_enabled=bool(
+                payload.get(
+                    "immersion_core_filtered_decks_enabled",
+                    DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED,
+                )
             ),
             retire_kanji_radical_phonetic_study=bool(
                 payload.get(
@@ -623,16 +630,21 @@ def rebuild_immersion_core_filtered_decks(
     col: Any,
     *,
     retire_kanji_radical_phonetic_study: bool = False,
+    enabled: bool = DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED,
 ) -> List[str]:
     """Ensure Immersion Core filtered decks exist and are rebuilt.
 
-    When retire mode is on, only Vocabulary filtered decks are rebuilt.
+    Retired by default: study from the home Core decks instead. When enabled and
+    retire mode is on, only Vocabulary filtered decks are rebuilt.
     """
     lines: List[str] = []
     errors: List[str] = []
     decks = active_immersion_core_filtered_decks(
-        retire_kanji_radical_phonetic_study=retire_kanji_radical_phonetic_study
+        retire_kanji_radical_phonetic_study=retire_kanji_radical_phonetic_study,
+        enabled=enabled,
     )
+    if not decks:
+        return ["Immersion core filtered decks: retired (studying from home decks)"]
     for name, home_deck, core_tag in decks:
         try:
             deck_id, status = ensure_immersion_core_filtered_deck(
@@ -661,8 +673,15 @@ def refresh_immersion_core_study_queues(
     col: Any,
     *,
     retire_kanji_radical_phonetic_study: bool = False,
+    immersion_core_filtered_decks_enabled: bool = (
+        DEFAULT_IMMERSION_CORE_FILTERED_DECKS_ENABLED
+    ),
 ) -> List[str]:
-    """Sync immersion-core tags and rebuild active Immersion Core filtered decks."""
+    """Sync immersion-core tags and rebuild active Immersion Core filtered decks.
+
+    Tags are always synced (they drive Browse searches even with the filtered
+    decks retired).
+    """
     changed, subject_ids_by_tag = sync_immersion_core_tags(col)
     lines = [
         f"Immersion core tags: updated {changed} note(s) "
@@ -674,6 +693,7 @@ def refresh_immersion_core_study_queues(
         rebuild_immersion_core_filtered_decks(
             col,
             retire_kanji_radical_phonetic_study=retire_kanji_radical_phonetic_study,
+            enabled=immersion_core_filtered_decks_enabled,
         )
     )
     return lines
@@ -682,7 +702,10 @@ def refresh_immersion_core_study_queues(
 def suspend_retired_study_decks(col: Any, config: WkAdaptiveNewConfig) -> int:
     """Suspend all cards in retired radical/kanji/phonetic decks (idempotent)."""
     deck_names = retired_study_deck_names(
-        retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study
+        retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study,
+        immersion_core_filtered_decks_enabled=(
+            config.immersion_core_filtered_decks_enabled
+        ),
     )
     if not deck_names:
         return 0
@@ -909,6 +932,9 @@ def adjust_new_limits(*, quiet: bool = False) -> Tuple[int, List[str]]:
             refresh_immersion_core_study_queues(
                 col,
                 retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study,
+                immersion_core_filtered_decks_enabled=(
+                    config.immersion_core_filtered_decks_enabled
+                ),
             )
         )
     except Exception as exc:  # noqa: BLE001 — filtered decks must not block new limits
@@ -1007,13 +1033,16 @@ def _menu_rebuild_immersion_core() -> None:
         lines = refresh_immersion_core_study_queues(
             mw.col,
             retire_kanji_radical_phonetic_study=config.retire_kanji_radical_phonetic_study,
+            immersion_core_filtered_decks_enabled=(
+                config.immersion_core_filtered_decks_enabled
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         showWarning(str(exc))
         return
     if mw is not None:
         mw.reset()
-    showInfo("Immersion Core filtered decks rebuilt.\n\n" + "\n".join(lines))
+    showInfo("Immersion core tags refreshed.\n\n" + "\n".join(lines))
 
 
 gui_hooks.collection_did_load.append(on_collection_did_load)

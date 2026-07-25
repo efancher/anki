@@ -5,8 +5,10 @@ Fills SentenceAudio (normal) and SentenceAudioEasy (slower). For Satori/Shadowin
 notes, also fills:
   • Audio — Voicevox of the cloze surface span (Target button)
   • ReadingAudio — Voicevox of the hiragana Reading (answer)
+Shadowing Immersion / Candidate notes keep native wk_shadowing_* SentenceAudio;
+--force never replaces those (use Target/Reading TTS only, or --surface-only).
 Cached under .wk_cache/immersion_sentence_audio/.
-Pass --force to regenerate cache and overwrite note fields.
+Pass --force to regenerate cache and overwrite note fields (non-shadowing).
 
 Usage (Anki must be running; VOICEVOX engine recommended):
 
@@ -303,7 +305,7 @@ def main() -> None:
         reading = value(FIELD_READING)
 
         did_sentence = False
-        if not args.surface_only:
+        if not args.surface_only and not _logic.uses_native_sentence_clip(model_name):
             sentence_audio = unwrap_satori_normal_if_needed(
                 base_url=args.anki_connect,
                 note_id=nid,
@@ -325,6 +327,7 @@ def main() -> None:
                         sentence_audio=sentence_audio,
                         sentence_audio_easy=sentence_audio_easy if has_easy else "[sound:skip]",
                         force=args.force,
+                        note_type_name=model_name,
                     )
                     if not has_easy:
                         needed = tuple(
@@ -362,6 +365,8 @@ def main() -> None:
                     skipped += 1
             else:
                 skipped += 1
+        elif not args.surface_only:
+            skipped += 1
 
         if model_name in SURFACE_AUDIO_NOTE_TYPES:
             surface = surface_span_text(sentence, expression, reading)

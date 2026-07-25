@@ -14,17 +14,20 @@ import json
 import re
 import shutil
 import sys
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import genanki
 
-from mining_vocab_index import load_mining_vocab_index
+from mining_vocab_index import load_mining_vocab_index, lookup_wk_vocab
 from shadowing_match import (
     CandidateLemma,
     WkMatch,
     candidate_lemmas_in_sentence,
+    candidate_reading_looks_truncated,
     match_wk_vocab_in_sentence,
     name_surface_for_shogo,
     reading_for_candidate_lemma,
@@ -209,6 +212,15 @@ SHADOWING_CANDIDATE_FRONT = """
 <div class="mining-card">
   {{#ClozeSentence}}<div class="cloze-sentence jp">{{ClozeSentence}}</div>{{/ClozeSentence}}
   {{^ClozeSentence}}{{#Sentence}}<div class="cloze-sentence jp">{{Sentence}}</div>{{/Sentence}}{{/ClozeSentence}}
+  <div class="hint-block">
+    {{#WkMeaning}}<div class="hint-meaning">{{WkMeaning}}</div>{{/WkMeaning}}
+    {{^WkMeaning}}
+      {{#HintGlossary}}<div class="hint-meaning">{{HintGlossary}}</div>{{/HintGlossary}}
+      {{^HintGlossary}}
+        {{#Translation}}<div class="hint-meaning">{{Translation}}</div>{{/Translation}}
+      {{/HintGlossary}}
+    {{/WkMeaning}}
+  </div>
   <div class="type-prompt">{{type:Reading}}</div>
 </div>
 """
@@ -320,6 +332,19 @@ SHADOWING_CSS = """
 
 
 @dataclass(frozen=True)
+class SelectedVocabulary:
+    """Authoritative human selection from Glossbook mining export."""
+
+    surface: str
+    start: int
+    end: int
+    expression: str
+    reading: str
+    english: str = ""
+    pos: str = ""
+
+
+@dataclass(frozen=True)
 class ShadowingSource:
     source_id: str
     title: str
@@ -340,6 +365,8 @@ class ShadowingSentence:
     clip_path: str
     start_ms: int
     end_ms: int
+    # When non-empty, Anki builds cards only from these selections (no auto-match).
+    selected_vocabulary: Tuple[SelectedVocabulary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -347,6 +374,8 @@ class ShadowingProject:
     root: Path
     source: ShadowingSource
     sentences: Tuple[ShadowingSentence, ...]
+    # True when loaded from a Glossbook japanese-shadowing-mining-package.
+    curated: bool = False
 
 
 @dataclass(frozen=True)
@@ -357,6 +386,63 @@ class ShadowingBuildStats:
     candidate_notes: int
     missing_clips: int
     skipped_auto_caption: int
+    curated_selections: int = 0
+
+
+MINING_PACKAGE_FORMAT = "japanese-shadowing-mining-package"
+MINING_PACKAGE_VERSION = 1
+
+
+def validate_selected_vocabulary(
+    japanese: str,
+    selection: SelectedVocabulary,
+    *,
+    sentence_id: str = "",
+) -> None:
+    """Raise ValueError when the selection span does not match the sentence."""
+    if selection.end <= selection.start:
+        raise ValueError(
+            f"Invalid selection span for {sentence_id or 'sentence'}: "
+            f"{selection.start}:{selection.end}"
+        )
+    if japanese[selection.start : selection.end] != selection.surface:
+        raise ValueError(
+            f"Selection surface {selection.surface!r} does not match "
+            f"{japanese[selection.start:selection.end]!r} in "
+            f"{sentence_id or 'sentence'} at {selection.start}:{selection.end}"
+        )
+    if not selection.expression.strip():
+        raise ValueError(
+            f"Selection in {sentence_id or 'sentence'} is missing an expression"
+        )
+
+
+def parse_selected_vocabulary(
+    japanese: str,
+    rows: object,
+    *,
+    sentence_id: str = "",
+) -> Tuple[SelectedVocabulary, ...]:
+    if not rows:
+        return ()
+    if not isinstance(rows, list):
+        raise ValueError(f"selectedVocabulary must be an array on {sentence_id}")
+    out: List[SelectedVocabulary] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        selection = SelectedVocabulary(
+            surface=str(row.get("surface") or "").strip(),
+            start=int(row.get("start") or 0),
+            end=int(row.get("end") or 0),
+            expression=str(row.get("expression") or "").strip(),
+            reading=str(row.get("reading") or "").strip(),
+            english=str(row.get("english") or "").strip(),
+            pos=str(row.get("pos") or "").strip(),
+        )
+        validate_selected_vocabulary(japanese, selection, sentence_id=sentence_id)
+        out.append(selection)
+    return tuple(out)
 
 
 def make_shadowing_model() -> WkModel:
@@ -397,6 +483,35 @@ def _safe_media_stem(*parts: object) -> str:
     raw = "_".join(str(part) for part in parts if str(part))
     cleaned = _SAFE_MEDIA_RE.sub("_", raw).strip("._")
     return cleaned[:80] or "clip"
+
+
+def native_shadowing_media_stem_from_duplicate_key(duplicate_key: str) -> str:
+    """Return media stem ``wk_shadowing_{source}_{sentence}`` from DuplicateKey."""
+    parts = [p.strip() for p in (duplicate_key or "").split("|") if p.strip()]
+    if len(parts) < 2:
+        return ""
+    return f"wk_shadowing_{_safe_media_stem(parts[0], parts[1])}"
+
+
+def find_native_shadowing_media(
+    media_dir: Path,
+    *,
+    duplicate_key: str = "",
+    stem: str = "",
+) -> Optional[Path]:
+    """Locate an existing ``wk_shadowing_*.{m4a,mp3,wav,ogg,opus}`` in media_dir."""
+    resolved_stem = (stem or native_shadowing_media_stem_from_duplicate_key(duplicate_key)).strip()
+    if not resolved_stem:
+        return None
+    for ext in (".m4a", ".mp3", ".wav", ".ogg", ".opus"):
+        candidate = media_dir / f"{resolved_stem}{ext}"
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+    matches = sorted(media_dir.glob(f"{resolved_stem}.*"))
+    for path in matches:
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return None
 
 
 def load_shadowing_project(project_dir: Path) -> ShadowingProject:
@@ -454,11 +569,145 @@ def load_shadowing_project(project_dir: Path) -> ShadowingProject:
                 clip_path=clip_path,
                 start_ms=int(row.get("startMs") or 0),
                 end_ms=int(row.get("endMs") or 0),
+                selected_vocabulary=parse_selected_vocabulary(
+                    japanese,
+                    row.get("selectedVocabulary"),
+                    sentence_id=sentence_id,
+                ),
             )
         )
     if not sentences:
         raise ValueError(f"No usable sentences in {sentences_path}")
-    return ShadowingProject(root=root, source=source, sentences=tuple(sentences))
+    curated = any(sentence.selected_vocabulary for sentence in sentences)
+    return ShadowingProject(
+        root=root,
+        source=source,
+        sentences=tuple(sentences),
+        curated=curated,
+    )
+
+
+def load_mining_package(package_path: Path) -> ShadowingProject:
+    """Load a Glossbook ``japanese-shadowing-mining-package`` ZIP.
+
+    Extracts into a temp directory under the system temp folder and returns a
+    curated ShadowingProject whose clip paths point at the extracted audio.
+    """
+    path = package_path.expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Mining package not found: {path}")
+
+    staging = Path(tempfile.mkdtemp(prefix="wk_mining_pkg_"))
+    with zipfile.ZipFile(path) as zf:
+        for name in zf.namelist():
+            normalized = name.replace("\\", "/")
+            if normalized.startswith("/") or ".." in normalized.split("/"):
+                raise ValueError(f"Unsafe path in mining package: {name}")
+        required = ("manifest.json", "source.json", "sentences.json")
+        for name in required:
+            if name not in zf.namelist():
+                raise ValueError(f"Mining package missing {name}")
+        zf.extractall(staging)
+
+    manifest = json.loads((staging / "manifest.json").read_text(encoding="utf-8"))
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("format") != MINING_PACKAGE_FORMAT
+        or int(manifest.get("version") or 0) != MINING_PACKAGE_VERSION
+    ):
+        raise ValueError(
+            "Not a supported japanese-shadowing-mining-package v1 file"
+        )
+
+    source_payload = json.loads((staging / "source.json").read_text(encoding="utf-8"))
+    sentences_payload = json.loads(
+        (staging / "sentences.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(source_payload, dict):
+        raise ValueError("source.json must be an object")
+    if not isinstance(sentences_payload, list) or not sentences_payload:
+        raise ValueError("sentences.json must be a non-empty array")
+
+    source = ShadowingSource(
+        source_id=str(source_payload.get("id") or "").strip() or f"source-{path.stem}",
+        title=str(source_payload.get("title") or path.stem).strip(),
+        url=str(source_payload.get("url") or "").strip(),
+        video_id=str(source_payload.get("videoId") or "").strip(),
+        channel=str(source_payload.get("channel") or "").strip(),
+    )
+
+    sentences: List[ShadowingSentence] = []
+    seen_ids: Set[str] = set()
+    for row in sentences_payload:
+        if not isinstance(row, dict):
+            continue
+        sentence_id = str(row.get("id") or "").strip()
+        japanese = str(row.get("japanese") or "").strip()
+        if not sentence_id or not japanese:
+            continue
+        if sentence_id in seen_ids:
+            raise ValueError(f"Duplicate sentence id: {sentence_id}")
+        seen_ids.add(sentence_id)
+        audio = row.get("audio") or {}
+        if not isinstance(audio, dict):
+            raise ValueError(f"Sentence {sentence_id} is missing audio metadata")
+        audio_rel = str(audio.get("path") or "").strip()
+        if not audio_rel:
+            raise ValueError(f"Sentence {sentence_id} is missing audio.path")
+        audio_path = (staging / audio_rel).resolve()
+        try:
+            audio_path.relative_to(staging.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Unsafe audio path: {audio_rel}") from exc
+        if not audio_path.is_file():
+            raise FileNotFoundError(
+                f"Mining package missing audio for {sentence_id}: {audio_rel}"
+            )
+        selections = parse_selected_vocabulary(
+            japanese,
+            row.get("selectedVocabulary"),
+            sentence_id=sentence_id,
+        )
+        tags = tuple(
+            str(tag).strip()
+            for tag in (row.get("tags") or [])
+            if str(tag).strip()
+        )
+        sentences.append(
+            ShadowingSentence(
+                sentence_id=sentence_id,
+                japanese=japanese,
+                reading=str(row.get("reading") or "").strip(),
+                english=str(row.get("english") or "").strip(),
+                transcript_status=str(
+                    row.get("transcriptStatus") or "verified"
+                ).strip(),
+                tags=tags,
+                notes=str(row.get("notes") or "").strip(),
+                clip_path=audio_rel,
+                start_ms=int(row.get("startMs") or 0),
+                end_ms=int(row.get("endMs") or 0),
+                selected_vocabulary=selections,
+            )
+        )
+    if not sentences:
+        raise ValueError("Mining package contains no usable sentences")
+    return ShadowingProject(
+        root=staging,
+        source=source,
+        sentences=tuple(sentences),
+        curated=True,
+    )
+
+
+def load_shadowing_input(path: Path) -> ShadowingProject:
+    """Load either a legacy project directory or a Glossbook mining ZIP."""
+    target = path.expanduser().resolve()
+    if target.is_file() and target.suffix.lower() == ".zip":
+        return load_mining_package(target)
+    if target.is_dir():
+        return load_shadowing_project(target)
+    raise FileNotFoundError(f"Expected a project directory or .zip: {target}")
 
 
 def resolve_clip_path(project: ShadowingProject, sentence: ShadowingSentence) -> Optional[Path]:
@@ -467,9 +716,10 @@ def resolve_clip_path(project: ShadowingProject, sentence: ShadowingSentence) ->
     clip = Path(sentence.clip_path)
     if clip.is_absolute():
         return clip if clip.is_file() else None
-    candidate = (project.root / clip).resolve()
+    root = project.root.expanduser().resolve()
+    candidate = (root / clip).resolve()
     try:
-        candidate.relative_to(project.root)
+        candidate.relative_to(root)
     except ValueError:
         return None
     return candidate if candidate.is_file() else None
@@ -671,7 +921,11 @@ def build_shadowing_decks(
     candidate_notes = 0
     missing_clips = 0
     skipped_auto = 0
+    curated_selections = 0
     seen_candidate_lemmas: Set[str] = set()
+    use_curated = project.curated or any(
+        sentence.selected_vocabulary for sentence in project.sentences
+    )
 
     for sentence in project.sentences:
         if not include_auto_caption and sentence.transcript_status == "auto-caption":
@@ -685,6 +939,93 @@ def build_shadowing_decks(
             seen_media.add(str(media_path))
             media_paths.append(str(media_path))
 
+        if use_curated:
+            if not sentence.selected_vocabulary:
+                continue
+            curated_selections += len(sentence.selected_vocabulary)
+            for selection in sentence.selected_vocabulary:
+                validate_selected_vocabulary(
+                    sentence.japanese,
+                    selection,
+                    sentence_id=sentence.sentence_id,
+                )
+                wk_entry = lookup_wk_vocab(
+                    selection.expression, selection.reading, index
+                )
+                if wk_entry:
+                    if should_skip_copula_cloze(
+                        selection.expression,
+                        selection.reading or str(wk_entry.get("reading") or ""),
+                        sentence.japanese,
+                        surface=selection.surface,
+                    ):
+                        continue
+                    wk_matches += 1
+                    guid = stable_guid(
+                        SHADOWING_KIND,
+                        project.source.source_id,
+                        sentence.sentence_id,
+                        wk_entry["id"],
+                    )
+                    note = genanki.Note(
+                        model=wk_model,
+                        fields=shadowing_note_fields(
+                            source=project.source,
+                            sentence=sentence,
+                            expression=selection.expression,
+                            reading=selection.reading
+                            or str(wk_entry.get("reading") or ""),
+                            wk_entry=wk_entry,
+                            audio_filename=audio_name,
+                            transcript_tag=sentence.transcript_status,
+                            surface=selection.surface,
+                        ),
+                        tags=_trust_tags(sentence) + ["shadowing-curated"],
+                        guid=guid,
+                    )
+                    wk_deck.add_note(note)
+                    wk_notes += 1
+                    continue
+
+                lemma_key = selection.expression
+                if lemma_key in seen_candidate_lemmas:
+                    continue
+                seen_candidate_lemmas.add(lemma_key)
+                candidate = CandidateLemma(
+                    lemma=selection.expression,
+                    surface=selection.surface,
+                    reading=selection.reading,
+                    pos=selection.pos,
+                    start=selection.start,
+                    end=selection.end,
+                )
+                guid = stable_guid(
+                    SHADOWING_CANDIDATE_KIND,
+                    project.source.source_id,
+                    sentence.sentence_id,
+                    candidate.lemma,
+                )
+                note = genanki.Note(
+                    model=cand_model,
+                    fields=shadowing_candidate_note_fields(
+                        source=project.source,
+                        sentence=sentence,
+                        candidate=candidate,
+                        audio_filename=audio_name,
+                    ),
+                    tags=[
+                        "immersion",
+                        SHADOWING_CANDIDATE_TAG,
+                        f"shadowing-{sentence.transcript_status}",
+                        "shadowing-curated",
+                    ],
+                    guid=guid,
+                )
+                cand_deck.add_note(note)
+                candidate_notes += 1
+            continue
+
+        # Legacy automatic matching for unreviewed project directories.
         matches = match_wk_vocab_in_sentence(
             sentence.japanese,
             index,
@@ -731,9 +1072,16 @@ def build_shadowing_decks(
             index,
             wk_matched_ids=matched_ids,
             wk_matched_expressions=matched_expr,
+            wk_matched_spans={(match.start, match.end) for match in matches},
         )
         for candidate in candidates:
             if candidate.lemma in seen_candidate_lemmas:
+                continue
+            # Extra guard: type-in answers must not end in っ (mid-conjugation cut).
+            reading = reading_for_surface_in_sentence(
+                sentence.japanese, candidate.surface or candidate.lemma
+            ) or candidate.reading
+            if candidate_reading_looks_truncated(reading):
                 continue
             seen_candidate_lemmas.add(candidate.lemma)
             guid = stable_guid(
@@ -773,6 +1121,7 @@ def build_shadowing_decks(
         candidate_notes=candidate_notes,
         missing_clips=missing_clips,
         skipped_auto_caption=skipped_auto,
+        curated_selections=curated_selections,
     )
     return wk_path, cand_path, stats
 

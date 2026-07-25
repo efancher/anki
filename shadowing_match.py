@@ -407,9 +407,10 @@ def reading_for_surface_in_sentence(sentence: str, surface: str) -> str:
     end = idx + len(surf)
     parts: List[str] = []
     for token in tokenize_japanese(plain):
-        if token.end <= idx or token.start >= end:
+        # Require the token to lie fully inside the surface — partial overlap
+        # (e.g. surface 敬語使 vs token 使っ) glues a trailing っ onto the reading.
+        if token.start < idx or token.end > end:
             continue
-        # Prefer overrides for multi-char name chunks inside the span.
         tok_override = _SURFACE_READING_OVERRIDES.get(token.surface)
         if tok_override:
             parts.append(tok_override)
@@ -424,12 +425,19 @@ def reading_for_surface_in_sentence(sentence: str, surface: str) -> str:
     return reading_for_candidate_lemma(surf)
 
 
+def candidate_reading_looks_truncated(reading: str) -> bool:
+    """True when a type-in reading ends in っ — not a normal dictionary form."""
+    text = (reading or "").strip()
+    return bool(text) and text[-1] in "っッ"
+
+
 def candidate_lemmas_in_sentence(
     sentence: str,
     index: dict,
     *,
     wk_matched_ids: Optional[Set[int]] = None,
     wk_matched_expressions: Optional[Iterable[str]] = None,
+    wk_matched_spans: Optional[Iterable[Tuple[int, int]]] = None,
 ) -> List[CandidateLemma]:
     """Content-word lemmas not present in the WK vocabulary index."""
     plain = (sentence or "").strip()
@@ -439,10 +447,36 @@ def candidate_lemmas_in_sentence(
     excluded_expr = {expr for expr in (wk_matched_expressions or []) if expr}
     excluded_expr.update(by_expression.keys())
 
+    occupied = [(int(start), int(end)) for start, end in (wk_matched_spans or [])]
+    if not occupied and by_expression:
+        for match in match_wk_vocab_in_sentence(plain, index):
+            occupied.append((match.start, match.end))
+
     tokens = tokenize_japanese(plain)
     if tokens:
         return _candidates_from_tokens(tokens, excluded_expr, by_expression)
-    return _candidates_fallback(plain, excluded_expr, by_expression)
+    return _candidates_fallback(plain, excluded_expr, by_expression, occupied)
+
+
+def _subtract_occupied_spans(
+    start: int, end: int, occupied: Sequence[Tuple[int, int]]
+) -> List[Tuple[int, int]]:
+    """Return sub-intervals of ``[start, end)`` not covered by ``occupied``."""
+    pieces: List[Tuple[int, int]] = [(start, end)]
+    for o_start, o_end in sorted(occupied):
+        if o_end <= o_start:
+            continue
+        next_pieces: List[Tuple[int, int]] = []
+        for a, b in pieces:
+            if o_end <= a or o_start >= b:
+                next_pieces.append((a, b))
+                continue
+            if a < o_start:
+                next_pieces.append((a, o_start))
+            if o_end < b:
+                next_pieces.append((o_end, b))
+        pieces = next_pieces
+    return pieces
 
 
 def _candidates_from_tokens(
@@ -464,13 +498,16 @@ def _candidates_from_tokens(
             continue
         if all(not _KANJI_RE.match(ch) for ch in lemma) and len(lemma) < 2:
             continue
+        reading = reading_for_candidate_lemma(lemma, token.reading)
+        if candidate_reading_looks_truncated(reading):
+            continue
         if lemma in seen:
             continue
         seen.add(lemma)
         out.append(
             CandidateLemma(
                 lemma=lemma,
-                reading=reading_for_candidate_lemma(lemma, token.reading),
+                reading=reading,
                 surface=token.surface,
                 pos=token.pos,
                 start=token.start,
@@ -484,30 +521,47 @@ def _candidates_fallback(
     sentence: str,
     excluded_expr: Set[str],
     by_expression: Dict[str, dict],
+    occupied: Sequence[Tuple[int, int]] = (),
 ) -> List[CandidateLemma]:
-    """Without fugashi: kanji runs and katakana words not in WK."""
+    """Without fugashi: kanji runs and katakana words not in WK.
+
+    Kanji runs are carved by WK match spans so conjugated compounds like
+    ``敬語使って`` do not become a fake lemma ``敬語使``.
+    """
     out: List[CandidateLemma] = []
     seen: Set[str] = set()
     for pattern in (_KANJI_RUN_RE, _KATAKANA_WORD_RE):
         for match in pattern.finditer(sentence):
-            lemma = match.group(0)
-            if lemma in _STOPWORDS or lemma in excluded_expr or lemma in by_expression:
-                continue
-            if lemma in seen:
-                continue
-            # Skip single-kanji candidates that are almost always WK radicals/kanji noise.
-            if pattern is _KANJI_RUN_RE and len(lemma) < 2:
-                continue
-            seen.add(lemma)
-            out.append(
-                CandidateLemma(
-                    lemma=lemma,
-                    reading=reading_for_candidate_lemma(lemma),
-                    surface=lemma,
-                    pos="unknown",
-                    start=match.start(),
-                    end=match.end(),
-                )
+            spans = (
+                _subtract_occupied_spans(match.start(), match.end(), occupied)
+                if pattern is _KANJI_RUN_RE
+                else [(match.start(), match.end())]
             )
+            for start, end in spans:
+                lemma = sentence[start:end]
+                if lemma in _STOPWORDS or lemma in excluded_expr or lemma in by_expression:
+                    continue
+                if lemma in seen:
+                    continue
+                # Skip single-kanji candidates that are almost always WK radicals/kanji noise.
+                if pattern is _KANJI_RUN_RE and len(lemma) < 2:
+                    continue
+                reading = reading_for_candidate_lemma(lemma)
+                if candidate_reading_looks_truncated(reading):
+                    continue
+                # Cut mid-conjugation: kanji run ends immediately before っ of て/た-form.
+                if end < len(sentence) and sentence[end] == "っ" and _KANJI_RE.match(lemma[-1]):
+                    continue
+                seen.add(lemma)
+                out.append(
+                    CandidateLemma(
+                        lemma=lemma,
+                        reading=reading,
+                        surface=lemma,
+                        pos="unknown",
+                        start=start,
+                        end=end,
+                    )
+                )
     out.sort(key=lambda item: (item.start, item.end))
     return out

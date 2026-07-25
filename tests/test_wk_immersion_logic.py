@@ -37,7 +37,9 @@ should_synthesize_note = _logic.should_synthesize_note
 sound_field_value = _logic.sound_field_value
 audio_field_value = _logic.audio_field_value
 sentence_audio_autoplay = _logic.sentence_audio_autoplay
+sentence_audio_fields_needing_synth = _logic.sentence_audio_fields_needing_synth
 unwrap_sound_tag = _logic.unwrap_sound_tag
+uses_native_sentence_clip = _logic.uses_native_sentence_clip
 synthesize_sentence_audio = _logic.synthesize_sentence_audio
 synthesize_voicevox_wav = _logic.synthesize_voicevox_wav
 
@@ -125,6 +127,39 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             "テスト", engine="voicevox", speaker_id=3, speed_scale=0.75, ext=".wav"
         )
         self.assertNotEqual(normal, easy)
+
+    def test_should_not_synthesize_shadowing_sentence_audio(self) -> None:
+        for note_type in ("WK Shadowing Immersion", "WK Shadowing Candidate"):
+            with self.subTest(note_type=note_type):
+                self.assertTrue(uses_native_sentence_clip(note_type))
+                self.assertFalse(
+                    should_synthesize_note(
+                        note_type_name=note_type,
+                        sentence="頭が痛い。",
+                        sentence_audio="",
+                        config=ImmersionTtsConfig(),
+                        on_mine=True,
+                    )
+                )
+                self.assertEqual(
+                    sentence_audio_fields_needing_synth(
+                        sentence_audio="",
+                        sentence_audio_easy="",
+                        force=True,
+                        note_type_name=note_type,
+                    ),
+                    (),
+                )
+
+    def test_force_does_not_replace_native_shadowing_clip(self) -> None:
+        needed = sentence_audio_fields_needing_synth(
+            sentence_audio="[sound:wk_shadowing_source-demo_sentence-001.m4a]",
+            sentence_audio_easy="",
+            force=True,
+            note_type_name="WK Yomitan Immersion",
+        )
+        self.assertNotIn("SentenceAudio", needed)
+        self.assertNotIn("SentenceAudioEasy", needed)
 
     def test_should_synthesize_when_easy_missing(self) -> None:
         self.assertTrue(

@@ -33,6 +33,7 @@ Architecture and tracker: [docs/wk_core_srs_design.md](docs/wk_core_srs_design.m
 | Setting up for the first time             | [§1 One-time setup](#1-one-time-setup) → [§2 First import](#2-first-import-migration) |
 | Studying day to day                       | [§3 Daily study](#3-daily-study)                                                      |
 | Regenerating after config or code changes | [§4 Regenerate & re-import](#4-regenerate--re-import)                                 |
+| Importing a Shadowing / Satori project    | [§8 Topic guides](#8-topic-guides) → Shadowing / Satori                               |
 | Tuning FSRS, unlocks, and study habits    | [§12 Tips & tuning](#12-tips--tuning)                                                 |
 | Changing grammar scope                    | [§5 Configuration](#5-configuration)                                                  |
 | Looking up a specific deck                | [§6 Deck catalog](#6-deck-catalog)                                                    |
@@ -175,13 +176,17 @@ This replaces the old “Phase 2 migration” — it **is implemented**; these a
 **Active study decks** (retire mode on by default):
 
 - **WaniKani Core · Vocabulary** — immersion-linked new cards first; other vocab at lowest priority
-- **Immersion Core · \* · Vocabulary** filtered decks — parallel immersion vocab
 - **WaniKani Kanji Meaning Anchor** — ungated meaning-only kanji path (primary for kanji)
 
-**Suspended (not studied):** Core · Radicals, Core · Kanji, Immersion Core · \* · Kanji,
-and **WaniKani Phonetic Families**. **WK Adjust New Limits** re-suspends them each run
-so rebuilds cannot sneak cards back. One-shot without waiting:
+**Suspended (not studied):** Core · Radicals, Core · Kanji, and **WaniKani Phonetic
+Families**. **WK Adjust New Limits** re-suspends them each run so rebuilds cannot
+sneak cards back. One-shot without waiting:
 `python scripts/retire_kanji_radical_study_ankiconnect.py`.
+
+**No filtered decks.** The `Immersion Core · …` decks are retired — study Core ·
+Vocabulary directly, where immersion priority already puts mined words first.
+Browse the same sets with `tag:immersion-core::satori` / `::shadowing` /
+`::candidates` (those tags are still maintained).
 
 Set `retire_kanji_radical_phonetic_study: false` in `wk_adaptive_new_config.json` /
 `wk_unlock_config.json` to restore classic radical→kanji→vocab study.
@@ -224,9 +229,9 @@ Study directly from **Japanese Grammar Context**.
 ### Suggested daily order
 
 1. **WaniKani Kanji Meaning Anchor** — primary kanji (meaning-only).
-2. **WaniKani Core · Vocabulary** / Immersion Core Vocabulary filtered decks — immersion-first.
+2. **WaniKani Core · Vocabulary** — immersion-first ordering, no filtered deck needed.
 3. Conjugation home decks (verbs → adjectives → reverse/types as you like).
-4. **Immersion · Yomitan Mining** / **Immersion · Satori** for cloze reading practice.
+4. **Immersion · Yomitan Mining** / **Immersion · Satori** / **Immersion · Shadowing** for cloze reading practice (Shadowing = native clip; Candidates optional).
 5. **Japanese Grammar Context** when you have energy.
 
 Grammar is **not** gated by kanji maturity today (see [§12](#12-tips--tuning)); use `grammar.max_jlpt` and `max_unknown_kanji` at generate time instead.
@@ -338,7 +343,32 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Satori immersion:** One-shot refresh: `python3 scripts/refresh_satori.py export.csv` (cloze + conjugations + template push + TTS + unlock). Or import CSV alone with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. Conjugations only: `python3 scripts/import_immersion_conjugations.py --satori export.csv`. Setup: [docs/satori_mining.md](docs/satori_mining.md).
 
-**Shadowing immersion:** Import a shadowmine project with `python3 scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID` → `out/wk_shadowing.apkg` + `out/wk_shadowing_candidates.apkg`. One cloze per matched WK vocab word (native clip audio); curated non-WK candidates in a separate deck. Setup: [docs/shadowing_mining.md](docs/shadowing_mining.md).
+**Shadowing immersion:** Full checklist: [docs/shadowing_mining.md](docs/shadowing_mining.md). **Preferred:** Glossbook vocabulary review → `.mining.zip`. Short version:
+
+```bash
+# Preferred: curated selections from Glossbook
+python3 scripts/import_shadowing.py ~/Downloads/VIDEO.mining.zip
+
+# Legacy: automatic matching from a shadowmine project (use fugashi venv)
+SHADOW_PY="$HOME/shadowing/cli/.venv/bin/python"
+"$SHADOW_PY" scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID
+# → out/wk_shadowing.apkg + out/wk_shadowing_candidates.apkg
+
+# Import both .apkg files. Do NOT enable "Update existing notes".
+# Tools → WK Adjust New Limits (priority for shadowing-mining)
+
+# Optional Target/Reading TTS only (keep native sentence clips):
+python3 scripts/synthesize_immersion_sentence_audio.py \
+  --surface-only --note-type "WK Shadowing Immersion"
+```
+
+| Task | Command |
+|------|---------|
+| Push templates | `python3 scripts/push_satori_template_ankiconnect.py --model "WK Shadowing Candidate" --no-refresh-cloze` |
+| Fix cloze HTML on live notes | `… --cloze-only --model "WK Shadowing Immersion"` (and Candidate) |
+| Restore native `SentenceAudio` | `python3 scripts/restore_shadowing_native_audio.py` |
+
+**Do not** run immersion TTS `--force` to “refresh” Shadowing sentence audio — use `--surface-only` or the restore script. Prefer WK clozes over glued candidates (readings ending in っ are almost always bad).
 
 **Off by default:** vocab-cloze, vocab-sentence, dictation, leeches (opt-in `--deck …`). Core `reading_audio` is on (WK vocab clips + Voicevox/edge for kanji).
 
@@ -373,11 +403,23 @@ Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs a
 
 **Cards stay suspended:** Run **WK Run Unlock Pass** on desktop; conjugations/types need linked Core Vocabulary maturity (≥ **7** day interval, Guru I equivalent).
 
-**Legacy `WK::` decks still appear:** Run
-`python3 scripts/remove_wk_filtered_decks_ankiconnect.py`; it returns queued
-cards to their home decks before removing the retired filtered decks.
+**Filtered decks reappear (`WK::…` or `Immersion Core · …`):** Sync add-ons and
+**restart Anki** (the running add-on recreates them until new code loads), then run
+`python3 scripts/remove_wk_filtered_decks_ankiconnect.py`; it returns queued cards
+to their home decks before removing the retired decks. Keep
+`immersion_core_filtered_decks_enabled: false` in `out/wk_adaptive_new_config.json`.
+
+**Cards stuck in a deleted filtered deck** (blank deck in Browse, or `deck:filtered`
+finds cards with no deck): Browse → select → **Change Deck** → home deck, or run
+**Tools → Check Database**.
 
 **Reading audio failures:** Re-run generator; optional `--refresh-reading-audio`.
+
+**Shadowing sentence plays Voicevox / wrong clip:** Native clips belong in `SentenceAudio` as `wk_shadowing_*.m4a`. Restore with `python3 scripts/restore_shadowing_native_audio.py`. For Target/Reading buttons only: `python3 scripts/synthesize_immersion_sentence_audio.py --surface-only --note-type "WK Shadowing Immersion"`.
+
+**Shadowing candidate answer ends in っ / looks cut off:** Usually a bad lemma (e.g. `敬語使`). Delete the note; rebuild with the shadowing CLI venv (`fugashi`). See [docs/shadowing_mining.md](docs/shadowing_mining.md).
+
+**Shadowing / Satori cloze blank missing after a code change:** `ClozeSentence` is stored — run `python3 scripts/push_satori_template_ankiconnect.py --cloze-only --model "…"`. Do not re-import with **Update existing notes** just to refresh templates (can wipe media).
 
 **FSRS:** Preset **WK FSRS** via **WK Apply Deck Options**.
 
@@ -444,17 +486,38 @@ Study core from the three **WaniKani Core ·** home decks; Anki’s per-deck
 
 **Immersion priority (overrides JLPT order):** when `immersion_priority_enabled` is on (default), vocab tagged `satori-mining` or `shadowing-mining` plus its prerequisite tree jump to the **front** of the Core Vocabulary new queue, ahead of the JLPT/level baseline. Non-immersion vocab stays available at lowest priority. The set is read live from the collection, so **re-importing** immersion `.apkg` files re-checks and updates priority automatically on the next collection load / import / sync. Set `immersion_priority_enabled: false` to fall back to pure JLPT/level order.
 
-**Immersion Core filtered decks (parallel study):** the same refresh tags Core
-Kanji/Vocabulary linked from immersion and rebuilds **Vocabulary** filtered decks —
-`Immersion Core · {Satori,Shadowing,Candidates} · Vocabulary` (Kanji filtered decks
-are not rebuilt while retire mode is on; their cards stay suspended). Manual rebuild:
-**Tools → WK Rebuild Immersion Core Decks**.
+**Immersion core tags (no filtered decks):** the same refresh tags Core
+Kanji/Vocabulary linked from immersion with `immersion-core::satori` /
+`::shadowing` / `::candidates`, so you can Browse or search each source inside the
+home decks. **Tools → WK Rebuild Immersion Core Decks** now only refreshes those
+tags.
+
+`Immersion Core · … · {Kanji,Vocabulary}` **filtered decks are retired**
+(`immersion_core_filtered_decks_enabled: false`, the default). To remove any that
+still exist and return their cards home:
+
+```bash
+python3 scripts/remove_wk_filtered_decks_ankiconnect.py --dry-run
+python3 scripts/remove_wk_filtered_decks_ankiconnect.py
+```
+
+**Restart Anki after syncing add-ons** before running the cleanup — the running
+add-on recreates the decks until the new code loads.
+
+<details>
+<summary>Re-enabling filtered decks (not recommended)</summary>
+
+Set `"immersion_core_filtered_decks_enabled": true` in
+`out/wk_adaptive_new_config.json`, restart Anki, then **Tools → WK Rebuild
+Immersion Core Decks**. Kanji filtered decks stay unbuilt while retire mode is on.
 
 Keep **Reschedule cards based on my answers** on (the addon sets this). Do not
 rebuild/empty while cards are still in learning — Anki turns those back into
 **new**. If that already happened: Browse the cards → **Cards → Set Due Date → 0**
 (converts new → review due today). The addon also salvages graduated-but-new
 cards before rebuild and skips rebuild while learning cards are present.
+
+</details>
 
 **Unseen vs new limit:** in WK Deck Stats, core tables use **Locked / New / Reviewed**
 (New = `is:new`). Locked counts rise for suspended radicals/kanji under retire mode.

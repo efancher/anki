@@ -149,10 +149,22 @@ class ShadowingIdentityTests(unittest.TestCase):
         self.assertEqual(cand.name, SHADOWING_CANDIDATE_NOTE_TYPE_NAME)
         self.assertIn("{{type:Reading}}", cand.templates[0]["qfmt"])
         self.assertNotIn("{{type:Expression}}", cand.templates[0]["qfmt"])
+        self.assertIn("{{HintGlossary}}", cand.templates[0]["qfmt"])
+        self.assertIn("{{Translation}}", cand.templates[0]["qfmt"])
         self.assertIn("{{Audio}}", cand.templates[0]["afmt"])
         self.assertIn("{{ReadingAudio}}", cand.templates[0]["afmt"])
         self.assertIn("Target", cand.templates[0]["afmt"])
         self.assertIn("Reading", cand.templates[0]["afmt"])
+
+    def test_native_media_stem_from_duplicate_key(self) -> None:
+        from shadowing_decks import native_shadowing_media_stem_from_duplicate_key
+
+        self.assertEqual(
+            native_shadowing_media_stem_from_duplicate_key(
+                "source-FkX4A-ZLBrc|sentence-007-c2fca3|水希"
+            ),
+            "wk_shadowing_source-FkX4A-ZLBrc_sentence-007-c2fca3",
+        )
 
 
 class ShadowingProjectLoadTests(unittest.TestCase):
@@ -247,6 +259,158 @@ class ShadowingBuildTests(unittest.TestCase):
     def test_tags(self) -> None:
         self.assertEqual(SHADOWING_TAG, "shadowing-mining")
         self.assertEqual(SHADOWING_CANDIDATE_TAG, "shadowing-candidate")
+
+    def test_mining_package_uses_authoritative_selections(self) -> None:
+        from shadowing_decks import load_mining_package
+
+        index = {
+            "by_expression": {
+                "する": {
+                    "id": 2467,
+                    "expression": "する",
+                    "reading": "する",
+                    "meaning": "to do",
+                }
+            },
+            "by_reading": {},
+        }
+        japanese = "世話をしました。"
+        # surface し at index 3
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "demo.mining.zip"
+            with zipfile.ZipFile(package, "w") as zf:
+                zf.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "format": "japanese-shadowing-mining-package",
+                            "version": 1,
+                            "createdAt": "2026-07-25T00:00:00Z",
+                            "generator": {"name": "satori-glossbook", "version": "0.6.0"},
+                        }
+                    ),
+                )
+                zf.writestr(
+                    "source.json",
+                    json.dumps(
+                        {
+                            "id": "source-demo",
+                            "type": "other",
+                            "title": "Demo Mining",
+                        }
+                    ),
+                )
+                zf.writestr(
+                    "sentences.json",
+                    json.dumps(
+                        [
+                            {
+                                "id": "sentence-001",
+                                "japanese": japanese,
+                                "english": "They took care.",
+                                "startMs": 0,
+                                "endMs": 1000,
+                                "transcriptStatus": "verified",
+                                "tags": ["glossbook-confirmed"],
+                                "audio": {
+                                    "path": "audio/sentence-001.m4a",
+                                    "mimeType": "audio/mp4",
+                                    "durationMs": 1000,
+                                },
+                                "selectedVocabulary": [
+                                    {
+                                        "surface": "し",
+                                        "start": 3,
+                                        "end": 4,
+                                        "expression": "する",
+                                        "reading": "する",
+                                    },
+                                    {
+                                        "surface": "世話",
+                                        "start": 0,
+                                        "end": 2,
+                                        "expression": "世話",
+                                        "reading": "せわ",
+                                    },
+                                ],
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                )
+                zf.writestr("audio/sentence-001.m4a", b"fake-audio")
+
+            project = load_mining_package(package)
+            self.assertTrue(project.curated)
+            self.assertEqual(len(project.sentences), 1)
+            self.assertEqual(len(project.sentences[0].selected_vocabulary), 2)
+
+            out = root / "out"
+            _, _, stats = build_shadowing_decks(
+                project, out, wk_index=index, include_auto_caption=True
+            )
+            # する is WK; 世話 is not in index → candidate
+            self.assertEqual(stats.curated_selections, 2)
+            self.assertEqual(stats.wk_notes, 1)
+            self.assertEqual(stats.candidate_notes, 1)
+            self.assertEqual(stats.missing_clips, 0)
+
+    def test_mining_package_rejects_bad_span(self) -> None:
+        from shadowing_decks import load_mining_package
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "bad.mining.zip"
+            with zipfile.ZipFile(package, "w") as zf:
+                zf.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "format": "japanese-shadowing-mining-package",
+                            "version": 1,
+                            "createdAt": "2026-07-25T00:00:00Z",
+                            "generator": {"name": "satori-glossbook", "version": "0.6.0"},
+                        }
+                    ),
+                )
+                zf.writestr(
+                    "source.json",
+                    json.dumps({"id": "s", "type": "other", "title": "t"}),
+                )
+                zf.writestr(
+                    "sentences.json",
+                    json.dumps(
+                        [
+                            {
+                                "id": "s1",
+                                "japanese": "世話をしました。",
+                                "startMs": 0,
+                                "endMs": 1,
+                                "transcriptStatus": "verified",
+                                "tags": [],
+                                "audio": {
+                                    "path": "audio/a.m4a",
+                                    "mimeType": "audio/mp4",
+                                    "durationMs": 1,
+                                },
+                                "selectedVocabulary": [
+                                    {
+                                        "surface": "担ぐ",
+                                        "start": 0,
+                                        "end": 2,
+                                        "expression": "担ぐ",
+                                        "reading": "かつぐ",
+                                    }
+                                ],
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                )
+                zf.writestr("audio/a.m4a", b"x")
+            with self.assertRaises(ValueError):
+                load_mining_package(package)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Return cards to home decks and remove legacy WK:: filtered decks.
+"""Return cards to home decks and remove retired WK filtered decks.
+
+Covers both generated families:
+  • legacy ``WK::…`` filtered decks (plus the empty ``WK`` parent)
+  • ``Immersion Core · … · {Kanji,Vocabulary}`` decks from wk_adaptive_new
 
 AnkiConnect's deleteDecks action requires ``cardsToo=true``. To avoid deleting
 cards, this script first calls ``changeDeck`` for every populated filtered deck;
 AnkiConnect removes those cards from the filtered queue before moving them to
 their known home deck. It verifies every move, then deletes only empty decks.
+
+Set ``immersion_core_filtered_decks_enabled: false`` in
+``out/wk_adaptive_new_config.json`` (the default) so the add-on does not
+recreate the Immersion Core decks on the next collection load.
 
 Usage (Anki open with AnkiConnect):
   python3 scripts/remove_wk_filtered_decks_ankiconnect.py --dry-run
@@ -22,10 +30,19 @@ from typing import Dict, List, Sequence
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
 FILTERED_DECK_PREFIX = "WK::"
 FILTERED_DECK_PARENT = "WK"
+IMMERSION_CORE_DECK_PREFIX = "Immersion Core · "
+CORE_KANJI_DECK = "WaniKani Core · Kanji"
+CORE_VOCABULARY_DECK = "WaniKani Core · Vocabulary"
 
-# Includes current and historical generated names. Unknown empty WK:: decks are
-# safe to delete; an unknown populated deck stops the run before any deletion.
+# Includes current and historical generated names. Unknown empty decks are safe
+# to delete; an unknown populated deck stops the run before any deletion.
 HOME_DECK_BY_FILTERED_NAME: Dict[str, str] = {
+    "Immersion Core · Satori · Kanji": CORE_KANJI_DECK,
+    "Immersion Core · Satori · Vocabulary": CORE_VOCABULARY_DECK,
+    "Immersion Core · Shadowing · Kanji": CORE_KANJI_DECK,
+    "Immersion Core · Shadowing · Vocabulary": CORE_VOCABULARY_DECK,
+    "Immersion Core · Candidates · Kanji": CORE_KANJI_DECK,
+    "Immersion Core · Candidates · Vocabulary": CORE_VOCABULARY_DECK,
     "WK::Core Radicals": "WaniKani Core · Radicals",
     "WK::Core Kanji": "WaniKani Core · Kanji",
     "WK::Core Vocabulary": "WaniKani Core · Vocabulary",
@@ -74,9 +91,15 @@ def anki_connect(base_url: str, action: str, **params: object) -> object:
     return payload["result"]
 
 
+def is_retired_filtered_deck(name: str) -> bool:
+    return name.startswith(FILTERED_DECK_PREFIX) or name.startswith(
+        IMMERSION_CORE_DECK_PREFIX
+    )
+
+
 def filtered_deck_names(base_url: str) -> List[str]:
     names = anki_connect(base_url, "deckNames")
-    return sorted(name for name in names if name.startswith(FILTERED_DECK_PREFIX))
+    return sorted(name for name in names if is_retired_filtered_deck(name))
 
 
 def card_ids_in_deck(base_url: str, deck_name: str) -> List[int]:
@@ -114,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     names = filtered_deck_names(args.anki_connect)
     if not names:
-        print("No WK:: filtered decks found.")
+        print("No retired WK / Immersion Core filtered decks found.")
         deck_names = anki_connect(args.anki_connect, "deckNames")
         if FILTERED_DECK_PARENT in deck_names:
             parent_cards = card_ids_in_deck(args.anki_connect, FILTERED_DECK_PARENT)

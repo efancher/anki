@@ -23,10 +23,20 @@ from wk_decks import (
     COMMON_CSS,
     DECK_IDS,
     DECK_NAMES,
+    GODAN_E_ROW_SUFFIX,
+    GODAN_NEGATIVE_STEM_SUFFIX,
+    GODAN_PAST_SUFFIX,
+    GODAN_POLITE_STEM_SUFFIX,
+    GODAN_TE_SUFFIX,
     MODEL_IDS,
     MODEL_TEMPLATE_VERSIONS,
     NOTE_TYPE_NAMES,
     WkModel,
+    conjugate_godan,
+    conjugate_i_adjective,
+    conjugate_ichidan,
+    conjugate_kuru,
+    conjugate_suru,
     stable_guid,
     versioned_css,
     write_apkg,
@@ -144,6 +154,25 @@ def _is_hiragana(ch: str) -> bool:
 
 def _is_kanji(ch: str) -> bool:
     return bool(_KANJI_RE.match(ch))
+
+
+# Katakana and hiragana are contiguous, parallel blocks in Unicode.
+_KATAKANA_TO_HIRAGANA_OFFSET = ord("ア") - ord("あ")
+_KATAKANA_FIRST, _KATAKANA_LAST = "ァ", "ヶ"
+
+
+def fold_kana(text: str) -> str:
+    """Katakana → hiragana, preserving length so match indices stay valid.
+
+    Dictionaries write some words in kana that sentences write in katakana
+    (わし vs ワシ); folding both sides lets those still line up.
+    """
+    return "".join(
+        chr(ord(ch) - _KATAKANA_TO_HIRAGANA_OFFSET)
+        if _KATAKANA_FIRST <= ch <= _KATAKANA_LAST
+        else ch
+        for ch in text
+    )
 
 
 def _expression_parts(expression: str) -> Tuple[str, str, str]:
@@ -377,6 +406,195 @@ def format_cloze_surface_html(surface: str, expression: str) -> str:
     return marked
 
 
+# Conjugated forms used to *locate* a lemma in a sentence. Potential, passive,
+# and causative are deliberately absent: those forms have their own dictionary
+# entries (する → できる, される, させる), so matching them would highlight a
+# different word than the one being tested.
+_SURFACE_MATCH_FORM_KEYS: Tuple[str, ...] = (
+    "polite_past_negative",
+    "polite_negative",
+    "polite_past",
+    "polite_present",
+    "polite",
+    "plain_past_negative",
+    "plain_negative",
+    "plain_past",
+    "te_form",
+    "ba_form",
+    "tara_form",
+)
+
+# Ichidan stem + suffix. Kept here rather than reused from conjugate_ichidan
+# because that path requires a kanji stem (see _kana_verb_surface_variants).
+_ICHIDAN_MATCH_SUFFIXES: Tuple[str, ...] = (
+    "ませんでした",
+    "ません",
+    "ました",
+    "ます",
+    "なかった",
+    "ない",
+    "たら",
+    "れば",
+    "た",
+    "て",
+)
+
+# Adverbial and evidential forms the conjugators do not emit (すごく, おいしそう).
+_I_ADJECTIVE_DERIVED_SUFFIXES: Tuple[str, ...] = ("そう", "く")
+
+# A surface this short is a fragment of some longer word far more often than it
+# is the target (する → し), so it is never trusted as a match.
+_MIN_CONJUGATED_MATCH_LEN = 2
+# Kana spellings of a kanji lemma (来ました → きました) collide with unrelated
+# words much more easily, so they must be longer to be trusted.
+_MIN_KANA_SPELLING_MATCH_LEN = 3
+
+
+def _i_adjective_derived_variants(lemma: str) -> List[str]:
+    """すごい → すごく / すごそう. Harmless for non-adjectives ending in い.
+
+    A two-kana lemma is skipped because its one-kana stem yields forms that
+    collide with ordinary words (いい → いく, which would match 行く).
+    """
+    if not lemma.endswith("い"):
+        return []
+    if len(lemma) < _MIN_KANA_SPELLING_MATCH_LEN and not kanji_stem(lemma):
+        return []
+    stem = lemma[:-1]
+    return [stem + suffix for suffix in _I_ADJECTIVE_DERIVED_SUFFIXES]
+
+
+def _kana_verb_surface_variants(lemma: str) -> List[str]:
+    """Conjugations of a kana-only verb lemma (なる, できる, ためらう, …).
+
+    wk_decks' conjugators need a kanji stem to split okurigana from, so kana-only
+    verbs produce nothing there. The godan suffix tables are reused so the rules
+    stay in one place; only the stem split is done locally.
+
+    A lemma ending in る is ambiguous (なる is godan, できる is ichidan), so both
+    readings are emitted. That is safe here because the caller keeps only the
+    variant that actually occurs in the sentence.
+    """
+    if len(lemma) < _MIN_CONJUGATED_MATCH_LEN:
+        return []
+    stem, ending = lemma[:-1], lemma[-1]
+    if ending not in GODAN_POLITE_STEM_SUFFIX:
+        return []
+
+    polite_stem = stem + GODAN_POLITE_STEM_SUFFIX[ending]
+    negative_stem = stem + GODAN_NEGATIVE_STEM_SUFFIX[ending]
+    past = stem + GODAN_PAST_SUFFIX[ending]
+    variants = [
+        polite_stem + "ませんでした",
+        polite_stem + "ません",
+        polite_stem + "ました",
+        polite_stem + "ます",
+        negative_stem + "なかった",
+        negative_stem + "ない",
+        past + "ら",
+        past,
+        stem + GODAN_TE_SUFFIX[ending],
+        stem + GODAN_E_ROW_SUFFIX[ending] + "ば",
+    ]
+    if ending == "る":
+        variants.extend(stem + suffix for suffix in _ICHIDAN_MATCH_SUFFIXES)
+    return variants
+
+
+def conjugated_surface_variants(expression: str, reading: str = "") -> List[str]:
+    """Sentence surfaces this lemma can appear as, longest first.
+
+    Covers する/くる, i-adjectives, and kanji verbs via wk_decks' conjugators,
+    plus kana-only verbs via _kana_verb_surface_variants. For a kanji verb the
+    godan and ichidan readings are both generated (怒る → 怒りました / 怒ました);
+    only one of them will be present in any real sentence.
+    """
+    expr = plain_mining_text(expression)
+    read = plain_mining_text(reading) or expr
+    if not expr:
+        return []
+
+    variants: List[str] = []
+    for conjugate in (
+        conjugate_suru,
+        conjugate_kuru,
+        conjugate_i_adjective,
+        conjugate_ichidan,
+        conjugate_godan,
+    ):
+        for form_key in _SURFACE_MATCH_FORM_KEYS:
+            try:
+                conjugated = conjugate(expr, read, form_key)
+            except (IndexError, KeyError):
+                continue
+            if not conjugated:
+                continue
+            written, spoken = conjugated
+            if written:
+                variants.append(written)
+            # Sentences sometimes spell a kanji verb in kana (飛んできました).
+            if spoken and spoken != written:
+                variants.append(spoken)
+    variants.extend(_kana_verb_surface_variants(expr))
+    variants.extend(_i_adjective_derived_variants(expr))
+
+    lemma_has_kanji = bool(kanji_stem(expr))
+    unique = []
+    for variant in sorted(set(variants), key=lambda item: (-len(item), item)):
+        is_kana_spelling = lemma_has_kanji and not kanji_stem(variant)
+        min_len = (
+            _MIN_KANA_SPELLING_MATCH_LEN
+            if is_kana_spelling
+            else _MIN_CONJUGATED_MATCH_LEN
+        )
+        if len(variant) >= min_len:
+            unique.append(variant)
+    return unique
+
+
+def _conjugated_match_span(
+    plain: str, expression: str, reading: str
+) -> Optional[Tuple[int, int]]:
+    """Longest conjugated surface of this lemma occurring in plain.
+
+    Two hits are discarded:
+
+    * one nested inside a longer hit — した must not be taken out of しました;
+    * an all-kana hit right after kanji, which is nearly always the tail of a
+      compound (する must not claim the しました in 電話しました).
+    """
+    spans: List[Tuple[int, int]] = []
+    for variant in conjugated_surface_variants(expression, reading):
+        start = 0
+        while True:
+            idx = plain.find(variant, start)
+            if idx < 0:
+                break
+            spans.append((idx, idx + len(variant)))
+            start = idx + 1
+
+    def is_nested(start: int, end: int) -> bool:
+        return any(
+            other_start <= start
+            and end <= other_end
+            and (other_end - other_start) > (end - start)
+            for other_start, other_end in spans
+        )
+
+    def follows_kanji(start: int, end: int) -> bool:
+        if start == 0 or not _is_kanji(plain[start - 1]):
+            return False
+        return not kanji_stem(plain[start:end])
+
+    best: Optional[Tuple[int, int]] = None
+    for start, end in spans:
+        if is_nested(start, end) or follows_kanji(start, end):
+            continue
+        if best is None or (end - start) > (best[1] - best[0]):
+            best = (start, end)
+    return best
+
+
 # Transparent sentence forms only — not ありません/ない-based negatives
 # (those are morphologically ある/ない, even when they negate です).
 _EXPRESSION_SURFACE_VARIANTS: Dict[str, Tuple[str, ...]] = {
@@ -481,6 +699,11 @@ def resolve_surface_span(
         if idx >= 0:
             return _finish(idx, idx + len(surf))
 
+    if expr:
+        idx = fold_kana(plain).find(fold_kana(expr))
+        if idx >= 0:
+            return idx, idx + len(expr), plain
+
     _prefix, stem, okuri = _expression_parts(expr)
     if stem:
         idx = _find_stem_index(plain, stem, okuri)
@@ -505,6 +728,12 @@ def resolve_surface_span(
         if clean == expr:
             return _finish(idx, idx + len(clean))
         return _finish(idx, idx + len(clean))
+
+    # Last resort: the lemma only appears conjugated (する → しました). These are
+    # already whole surfaces, so they are returned without okurigana expansion.
+    conjugated = _conjugated_match_span(plain, expression, reading)
+    if conjugated is not None:
+        return conjugated[0], conjugated[1], plain
     return None
 
 
@@ -795,6 +1024,24 @@ SATORI_FALLBACK_MEANINGS: Dict[str, str] = {
     "飛び出す": "to jump out; to fly out",
     "怖がり": "coward; timid person",
     "週間": "week(s); ... weeks",
+    "いつも": "always; usually",
+    "おいしい": "delicious; tasty",
+    "しばらく": "for a while; for a moment",
+    "しばらくすると": "after a while",
+    "する": "to do",
+    "そう": "so; that way; (I) hear that",
+    "なる": "to become; to turn into",
+    "ひな": "chick; baby bird",
+    "まだ": "still; not yet",
+    "みんな": "everyone; everybody; all",
+    "やって来る": "to come along; to show up",
+    "バタバタ": "flap-flap; fluttering (onomatopoeia)",
+    "ピーピー": "peep-peep; chirping (onomatopoeia)",
+    "大きな": "big; large",
+    "少しずつ": "little by little; bit by bit",
+    "後": "after; later",
+    "第": "ordinal prefix (No. ...)",
+    "達": "pluralizing suffix (people)",
 }
 
 

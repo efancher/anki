@@ -38,6 +38,7 @@ from .logic import (
     should_synthesize_note,
     synthesize_sentence_audio,
     unwrap_sound_tag,
+    uses_native_sentence_clip,
 )
 from .migaku_field_map import configure_migaku_field_map
 from .mining_enrich import apply_mining_enrichment
@@ -229,6 +230,9 @@ def _store_sentence_audio(
     unwrapped = _unwrap_satori_normal_audio(note)
     if unwrapped:
         existing_audio = _field_value(note, FIELD_SENTENCE_AUDIO)
+    if uses_native_sentence_clip(note_type_name):
+        return unwrapped
+
     if not should_synthesize_note(
         note_type_name=note_type_name,
         sentence=sentence,
@@ -248,6 +252,7 @@ def _store_sentence_audio(
         sentence_audio=existing_audio,
         sentence_audio_easy=existing_easy,
         force=force,
+        note_type_name=note_type_name,
     )
     if not needed:
         return unwrapped

@@ -378,5 +378,94 @@ class SatoriClozeTests(unittest.TestCase):
         self.assertIn("たち", cloze)
 
 
+class ConjugatedSurfaceMatchTests(unittest.TestCase):
+    """Lemmas that only ever appear conjugated in the sentence."""
+
+    def surface(self, sentence: str, expression: str, reading: str) -> str:
+        from satori_decks import surface_span_text
+
+        return surface_span_text(sentence, expression, reading)
+
+    def test_suru_matches_polite_past(self) -> None:
+        sentence = "親鳥たちは、毎日、一生懸命にひなたちの世話をしました。"
+        self.assertEqual(self.surface(sentence, "する", "する"), "しました")
+        cloze, _ = build_satori_cloze_sentence(sentence, "する", "する")
+        self.assertIn("cloze-blank", cloze)
+        self.assertIn("世話を", cloze)
+        self.assertNotIn("しました", cloze)
+
+    def test_kana_godan_verb_matches_polite_past(self) -> None:
+        self.assertEqual(
+            self.surface("とためらいました。", "ためらう", "ためらう"),
+            "ためらいました",
+        )
+        self.assertEqual(
+            self.surface("大きくなりました。", "なる", "なる"), "なりました"
+        )
+
+    def test_kana_ichidan_verb_matches_polite_past_negative(self) -> None:
+        self.assertEqual(
+            self.surface("飛び出すことができませんでした。", "できる", "できる"),
+            "できませんでした",
+        )
+
+    def test_longest_form_wins_over_nested_shorter_form(self) -> None:
+        """できました must not be clipped to できた/きた."""
+        self.assertEqual(
+            self.surface("なんとか飛ぶことができました。", "できる", "できる"),
+            "できました",
+        )
+
+    def test_i_adjective_adverbial_and_evidential(self) -> None:
+        self.assertEqual(
+            self.surface("飛ぶのって、すごく楽しいね！", "すごい", "すごい"), "すごく"
+        )
+        self.assertEqual(
+            self.surface("おいしそうにえさを食べました。", "おいしい", "おいしい"),
+            "おいしそう",
+        )
+
+    def test_two_kana_adjective_does_not_generate_colliding_forms(self) -> None:
+        """いい must not reach 行く through a bogus いく form."""
+        self.assertEqual(self.surface("今から飲み行くの?", "いい", "いい"), "")
+
+    def test_short_kanji_adjective_matches_evidential(self) -> None:
+        sentence = "なんか仕事中偉そうな態度を取ってしまってすいません。"
+        self.assertEqual(self.surface(sentence, "偉い", "えらい"), "偉そう")
+
+    def test_kanji_lemma_matches_kana_spelling(self) -> None:
+        """来る is written き in 飛んできました."""
+        sentence = "タカが飛んできました。"
+        self.assertEqual(self.surface(sentence, "来る", "くる"), "きました")
+        cloze, _ = build_satori_cloze_sentence(sentence, "来る", "くる")
+        self.assertIn("cloze-blank", cloze)
+        self.assertIn("飛んで", cloze)
+
+    def test_kana_lemma_matches_katakana_spelling(self) -> None:
+        sentence = "外の世界には、怖いワシやタカもいるの。"
+        self.assertEqual(self.surface(sentence, "わし", "わし"), "ワシ")
+        cloze, _ = build_satori_cloze_sentence(sentence, "わし", "わし")
+        self.assertIn("cloze-blank", cloze)
+        self.assertIn("タカ", cloze)
+        self.assertNotIn("ワシ", cloze)
+
+    def test_suru_does_not_claim_the_tail_of_a_compound_verb(self) -> None:
+        """電話しました belongs to 電話する, and した must not be cut out of it."""
+        self.assertEqual(self.surface("電話しました。", "する", "する"), "")
+
+    def test_suru_does_not_match_an_unrelated_verbs_stem(self) -> None:
+        self.assertEqual(self.surface("彼は話した。", "する", "する"), "")
+
+    def test_potential_form_is_not_matched_as_suru(self) -> None:
+        """できる is する's potential but has its own card — don't steal it."""
+        self.assertEqual(self.surface("それができる。", "する", "する"), "")
+
+    def test_conjugated_match_does_not_displace_an_exact_hit(self) -> None:
+        sentence = "親鳥たちは、毎日、一生懸命にひなたちの世話をしました。"
+        cloze, _ = build_satori_cloze_sentence(sentence, "世話", "せわ")
+        self.assertIn('<span class="cloze-target">世話</span>', cloze)
+        self.assertIn("しました", cloze)
+
+
 if __name__ == "__main__":
     unittest.main()

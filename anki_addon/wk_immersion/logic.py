@@ -39,6 +39,8 @@ DEFAULT_VOICEVOX_EASY_SPEED_SCALE = 0.75
 DEFAULT_EDGE_TTS_VOICE = "ja-JP-NanamiNeural"
 DEFAULT_SYNTH_ENGINE = "voicevox"
 SENTENCE_AUDIO_FILENAME_PREFIX = "wk_immersion_sent_"
+# Packaged native clips from shadowing project imports (never overwrite with TTS).
+NATIVE_SHADOWING_AUDIO_PREFIX = "wk_shadowing_"
 IMMERSION_AUDIO_CACHE_SUBDIR = "immersion_sentence_audio"
 VOICEVOX_SYNTH_TIMEOUT_SECONDS = 45
 EDGE_TTS_SUBPROCESS_TIMEOUT_SECONDS = 60
@@ -156,6 +158,27 @@ def sentence_text_for_tts(sentence: str, sentence_furigana: str = "") -> str:
 
 def sentence_audio_already_set(sentence_audio_field: str) -> bool:
     return bool(strip_html(sentence_audio_field).strip())
+
+
+def uses_native_sentence_clip(note_type_name: str) -> bool:
+    """Shadowing notes ship video/audio clips; sentence TTS must not replace them."""
+    try:
+        from .mining_note_types import (
+            SHADOWING_CANDIDATE_NOTE_TYPE,
+            SHADOWING_NOTE_TYPE,
+        )
+    except ImportError:
+        from mining_note_types import (  # type: ignore
+            SHADOWING_CANDIDATE_NOTE_TYPE,
+            SHADOWING_NOTE_TYPE,
+        )
+
+    return note_type_name in {SHADOWING_NOTE_TYPE, SHADOWING_CANDIDATE_NOTE_TYPE}
+
+
+def is_native_shadowing_audio_field(sentence_audio_field: str) -> bool:
+    bare = unwrap_sound_tag(sentence_audio_field)
+    return bare.startswith(NATIVE_SHADOWING_AUDIO_PREFIX)
 
 
 def resolve_python_executable(configured: str = "") -> Optional[str]:
@@ -459,12 +482,20 @@ def sentence_audio_fields_needing_synth(
     sentence_audio: str,
     sentence_audio_easy: str,
     force: bool = False,
+    note_type_name: str = "",
 ) -> Tuple[str, ...]:
+    if note_type_name and uses_native_sentence_clip(note_type_name):
+        return ()
     needed: list[str] = []
-    if force or not sentence_audio_already_set(sentence_audio):
+    # Never replace packaged shadowing clips, even under --force.
+    if is_native_shadowing_audio_field(sentence_audio):
+        pass
+    elif force or not sentence_audio_already_set(sentence_audio):
         needed.append(FIELD_SENTENCE_AUDIO)
     if force or not sentence_audio_already_set(sentence_audio_easy):
-        needed.append(FIELD_SENTENCE_AUDIO_EASY)
+        # Shadowing notes do not use Easy sentence TTS.
+        if not is_native_shadowing_audio_field(sentence_audio):
+            needed.append(FIELD_SENTENCE_AUDIO_EASY)
     return tuple(needed)
 
 
@@ -484,9 +515,12 @@ def should_synthesize_note(
         return False
     if not is_mining_note_type(note_type_name):
         return False
+    if uses_native_sentence_clip(note_type_name):
+        return False
     if not sentence_audio_fields_needing_synth(
         sentence_audio=sentence_audio,
         sentence_audio_easy=sentence_audio_easy,
+        note_type_name=note_type_name,
     ):
         return False
     return bool(sentence_text_for_tts(sentence, sentence_furigana))
