@@ -261,7 +261,7 @@ Edit `wk_deck_config.json`, then `python wk_decks.py --from-config`.
 
 | Key                          | Typical value      | Effect                                                     |
 | ---------------------------- | ------------------ | ---------------------------------------------------------- |
-| `generate_decks`             | `core-radical`, `kanji-meaning`, conjugations, … | Decks in `wk_all.apkg` |
+| `generate_decks`             | `core-radical`, `kanji-meaning`, verb/adjective types, … | Decks in `wk_all.apkg` (WK conjugation packs off by default) |
 | `no_wk_progress_filter`      | `true`             | Full supplementary import + Anki gating                    |
 | `fetch_wk_review_statistics` | `false`            | Skip WK review_statistics API (leech decks only)           |
 | `core.bootstrap_scheduling`  | `false`            | **Off by default.** Set `true` once for WK interval import |
@@ -326,7 +326,7 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Grammar:** `python wk_decks.py --deck grammar` — Hanabira clozes ordered by JLPT; browse by `tag:jlpt-n5`, etc.
 
-**Conjugation:** type-in forms via their WaniKani conjugation home decks; `--verify-conjugations-only` for rule checks. Unlock when linked Core Vocabulary is Guru+.
+**Conjugation:** immersion-driven drills via `python3 scripts/import_immersion_conjugations.py` → **Immersion · Conjugations**. Forms allowlist in `wk_deck_config.json` → `conjugation_forms`. `--verify-conjugations-only` for rule checks. WK-linked notes unlock when Core Vocabulary is Guru+.
 
 **Phonetic families:** Keisei DB in `.wk_cache/keisei/`. Unlock when any family kanji reviewed once in the meaning anchor. Card backs lead with the phonetic component, then “usually signals” ordered most→least (with WK mnemonic keywords, e.g. `しょ - Show`), then a focus table of Reading / Started / Total by each family kanji’s primary on’yomi (rows sum to the footer). Regen: `python wk_decks.py --deck phonetic-families`. Live patch: `python3 scripts/patch_phonetic_readings_ankiconnect.py --from-cache`.
 
@@ -336,7 +336,7 @@ by suspending or unsuspending prerequisite-gated cards.
 
 **Yomitan immersion:** Sentence cloze on front — type the reading in kana; sentence audio + pitch on back; second **Shadow → pitch** card for speaking practice. Native YouTube clips via `scripts/extract_immersion_clip.py`. Setup: [docs/yomitan_mining.md](docs/yomitan_mining.md).
 
-**Satori immersion:** Import a Satori Reader CSV with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. English word + sentence translation always on the back. Conjugations: `python3 scripts/import_satori.py export.csv --conjugations` → `out/wk_satori_conjugations.apkg` / **Immersion · Satori Conjugations**. Setup: [docs/satori_mining.md](docs/satori_mining.md).
+**Satori immersion:** One-shot refresh: `python3 scripts/refresh_satori.py export.csv` (cloze + conjugations + template push + TTS + unlock). Or import CSV alone with `python3 scripts/import_satori.py export.csv` → `out/wk_satori.apkg`. Conjugations only: `python3 scripts/import_immersion_conjugations.py --satori export.csv`. Setup: [docs/satori_mining.md](docs/satori_mining.md).
 
 **Shadowing immersion:** Import a shadowmine project with `python3 scripts/import_shadowing.py ~/shadowing/cli/projects/VIDEO_ID` → `out/wk_shadowing.apkg` + `out/wk_shadowing_candidates.apkg`. One cloze per matched WK vocab word (native clip audio); curated non-WK candidates in a separate deck. Setup: [docs/shadowing_mining.md](docs/shadowing_mining.md).
 

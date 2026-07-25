@@ -4,6 +4,20 @@ Import vocabulary from a **Satori Reader** CSV export into Anki as sentence cloz
 
 Same pedagogy as Migaku mining: blank the target word in context, type it in kanji. **Word English** and **sentence translation** always show on the back.
 
+## One-shot refresh
+
+Build cloze + conjugations, open import dialogs, push templates, regenerate TTS,
+and unlock the immersion closure:
+
+```bash
+# Anki open with AnkiConnect; VOICEVOX running
+python3 scripts/refresh_satori.py /path/to/satori_export.csv
+python3 scripts/refresh_satori.py export.csv --from-anki   # also Shadowing/Yomitan lemmas
+```
+
+Useful flags: `--skip-tts`, `--no-force-tts` (fill missing only), `--skip-conjugations`,
+`--skip-import-dialogs`, `--skip-unlock`.
+
 ## Export from Satori
 
 In Satori Reader, export your cards to CSV (includes `CardType`, `Expression`, `Context1`, translations, readings).
@@ -102,17 +116,39 @@ If audio sounds doubled or choppy (`親鳥おやどり…`), an older build was 
 
 New Satori notes added through AnkiConnect also get TTS when `on_mine` is enabled (CSV import still needs the backfill step above).
 
-## Satori conjugations
+## Immersion conjugations
 
-Build **separate** conjugation drills from JE verbs/adjectives in the same CSV (not mixed into WK conjugation packs):
+Drive verb/adjective conjugation drills from **immersion lemmas** (Satori CSV
+and/or live Anki notes tagged `satori-mining`, `shadowing-mining`,
+`yomitan-mining`). Part of speech comes from Satori CSV fields, WK vocab POS
+when `WkSubjectId` links, then an offline **JMDict** index
+(`out/jmdict-eng.json` / `out/jmdict_pos_index.json`, auto-downloaded on first
+build).
+
+```bash
+# Satori CSV only
+python3 scripts/import_immersion_conjugations.py --satori /path/to/satori_export.csv
+
+# Live Anki immersion notes (requires AnkiConnect)
+python3 scripts/import_immersion_conjugations.py --from-anki
+
+# Both
+python3 scripts/import_immersion_conjugations.py --satori export.csv --from-anki
+```
+
+Writes `out/wk_immersion_conjugations.apkg`. Import it, then study from
+**Immersion · Conjugations**.
+
+Forms are the full set (polite/plain, past, negatives, te, potential, passive,
+causative, 〜ば / 〜たら). Trim via `conjugation_forms` in
+`wk_deck_config.json`. WK conjugation packs are no longer in the default
+`generate_decks` list.
+
+Legacy Satori-only builder still works:
 
 ```bash
 python3 scripts/import_satori.py /path/to/satori_export.csv --conjugations
 ```
-
-Writes `out/wk_satori_conjugations.apkg`. Import it, then study directly from
-**Immersion · Satori Conjugations**. Lemmas already covered by WK conjugations
-are skipped when a WK index/cache is available.
 
 ## Gloss worksheet (Cure Dolly–style mapping practice)
 

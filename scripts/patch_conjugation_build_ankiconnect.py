@@ -62,10 +62,16 @@ FORM_TAGS = {
     "polite_present",
     "polite_negative",
     "polite_past",
+    "polite_past_negative",
     "plain_negative",
     "plain_past",
-    "te_form",
     "plain_past_negative",
+    "te_form",
+    "potential",
+    "passive",
+    "causative",
+    "ba_form",
+    "tara_form",
     "polite",
 }
 

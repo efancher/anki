@@ -40,12 +40,18 @@ def build_mining_vocab_index(vocab_items: Sequence[dict]) -> dict:
             for item in (data.get("meanings") or [])
             if item.get("meaning")
         ]
+        parts_of_speech = [
+            str(pos).strip()
+            for pos in (data.get("parts_of_speech") or [])
+            if str(pos).strip()
+        ]
         component_ids = data.get("component_subject_ids") or []
         entry = {
             "id": int(vocab["id"]),
             "expression": expr,
             "reading": reading,
             "meaning": "; ".join(meanings[:3]),
+            "parts_of_speech": parts_of_speech,
             "prerequisite_ids": ",".join(str(component_id) for component_id in component_ids),
         }
         if expr:

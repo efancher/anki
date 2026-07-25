@@ -68,8 +68,8 @@ Each run appends one row to out/wk_run_history.csv with deck counts and bundle c
 
 from __future__ import annotations
 
-VERSION = "2.37.1"
-BUILD_DATE = "2026-07-04"
+VERSION = "2.38.0"
+BUILD_DATE = "2026-07-24"
 
 import warnings
 
@@ -121,8 +121,6 @@ WK_DECK_CONFIG_FILENAME = "wk_deck_config.json"
 DEFAULT_GENERATE_DECKS = (
     "phonetic-families",
     "radicals",
-    "conjugations-verbs",
-    "conjugations-adjectives",
     "verb-types",
     "kanji-meaning",
     "rendaku",
@@ -547,7 +545,7 @@ _RETIRED_FILTERED_DECK_DEFINITIONS = [
     {
         "name": "WK::Immersion · Satori Conj",
         "search": daily_filtered_deck_search(
-            'deck:"Immersion · Satori Conjugations" tag:satori-conjugation',
+            'deck:"Immersion · Conjugations" (tag:immersion-conjugation OR tag:satori-conjugation)',
         ),
         "limit": CORE_FILTERED_DECK_CARD_LIMIT,
         "order": FILTERED_DECK_ORDER_RELATIVE_OVERDUENESS,
@@ -593,7 +591,7 @@ DECK_NAMES = {
     "vocab-sentence-meaning": "WaniKani Vocabulary Sentence Meaning",
     "vocab-sentence-reading": "WaniKani Vocabulary Sentence Reading",
     "satori": "Immersion · Satori",
-    "satori-conjugations": "Immersion · Satori Conjugations",
+    "satori-conjugations": "Immersion · Conjugations",
     "shadowing": "Immersion · Shadowing",
     "shadowing-candidates": "Immersion · Shadowing Candidates",
 }
@@ -2921,9 +2919,16 @@ VERB_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
     ("polite_present", "Polite present"),
     ("polite_negative", "Polite negative"),
     ("polite_past", "Polite past"),
+    ("polite_past_negative", "Polite past negative"),
     ("plain_negative", "Plain negative"),
     ("plain_past", "Plain past"),
+    ("plain_past_negative", "Plain past negative"),
     ("te_form", "Te-form"),
+    ("potential", "Potential"),
+    ("passive", "Passive"),
+    ("causative", "Causative"),
+    ("ba_form", "Conditional (~ば)"),
+    ("tara_form", "Conditional (~たら)"),
 )
 
 I_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
@@ -2933,6 +2938,10 @@ I_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
     ("polite", "Polite"),
     ("polite_negative", "Polite negative"),
     ("polite_past", "Polite past"),
+    ("polite_past_negative", "Polite past negative"),
+    ("te_form", "Te-form"),
+    ("ba_form", "Conditional (~ば)"),
+    ("tara_form", "Conditional (~たら)"),
 )
 
 NA_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
@@ -2942,7 +2951,15 @@ NA_ADJECTIVE_CONJUGATION_FORMS: Tuple[Tuple[str, str], ...] = (
     ("polite", "Polite"),
     ("polite_negative", "Polite negative"),
     ("polite_past", "Polite past"),
+    ("polite_past_negative", "Polite past negative"),
+    ("te_form", "Te-form"),
+    ("ba_form", "Conditional (~ば)"),
+    ("tara_form", "Conditional (~たら)"),
 )
+
+# Optional form allowlist from wk_deck_config.json → conjugation_forms.
+# Missing keys mean "all forms for that class".
+_CONJUGATION_FORMS_ALLOWLIST: Dict[str, Set[str]] = {}
 
 VERB_CONJUGATION_WORD_CLASSES: Set[str] = {
     "godan",
@@ -3004,14 +3021,45 @@ GODAN_PAST_SUFFIX = {
     "る": "った",
 }
 
+GODAN_POTENTIAL_SUFFIX = {
+    "う": "える",
+    "く": "ける",
+    "ぐ": "げる",
+    "す": "せる",
+    "つ": "てる",
+    "ぬ": "ねる",
+    "ぶ": "べる",
+    "む": "める",
+    "る": "れる",
+}
+
+GODAN_E_ROW_SUFFIX = {
+    "う": "え",
+    "く": "け",
+    "ぐ": "げ",
+    "す": "せ",
+    "つ": "て",
+    "ぬ": "ね",
+    "ぶ": "べ",
+    "む": "め",
+    "る": "れ",
+}
+
 IKU_READING_EXCEPTIONS = {
     "いく": {
         "polite_present": "いきます",
         "polite_negative": "いきません",
         "polite_past": "いきました",
+        "polite_past_negative": "いきませんでした",
         "plain_negative": "いかない",
         "plain_past": "いった",
+        "plain_past_negative": "いかなかった",
         "te_form": "いって",
+        "potential": "いける",
+        "passive": "いかれる",
+        "causative": "いかせる",
+        "ba_form": "いけば",
+        "tara_form": "いったら",
     },
 }
 
@@ -3214,12 +3262,26 @@ def conjugate_godan(expr: str, reading: str, form_key: str) -> Optional[Tuple[st
         conj_reading = reading_stem + GODAN_POLITE_STEM_SUFFIX[ending] + "ません"
     elif form_key == "polite_past":
         conj_reading = reading_stem + GODAN_POLITE_STEM_SUFFIX[ending] + "ました"
+    elif form_key == "polite_past_negative":
+        conj_reading = reading_stem + GODAN_POLITE_STEM_SUFFIX[ending] + "ませんでした"
     elif form_key == "plain_negative":
         conj_reading = reading_stem + GODAN_NEGATIVE_STEM_SUFFIX[ending] + "ない"
     elif form_key == "plain_past":
         conj_reading = reading_stem + GODAN_PAST_SUFFIX[ending]
+    elif form_key == "plain_past_negative":
+        conj_reading = reading_stem + GODAN_NEGATIVE_STEM_SUFFIX[ending] + "なかった"
     elif form_key == "te_form":
         conj_reading = reading_stem + GODAN_TE_SUFFIX[ending]
+    elif form_key == "potential":
+        conj_reading = reading_stem + GODAN_POTENTIAL_SUFFIX[ending]
+    elif form_key == "passive":
+        conj_reading = reading_stem + GODAN_NEGATIVE_STEM_SUFFIX[ending] + "れる"
+    elif form_key == "causative":
+        conj_reading = reading_stem + GODAN_NEGATIVE_STEM_SUFFIX[ending] + "せる"
+    elif form_key == "ba_form":
+        conj_reading = reading_stem + GODAN_E_ROW_SUFFIX[ending] + "ば"
+    elif form_key == "tara_form":
+        conj_reading = reading_stem + GODAN_PAST_SUFFIX[ending] + "ら"
     else:
         return None
 
@@ -3240,12 +3302,26 @@ def conjugate_ichidan(expr: str, reading: str, form_key: str) -> Optional[Tuple[
         conj_reading = reading_stem + "ません"
     elif form_key == "polite_past":
         conj_reading = reading_stem + "ました"
+    elif form_key == "polite_past_negative":
+        conj_reading = reading_stem + "ませんでした"
     elif form_key == "plain_negative":
         conj_reading = reading_stem + "ない"
     elif form_key == "plain_past":
         conj_reading = reading_stem + "た"
+    elif form_key == "plain_past_negative":
+        conj_reading = reading_stem + "なかった"
     elif form_key == "te_form":
         conj_reading = reading_stem + "て"
+    elif form_key == "potential":
+        conj_reading = reading_stem + "られる"
+    elif form_key == "passive":
+        conj_reading = reading_stem + "られる"
+    elif form_key == "causative":
+        conj_reading = reading_stem + "させる"
+    elif form_key == "ba_form":
+        conj_reading = reading_stem + "れば"
+    elif form_key == "tara_form":
+        conj_reading = reading_stem + "たら"
     else:
         return None
 
@@ -3256,12 +3332,10 @@ def conjugate_suru(expr: str, reading: str, form_key: str) -> Optional[Tuple[str
     if reading.endswith("する"):
         char_stem = expr[:-2] if expr.endswith("する") else expr
         reading_stem = reading[:-2]
-        suru_reading = "する"
         suru_expr = "する"
     elif reading == "する" and expr == "する":
         char_stem = ""
         reading_stem = ""
-        suru_reading = "する"
         suru_expr = "する"
     else:
         return None
@@ -3270,18 +3344,26 @@ def conjugate_suru(expr: str, reading: str, form_key: str) -> Optional[Tuple[str
         "polite_present": ("します", "します"),
         "polite_negative": ("しません", "しません"),
         "polite_past": ("しました", "しました"),
+        "polite_past_negative": ("しませんでした", "しませんでした"),
         "plain_negative": ("しない", "しない"),
         "plain_past": ("した", "した"),
+        "plain_past_negative": ("しなかった", "しなかった"),
         "te_form": ("して", "して"),
+        "potential": ("できる", "できる"),
+        "passive": ("される", "される"),
+        "causative": ("させる", "させる"),
+        "ba_form": ("すれば", "すれば"),
+        "tara_form": ("したら", "したら"),
     }
     if form_key not in suru_forms:
         return None
     conj_suffix, conj_reading_suffix = suru_forms[form_key]
-    conj_expr = char_stem + (suru_expr[:-2] + conj_suffix if suru_expr == "する" else conj_suffix)
     if char_stem and expr.endswith("する"):
         conj_expr = char_stem + conj_suffix
     elif not char_stem:
         conj_expr = conj_suffix
+    else:
+        conj_expr = char_stem + (suru_expr[:-2] + conj_suffix if suru_expr == "する" else conj_suffix)
     conj_reading = reading_stem + conj_reading_suffix
     return conj_expr, conj_reading
 
@@ -3293,9 +3375,16 @@ def conjugate_kuru(expr: str, reading: str, form_key: str) -> Optional[Tuple[str
         "polite_present": ("来ます", "きます"),
         "polite_negative": ("来ません", "きません"),
         "polite_past": ("来ました", "きました"),
+        "polite_past_negative": ("来ませんでした", "きませんでした"),
         "plain_negative": ("来ない", "こない"),
         "plain_past": ("来た", "きた"),
+        "plain_past_negative": ("来なかった", "こなかった"),
         "te_form": ("来て", "きて"),
+        "potential": ("来られる", "こられる"),
+        "passive": ("来られる", "こられる"),
+        "causative": ("来させる", "こさせる"),
+        "ba_form": ("来れば", "くれば"),
+        "tara_form": ("来たら", "きたら"),
     }
     if form_key not in forms:
         return None
@@ -3311,6 +3400,10 @@ def conjugate_i_adjective(expr: str, reading: str, form_key: str) -> Optional[Tu
             "polite": ("いいです", "いいです"),
             "polite_negative": ("よくないです", "よくないです"),
             "polite_past": ("よかったです", "よかったです"),
+            "polite_past_negative": ("よくなかったです", "よくなかったです"),
+            "te_form": ("よくて", "よくて"),
+            "ba_form": ("よければ", "よければ"),
+            "tara_form": ("よかったら", "よかったら"),
         }
         if form_key in irregular:
             return irregular[form_key]
@@ -3328,6 +3421,10 @@ def conjugate_i_adjective(expr: str, reading: str, form_key: str) -> Optional[Tu
         "polite": ("いです", "いです"),
         "polite_negative": ("くないです", "くないです"),
         "polite_past": ("かったです", "かったです"),
+        "polite_past_negative": ("くなかったです", "くなかったです"),
+        "te_form": ("くて", "くて"),
+        "ba_form": ("ければ", "ければ"),
+        "tara_form": ("かったら", "かったら"),
     }
     if form_key not in forms:
         return None
@@ -3343,6 +3440,10 @@ def conjugate_na_adjective(expr: str, reading: str, form_key: str) -> Optional[T
         "polite": ("です", "です"),
         "polite_negative": ("じゃないです", "じゃないです"),
         "polite_past": ("でした", "でした"),
+        "polite_past_negative": ("じゃなかったです", "じゃなかったです"),
+        "te_form": ("で", "で"),
+        "ba_form": ("なら", "なら"),
+        "tara_form": ("だったら", "だったら"),
     }
     if form_key not in forms:
         return None
@@ -3366,9 +3467,16 @@ def conjugation_form_rule(word_class: str, form_key: str) -> str:
         "polite_present": "polite present (〜ます)",
         "polite_negative": "polite negative (〜ません)",
         "polite_past": "polite past (〜ました)",
+        "polite_past_negative": "polite past negative (〜ませんでした)",
         "plain_negative": "plain negative (〜ない)",
         "plain_past": "plain past (〜た / 〜だ)",
+        "plain_past_negative": "plain past negative (〜なかった)",
         "te_form": "te-form (〜て / 〜で)",
+        "potential": "potential (can …)",
+        "passive": "passive (is …-ed)",
+        "causative": "causative (make / let …)",
+        "ba_form": "conditional (〜ば)",
+        "tara_form": "conditional (〜たら)",
     }
     i_adj_rules = {
         "plain_negative": "drop い → くない",
@@ -3377,6 +3485,10 @@ def conjugation_form_rule(word_class: str, form_key: str) -> str:
         "polite": "keep い + です",
         "polite_negative": "drop い → くないです",
         "polite_past": "drop い → かったです",
+        "polite_past_negative": "drop い → くなかったです",
+        "te_form": "drop い → くて",
+        "ba_form": "drop い → ければ",
+        "tara_form": "drop い → かったら",
     }
     na_adj_rules = {
         "plain_negative": "add じゃない",
@@ -3385,15 +3497,26 @@ def conjugation_form_rule(word_class: str, form_key: str) -> str:
         "polite": "add です",
         "polite_negative": "add じゃないです",
         "polite_past": "add でした",
+        "polite_past_negative": "add じゃなかったです",
+        "te_form": "add で",
+        "ba_form": "add なら",
+        "tara_form": "add だったら",
     }
     if word_class == "ichidan":
         detail = {
             "polite_present": "drop る, add ます",
             "polite_negative": "drop る, add ません",
             "polite_past": "drop る, add ました",
+            "polite_past_negative": "drop る, add ませんでした",
             "plain_negative": "drop る, add ない",
             "plain_past": "drop る, add た",
+            "plain_past_negative": "drop る, add なかった",
             "te_form": "drop る, add て",
+            "potential": "drop る, add られる",
+            "passive": "drop る, add られる",
+            "causative": "drop る, add させる",
+            "ba_form": "drop る, add れば",
+            "tara_form": "drop る, add たら",
         }.get(form_key, verb_rules.get(form_key, form_key))
         return f"{class_label} · {detail}"
     if word_class == "godan":
@@ -3401,9 +3524,16 @@ def conjugation_form_rule(word_class: str, form_key: str) -> str:
             "polite_present": "shift last kana to い-row, add ます",
             "polite_negative": "shift last kana to い-row, add ません",
             "polite_past": "shift last kana to い-row, add ました",
+            "polite_past_negative": "shift last kana to い-row, add ませんでした",
             "plain_negative": "shift last kana to あ-row, add ない",
             "plain_past": "replace ending with past sound change (った / いた / …)",
+            "plain_past_negative": "shift last kana to あ-row, add なかった",
             "te_form": "replace ending with te sound change (って / いて / …)",
+            "potential": "shift last kana to え-row potential (〜える / 〜ける / …)",
+            "passive": "shift last kana to あ-row, add れる",
+            "causative": "shift last kana to あ-row, add せる",
+            "ba_form": "shift last kana to え-row, add ば",
+            "tara_form": "past sound change + ら",
         }.get(form_key, verb_rules.get(form_key, form_key))
         return f"{class_label} · {detail}"
     if word_class == "suru_verb":
@@ -3442,9 +3572,16 @@ def conjugation_build_steps(
             "polite_present": "ます",
             "polite_negative": "ません",
             "polite_past": "ました",
+            "polite_past_negative": "ませんでした",
             "plain_negative": "ない",
             "plain_past": "た",
+            "plain_past_negative": "なかった",
             "te_form": "て",
+            "potential": "られる",
+            "passive": "られる",
+            "causative": "させる",
+            "ba_form": "れば",
+            "tara_form": "たら",
         }
         piece = piece_map.get(form_key)
         if piece:
@@ -3461,7 +3598,12 @@ def conjugation_build_steps(
         if len(ending) != 1 or ending not in GODAN_POLITE_STEM_SUFFIX:
             return steps + [ConjugationBuildStep(conj_expr, "result")]
         steps.append(ConjugationBuildStep(char_stem, f"drop {ending}"))
-        if form_key in {"polite_present", "polite_negative", "polite_past"}:
+        if form_key in {
+            "polite_present",
+            "polite_negative",
+            "polite_past",
+            "polite_past_negative",
+        }:
             i_kana = GODAN_POLITE_STEM_SUFFIX[ending]
             i_surface = _conj_surface(char_stem, reading_stem, reading_stem + i_kana)
             steps.append(ConjugationBuildStep(i_surface, f"{ending} → {i_kana} (い-row)"))
@@ -3469,6 +3611,7 @@ def conjugation_build_steps(
                 "polite_present": "ます",
                 "polite_negative": "ません",
                 "polite_past": "ました",
+                "polite_past_negative": "ませんでした",
             }[form_key]
             steps.append(ConjugationBuildStep(i_surface + piece, f"+ {piece}"))
         elif form_key == "plain_negative":
@@ -3476,10 +3619,32 @@ def conjugation_build_steps(
             a_surface = _conj_surface(char_stem, reading_stem, reading_stem + a_kana)
             steps.append(ConjugationBuildStep(a_surface, f"{ending} → {a_kana} (あ-row)"))
             steps.append(ConjugationBuildStep(a_surface + "ない", "+ ない"))
-        elif form_key in {"plain_past", "te_form"}:
-            suffix = GODAN_PAST_SUFFIX[ending] if form_key == "plain_past" else GODAN_TE_SUFFIX[ending]
+        elif form_key == "plain_past_negative":
+            a_kana = GODAN_NEGATIVE_STEM_SUFFIX[ending]
+            a_surface = _conj_surface(char_stem, reading_stem, reading_stem + a_kana)
+            steps.append(ConjugationBuildStep(a_surface, f"{ending} → {a_kana} (あ-row)"))
+            steps.append(ConjugationBuildStep(a_surface + "なかった", "+ なかった"))
+        elif form_key in {"plain_past", "te_form", "tara_form"}:
+            suffix = GODAN_PAST_SUFFIX[ending] if form_key != "te_form" else GODAN_TE_SUFFIX[ending]
+            if form_key == "tara_form":
+                suffix = GODAN_PAST_SUFFIX[ending] + "ら"
             stacked = _conj_surface(char_stem, reading_stem, reading_stem + suffix)
             steps.append(ConjugationBuildStep(stacked, f"{ending} → {suffix}"))
+        elif form_key == "potential":
+            suffix = GODAN_POTENTIAL_SUFFIX[ending]
+            stacked = _conj_surface(char_stem, reading_stem, reading_stem + suffix)
+            steps.append(ConjugationBuildStep(stacked, f"{ending} → {suffix}"))
+        elif form_key in {"passive", "causative"}:
+            a_kana = GODAN_NEGATIVE_STEM_SUFFIX[ending]
+            a_surface = _conj_surface(char_stem, reading_stem, reading_stem + a_kana)
+            steps.append(ConjugationBuildStep(a_surface, f"{ending} → {a_kana} (あ-row)"))
+            piece = "れる" if form_key == "passive" else "せる"
+            steps.append(ConjugationBuildStep(a_surface + piece, f"+ {piece}"))
+        elif form_key == "ba_form":
+            e_kana = GODAN_E_ROW_SUFFIX[ending]
+            e_surface = _conj_surface(char_stem, reading_stem, reading_stem + e_kana)
+            steps.append(ConjugationBuildStep(e_surface, f"{ending} → {e_kana} (え-row)"))
+            steps.append(ConjugationBuildStep(e_surface + "ば", "+ ば"))
         if steps[-1].surface != conj_expr:
             steps.append(ConjugationBuildStep(conj_expr, "result"))
         return steps
@@ -3491,9 +3656,16 @@ def conjugation_build_steps(
                 "polite_present": "します",
                 "polite_negative": "しません",
                 "polite_past": "しました",
+                "polite_past_negative": "しませんでした",
                 "plain_negative": "しない",
                 "plain_past": "した",
+                "plain_past_negative": "しなかった",
                 "te_form": "して",
+                "potential": "できる",
+                "passive": "される",
+                "causative": "させる",
+                "ba_form": "すれば",
+                "tara_form": "したら",
             }.get(form_key)
             if char_stem:
                 steps.append(ConjugationBuildStep(char_stem, "keep noun / stem"))
@@ -3540,6 +3712,19 @@ def conjugation_build_steps(
             steps.append(ConjugationBuildStep(char_stem, "drop い"))
             steps.append(ConjugationBuildStep(char_stem + "かった", "+ かった"))
             steps.append(ConjugationBuildStep(char_stem + "かったです", "+ です"))
+        elif form_key == "polite_past_negative":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "くなかった", "+ くなかった"))
+            steps.append(ConjugationBuildStep(char_stem + "くなかったです", "+ です"))
+        elif form_key == "te_form":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "くて", "+ くて"))
+        elif form_key == "ba_form":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "ければ", "+ ければ"))
+        elif form_key == "tara_form":
+            steps.append(ConjugationBuildStep(char_stem, "drop い"))
+            steps.append(ConjugationBuildStep(char_stem + "かったら", "+ かったら"))
         if steps[-1].surface != conj_expr:
             steps.append(ConjugationBuildStep(conj_expr, "result"))
         return steps
@@ -3552,6 +3737,10 @@ def conjugation_build_steps(
             "polite": "です",
             "polite_negative": "じゃないです",
             "polite_past": "でした",
+            "polite_past_negative": "じゃなかったです",
+            "te_form": "で",
+            "ba_form": "なら",
+            "tara_form": "だったら",
         }.get(form_key)
         if piece:
             steps.append(ConjugationBuildStep(expr + piece, f"+ {piece}"))
@@ -3631,12 +3820,47 @@ def conjugate_vocab_form(vocab: dict, word_class: str, form_key: str) -> Optiona
 
 def conjugation_forms_for_class(word_class: str) -> Tuple[Tuple[str, str], ...]:
     if word_class in {"godan", "ichidan", "suru_verb", "irregular_verb"}:
-        return VERB_CONJUGATION_FORMS
-    if word_class == "i_adjective":
-        return I_ADJECTIVE_CONJUGATION_FORMS
-    if word_class == "na_adjective":
-        return NA_ADJECTIVE_CONJUGATION_FORMS
-    return ()
+        forms = VERB_CONJUGATION_FORMS
+        allow_key = "verbs"
+    elif word_class == "i_adjective":
+        forms = I_ADJECTIVE_CONJUGATION_FORMS
+        allow_key = "i_adjectives"
+    elif word_class == "na_adjective":
+        forms = NA_ADJECTIVE_CONJUGATION_FORMS
+        allow_key = "na_adjectives"
+    else:
+        return ()
+    allow = _CONJUGATION_FORMS_ALLOWLIST.get(allow_key)
+    if allow is None:
+        return forms
+    return tuple((form_key, prompt) for form_key, prompt in forms if form_key in allow)
+
+
+def set_conjugation_forms_allowlist(
+    allowlist: Optional[Mapping[str, Sequence[str]]] = None,
+) -> None:
+    """Filter conjugation catalogs by config allowlist (None / empty = full set)."""
+    global _CONJUGATION_FORMS_ALLOWLIST
+    if not allowlist:
+        _CONJUGATION_FORMS_ALLOWLIST = {}
+        return
+    parsed: Dict[str, Set[str]] = {}
+    for key in ("verbs", "i_adjectives", "na_adjectives"):
+        raw = allowlist.get(key)
+        if raw is None:
+            continue
+        keys = {str(item).strip() for item in raw if str(item).strip()}
+        if keys:
+            parsed[key] = keys
+    _CONJUGATION_FORMS_ALLOWLIST = parsed
+
+
+def apply_conjugation_forms_from_config(config: Mapping[str, Any]) -> None:
+    section = config.get("conjugation_forms")
+    if isinstance(section, dict):
+        set_conjugation_forms_allowlist(section)
+    else:
+        set_conjugation_forms_allowlist(None)
 
 
 def collect_conjugation_drills(
@@ -7624,6 +7848,7 @@ def load_wk_deck_config(config_path: Optional[Path] = None) -> dict:
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{config_path.name} must contain a JSON object.")
+    apply_conjugation_forms_from_config(payload)
     return payload
 
 

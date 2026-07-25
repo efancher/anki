@@ -31,6 +31,7 @@ VOCAB_GATED_SUPPLEMENTARY_TAGS = frozenset(
         "verb-type",
         "adjective-type",
         "satori-conjugation",
+        "immersion-conjugation",
     }
 )
 

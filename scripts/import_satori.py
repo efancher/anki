@@ -7,7 +7,7 @@ Works from any clone of this repo (no Anki required at build time):
   python3 scripts/import_satori.py /path/to/satori_export.csv
   python3 scripts/import_satori.py /path/to/satori_export.csv -o out/wk_satori.apkg
   python3 scripts/import_satori.py export.csv --include-ej   # also EJ recognition cards
-  python3 scripts/import_satori.py export.csv --conjugations
+  python3 scripts/import_satori.py export.csv --conjugations  # legacy; prefer import_immersion_conjugations.py
 
 Then import the .apkg in Anki (Add or Update note type).
 """
@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--conjugations",
         action="store_true",
-        help="Build Immersion · Satori Conjugations instead of the immersion cloze deck",
+        help="Build Immersion · Conjugations from this CSV only (prefer scripts/import_immersion_conjugations.py)",
     )
     parser.add_argument(
         "--skip-wk-lemmas",
@@ -107,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
             apkg_path.replace(output_path)
             apkg_path = output_path
         print(f"Wrote {len(deck.notes)} conjugation notes ({len(drills)} drills) → {apkg_path}")
-        print("Import in Anki, then study from Immersion · Satori Conjugations.")
+        print("Import in Anki, then study from Immersion · Conjugations.")
+        print("Tip: scripts/import_immersion_conjugations.py also pulls Shadowing/Yomitan lemmas.")
         return 0
 
     card_types = ("JE", "EJ") if args.include_ej else ("JE",)

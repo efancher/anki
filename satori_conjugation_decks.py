@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import html
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 
 import genanki
 
+from jmdict_pos import pos_string_to_word_class
 from satori_decks import SatoriCard, parse_satori_csv
 from wk_decks import (
     ADJECTIVE_CONJUGATION_WORD_CLASSES,
@@ -36,8 +36,6 @@ SATORI_CONJ_TAG = "satori-conjugation"
 SATORI_CONJ_EXPORT_FILENAME = "wk_satori_conjugations.apkg"
 SATORI_CONJ_DECK_KEY = "satori-conjugations"
 
-_POS_SPLIT_RE = re.compile(r"[,;/|]+")
-
 
 @dataclass(frozen=True)
 class SatoriConjugationDrill:
@@ -52,51 +50,9 @@ class SatoriConjugationDrill:
     meaning: str
 
 
-def _pos_tokens(raw: str) -> List[str]:
-    text = (raw or "").strip().lower()
-    if not text:
-        return []
-    tokens = [part.strip() for part in _POS_SPLIT_RE.split(text) if part.strip()]
-    return tokens or [text]
-
-
 def satori_pos_to_word_class(parts_of_speech: str) -> Optional[str]:
     """Map Satori/JMDict POS strings to internal conjugation word classes."""
-    tokens = _pos_tokens(parts_of_speech)
-    joined = " ".join(tokens)
-
-    if any(token in {"adj-i", "adj-ix", "い adjective", "i-adjective", "i_adjective"} for token in tokens):
-        return "i_adjective"
-    if "い adjective" in joined or "i adjective" in joined:
-        return "i_adjective"
-
-    if any(token in {"adj-na", "な adjective", "na-adjective", "na_adjective"} for token in tokens):
-        return "na_adjective"
-    if "な adjective" in joined or "na adjective" in joined:
-        return "na_adjective"
-
-    if any(token in {"vk", "kuru", "irregular_verb"} for token in tokens) or "来る" in parts_of_speech:
-        return "irregular_verb"
-
-    if any(
-        token.startswith("vs") or token in {"する verb", "suru", "suru_verb", "vs", "vs-i", "vs-s"}
-        for token in tokens
-    ):
-        return "suru_verb"
-    if "する verb" in joined or "suru verb" in joined:
-        return "suru_verb"
-
-    if any(token.startswith("v1") or token in {"ichidan", "ichidan verb"} for token in tokens):
-        return "ichidan"
-    if "ichidan" in joined:
-        return "ichidan"
-
-    if any(token.startswith("v5") or token in {"godan", "godan verb"} for token in tokens):
-        return "godan"
-    if "godan" in joined:
-        return "godan"
-
-    return None
+    return pos_string_to_word_class(parts_of_speech)
 
 
 def lemma_key(expression: str, reading: str) -> Tuple[str, str]:
@@ -238,6 +194,7 @@ def build_satori_conjugation_deck(
             tags=[
                 "immersion",
                 SATORI_CONJ_TAG,
+                "immersion-conjugation",
                 tag_kind,
                 drill.word_class.replace("_", "-"),
                 drill.form_key,
