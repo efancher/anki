@@ -105,7 +105,7 @@ python3 scripts/synthesize_immersion_sentence_audio.py \
 | Cloze style | Highlight/blank the **surface span** in the sentence; type the **dictionary reading** (e.g. 使う → つかう even when the sentence has 使って). |
 | Conjugated-only lemmas | A lemma that never appears in dictionary form is still located by conjugating it (する → しました, できる → できませんでした, すごい → すごく, 来る → きました, わし → ワシ). A kana surface right after kanji is skipped, so する does not claim the しました of 電話しました. |
 | English | Front hint: `WkMeaning` → `HintGlossary` → sentence `Translation`. Candidates often only have sentence English. |
-| Audio | Native clip in `SentenceAudio` (autoplays). Optional Voicevox **Target** / **Reading** are manual buttons — they never replace the sentence clip. |
+| Audio | Native clip in `SentenceAudio` (autoplays via template JS). Optional Voicevox **Target** / **Reading** are Anki `[sound:]` replay buttons — they never replace the sentence clip. |
 | Priority tag | `shadowing-mining` (seeds `wk_adaptive_new`) |
 | Candidates | Non-WK content words only. Tag `shadowing-candidate` does **not** seed core priority. Prefer studying the WK cloze when both exist (e.g. 敬語 / 使う, not a glued `敬語使`). |
 
@@ -199,6 +199,8 @@ Legacy single-key `immersion_tag` still works if `immersion_tags` is omitted.
 |---------|-----|
 | Answer reading ends in っ (e.g. `けいごつかっ`) | Bad candidate cut — delete the note; rebuild with fugashi venv |
 | Front has no English on Candidates | Push candidate templates (v9+); field is `Translation` / `HintGlossary` |
+| iPhone Target/Reading tap advances the card | Push templates (shadowing v8+ / candidate v11+ / satori v17+): `python3 scripts/push_satori_template_ankiconnect.py` then sync |
+| iPhone Target/Reading button does nothing | Same push — uses Anki `[sound:]` (HTML5 `<audio>` does not play on AnkiMobile). Immersion decks get **WK Immersion Audio** options (autoplay off; sentence still autoplays via template JS) |
 | Sentence plays Voicevox, not the video clip | `python3 scripts/restore_shadowing_native_audio.py` |
 | WK cloze shows no blank/highlight | `push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Immersion"` |
 | Still no blank/highlight after that | The lemma is not in the sentence at all — a bad WK match (担ぐ/任す pulled out of 担任, 息/音 out of a sentence with neither). Delete the note; it is not a cloze bug |

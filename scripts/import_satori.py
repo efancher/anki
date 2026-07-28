@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Build Immersion · Satori Anki packages from a Satori Reader CSV export.
+Import a Satori Reader CSV into Anki (live via AnkiConnect) and/or build an .apkg.
 
-Works from any clone of this repo (no Anki required at build time):
+Default: write notes directly into Immersion · Satori through AnkiConnect
+(add new, update existing, preserve audio). No File → Import dialog, no note-type forks.
 
   python3 scripts/import_satori.py /path/to/satori_export.csv
-  python3 scripts/import_satori.py /path/to/satori_export.csv -o out/wk_satori.apkg
-  python3 scripts/import_satori.py export.csv --include-ej   # also EJ recognition cards
+  python3 scripts/import_satori.py export.csv --apkg          # also write out/wk_satori.apkg
+  python3 scripts/import_satori.py export.csv --apkg-only     # package only (no Anki)
+  python3 scripts/import_satori.py export.csv --include-ej
   python3 scripts/import_satori.py export.csv --conjugations  # legacy; prefer import_immersion_conjugations.py
-
-Then import the .apkg in Anki (Add or Update note type).
+  python3 scripts/import_satori.py export.csv --dry-run
 """
 
 from __future__ import annotations
@@ -33,6 +34,12 @@ from satori_decks import (  # noqa: E402
     build_satori_deck,
     parse_satori_csv,
 )
+from satori_live_import import (  # noqa: E402
+    DEFAULT_ANKI_CONNECT,
+    anki_reachable,
+    format_live_import_summary,
+    import_satori_cards_to_anki,
+)
 
 
 def load_wk_index(path: Path) -> dict | None:
@@ -50,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output",
         type=Path,
         default=None,
-        help=f"Output .apkg path (default: out/{SATORI_EXPORT_FILENAME} or conjugations filename)",
+        help=f"Output .apkg path when writing a package (default: out/{SATORI_EXPORT_FILENAME})",
     )
     parser.add_argument(
         "--include-ej",
@@ -74,7 +81,31 @@ def main(argv: list[str] | None = None) -> int:
         default=REPO_ROOT / "out" / "wk_mining_vocab_index.json",
         help="Optional WK vocab index for WkSubjectId / meaning linking (immersion deck)",
     )
+    parser.add_argument(
+        "--anki-connect",
+        default=DEFAULT_ANKI_CONNECT,
+        help=f"AnkiConnect URL (default: {DEFAULT_ANKI_CONNECT})",
+    )
+    parser.add_argument(
+        "--apkg",
+        action="store_true",
+        help="Also write out/wk_satori.apkg (backup / sharing)",
+    )
+    parser.add_argument(
+        "--apkg-only",
+        action="store_true",
+        help="Only write .apkg; do not talk to Anki",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With live import: report adds/updates without writing",
+    )
     args = parser.parse_args(argv)
+
+    if args.apkg_only and args.dry_run:
+        print("--dry-run only applies to live Anki import", file=sys.stderr)
+        return 2
 
     csv_path = args.csv.expanduser().resolve()
     if not csv_path.is_file():
@@ -118,20 +149,49 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     wk_index = load_wk_index(args.wk_index.expanduser().resolve())
-    apkg_path, deck = build_satori_deck(cards, output_dir, wk_index=wk_index)
-    if output_path != apkg_path:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        apkg_path.replace(output_path)
-        apkg_path = output_path
+    wrote_apkg = False
+    live_ok = False
 
-    print(f"Wrote {len(deck.notes)} notes → {apkg_path}")
-    print("First import: File → Import in Anki (Add note type).")
-    print(
-        "Notes already exist: they will be skipped — that is OK. "
-        "Do not enable Update existing notes (it blanks SentenceAudio)."
-    )
-    print("Template-only refresh: python3 scripts/push_satori_template_ankiconnect.py")
-    print("Then study from Immersion · Satori.")
+    if not args.apkg_only:
+        if not anki_reachable(args.anki_connect):
+            print(
+                f"AnkiConnect not reachable at {args.anki_connect}. "
+                "Open Anki with AnkiConnect, or pass --apkg-only.",
+                file=sys.stderr,
+            )
+            return 1
+        result = import_satori_cards_to_anki(
+            cards,
+            base_url=args.anki_connect,
+            wk_index=wk_index,
+            dry_run=bool(args.dry_run),
+        )
+        live_ok = True
+        prefix = "DRY RUN — would have " if args.dry_run else "Live import: "
+        print(f"{prefix}{format_live_import_summary(result)}")
+        if not args.dry_run:
+            print("Study from Immersion · Satori. Gloss worksheet uses the same note type.")
+            print(
+                "TTS if needed: python3 scripts/synthesize_immersion_sentence_audio.py "
+                '--note-type "WK Satori Immersion"'
+            )
+
+    if args.apkg_only or args.apkg:
+        apkg_path, deck = build_satori_deck(cards, output_dir, wk_index=wk_index)
+        if output_path != apkg_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            apkg_path.replace(output_path)
+            apkg_path = output_path
+        wrote_apkg = True
+        print(f"Wrote {len(deck.notes)} notes → {apkg_path}")
+        if args.apkg_only:
+            print(
+                "Package-only mode: import with File → Import only if you need a cold start. "
+                "Prefer live import next time (default) so audio is not wiped."
+            )
+
+    if not live_ok and not wrote_apkg:
+        return 1
     return 0
 
 

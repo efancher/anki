@@ -203,15 +203,21 @@ def _store_one_sentence_audio(
         return True
 
 
-def _unwrap_satori_normal_audio(note) -> bool:
-    """Satori Normal must be a bare filename so Anki does not autoplay it."""
-    if note.note_type()["name"] != SATORI_NOTE_TYPE:
-        return False
-    raw = _field_value(note, FIELD_SENTENCE_AUDIO)
+def _ensure_sound_tag_audio(note, field_name: str) -> bool:
+    """Store ``[sound:]`` so Anki tracks media and AnkiMobile can play it."""
+    raw = _field_value(note, field_name)
     bare = unwrap_sound_tag(raw)
-    if not bare or bare == (raw or "").strip():
+    if not bare:
         return False
-    return _set_field(note, FIELD_SENTENCE_AUDIO, bare)
+    tagged = audio_field_value(bare, autoplay=True)
+    if tagged == (raw or "").strip():
+        return False
+    return _set_field(note, field_name, tagged)
+
+
+def _unwrap_satori_normal_audio(note) -> bool:
+    """Compat alias: Normal stays ``[sound:]``; deck options control autoplay."""
+    return _ensure_sound_tag_audio(note, FIELD_SENTENCE_AUDIO)
 
 
 def _store_sentence_audio(

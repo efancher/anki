@@ -855,6 +855,27 @@ SATORI_FRONT = """
 
 SATORI_SENTENCE_TTS = "{{tts ja_JP:Sentence}}"
 
+# AnkiMobile only plays collection media via [sound:], not HTML5 <audio>.
+# Manual Target/Reading/Normal fields store [sound:…]; immersion decks use a
+# dedicated options group with autoplay off; JS clicks .autoplay-audio on reveal.
+_MANUAL_TTS_BIND_SCRIPT = """
+<script>
+(function () {
+  function playAutoplayAudio() {
+    var node = document.querySelector(
+      ".autoplay-audio .replay-button, .autoplay-audio .replaybutton, .autoplay-audio a.soundLink"
+    );
+    if (node) node.click();
+  }
+  if (typeof onShownHook !== "undefined") {
+    onShownHook.push(playAutoplayAudio);
+  } else {
+    setTimeout(playAutoplayAudio, 50);
+  }
+})();
+</script>
+"""
+
 SATORI_BACK = """
 {{FrontSide}}
 <hr>
@@ -866,13 +887,13 @@ SATORI_BACK = """
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
-  <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
+  <div class="manual-tts-sound">{{Audio}}</div>
 </div>
 {{/Audio}}
 {{#ReadingAudio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Reading</div>
-  <audio class="surface-audio-manual" controls preload="none" src="{{ReadingAudio}}"></audio>
+  <div class="manual-tts-sound">{{ReadingAudio}}</div>
 </div>
 {{/ReadingAudio}}
 {{#Sentence}}
@@ -881,13 +902,13 @@ SATORI_BACK = """
   {{#SentenceAudioEasy}}
   <div class="audio-row">
     <div class="audio-label meta">Easy</div>
-    <div class="sentence-audio sentence-tts-file">{{SentenceAudioEasy}}</div>
+    <div class="sentence-audio sentence-tts-file autoplay-audio">{{SentenceAudioEasy}}</div>
   </div>
   {{/SentenceAudioEasy}}
   {{#SentenceAudio}}
   <div class="audio-row">
     <div class="audio-label meta">Normal</div>
-    <audio class="sentence-audio-manual" controls preload="none" src="{{SentenceAudio}}"></audio>
+    <div class="manual-tts-sound">{{SentenceAudio}}</div>
   </div>
   {{/SentenceAudio}}
   {{^SentenceAudioEasy}}
@@ -918,17 +939,7 @@ SATORI_BACK = """
 {{/UserNotes}}
 {{#SourceTitle}}<div class="source">{{SourceTitle}}</div>{{/SourceTitle}}
 <div class="meta">{{Meta}}</div>
-<script>
-(function () {
-  document.querySelectorAll("audio.sentence-audio-manual, audio.surface-audio-manual").forEach(function (audio) {
-    var src = (audio.getAttribute("src") || "").trim();
-    var match = src.match(/\\[sound:([^\\]]+)\\]/);
-    if (match) {
-      audio.setAttribute("src", match[1]);
-    }
-  });
-})();
-</script>
+""" + _MANUAL_TTS_BIND_SCRIPT + """
 """
 
 SATORI_CSS = """
@@ -967,13 +978,11 @@ SATORI_CSS = """
 .audio-label { font-size: 13px; margin-bottom: 2px; }
 .surface-audio-row { margin: 10px auto; max-width: 520px; }
 .sentence-audio, .sentence-tts { margin: 2px 0 6px; }
-.sentence-audio-manual,
-.surface-audio-manual {
-  display: block;
-  width: 100%;
-  max-width: 420px;
-  margin: 2px 0 6px;
-  height: 32px;
+.manual-tts-sound { margin: 2px 0 8px; }
+.manual-tts-sound .replay-button,
+.manual-tts-sound .replaybutton,
+.manual-tts-sound .soundLink {
+  vertical-align: middle;
 }
 .sentence-en { font-size: 18px; color: #c8e6c9; margin-top: 10px; }
 .word-def {
@@ -1204,6 +1213,15 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         else:
             fields.append(html.escape(value))
     return fields
+
+
+def satori_note_field_map(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> Dict[str, str]:
+    """Field name → value map for AnkiConnect add/update."""
+    return dict(zip(SATORI_FIELD_NAMES, satori_note_fields(card, wk_entry=wk_entry)))
+
+
+def satori_note_tags(card: SatoriCard) -> List[str]:
+    return ["immersion", SATORI_TAG, f"satori-{card.card_type.lower()}"]
 
 
 def build_satori_deck(

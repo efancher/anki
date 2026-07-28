@@ -42,6 +42,13 @@ from shadowing_decks import (  # noqa: E402
 
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
 
+IMMERSION_DECK_NAMES = (
+    "Immersion · Satori",
+    "Immersion · Shadowing",
+    "Immersion · Shadowing Candidates",
+)
+IMMERSION_AUDIO_CONFIG_NAME = "WK Immersion Audio"
+
 
 def anki_connect(base_url: str, action: str, **params: object) -> object:
     body = json.dumps({"action": action, "version": 6, "params": params}).encode()
@@ -61,6 +68,90 @@ def anki_connect(base_url: str, action: str, **params: object) -> object:
     if payload.get("error"):
         raise SystemExit(f"AnkiConnect {action}: {payload['error']}")
     return payload["result"]
+
+
+def ensure_immersion_deck_audio_config(base_url: str) -> None:
+    """Give immersion decks their own options group with autoplay off.
+
+    Target/Reading/Normal use ``[sound:]`` so AnkiMobile can play them, but that
+    would also autoplay under the shared WK FSRS group. Autoplay-off + template JS
+    that clicks ``.autoplay-audio`` keeps sentence/Easy autoplay only.
+    """
+    existing_names = set(anki_connect(base_url, "deckNames") or [])
+    present = [name for name in IMMERSION_DECK_NAMES if name in existing_names]
+    if not present:
+        return
+
+    config_id = None
+    for deck_name in present:
+        cfg = anki_connect(base_url, "getDeckConfig", deck=deck_name)
+        if isinstance(cfg, dict) and cfg.get("name") == IMMERSION_AUDIO_CONFIG_NAME:
+            config_id = cfg.get("id")
+            break
+
+    if config_id is None:
+        donor = anki_connect(base_url, "getDeckConfig", deck=present[0])
+        if not isinstance(donor, dict) or donor.get("id") is None:
+            raise SystemExit(f"Could not read deck config for {present[0]!r}")
+        config_id = anki_connect(
+            base_url,
+            "cloneDeckConfigId",
+            name=IMMERSION_AUDIO_CONFIG_NAME,
+            cloneFrom=donor["id"],
+        )
+
+    anki_connect(base_url, "setDeckConfigId", decks=present, configId=config_id)
+    cfg = anki_connect(base_url, "getDeckConfig", deck=present[0])
+    if not isinstance(cfg, dict):
+        raise SystemExit("getDeckConfig returned a non-object after assign")
+    if cfg.get("autoplay") is not False or cfg.get("name") != IMMERSION_AUDIO_CONFIG_NAME:
+        cfg["name"] = IMMERSION_AUDIO_CONFIG_NAME
+        cfg["autoplay"] = False
+        anki_connect(base_url, "saveDeckConfig", config=cfg)
+    print(
+        f"Immersion decks use {IMMERSION_AUDIO_CONFIG_NAME!r} "
+        f"(autoplay off; template JS plays .autoplay-audio)."
+    )
+
+
+def wrap_bare_audio_fields(base_url: str, model_name: str) -> int:
+    """Rewrite bare media filenames to ``[sound:]`` so AnkiMobile can play them."""
+    fields_by_model = {
+        SATORI_NOTE_TYPE_NAME: ("Audio", "ReadingAudio", "SentenceAudio"),
+        SHADOWING_NOTE_TYPE_NAME: ("Audio", "ReadingAudio"),
+        SHADOWING_CANDIDATE_NOTE_TYPE_NAME: ("Audio", "ReadingAudio"),
+    }
+    wanted = fields_by_model.get(model_name)
+    if not wanted:
+        return 0
+    note_ids = list(anki_connect(base_url, "findNotes", query=f'note:"{model_name}"'))
+    if not note_ids:
+        return 0
+    updated = 0
+    # Batch in chunks to keep payloads reasonable
+    chunk_size = 100
+    for start in range(0, len(note_ids), chunk_size):
+        chunk = note_ids[start : start + chunk_size]
+        infos = anki_connect(base_url, "notesInfo", notes=chunk)
+        for info in infos:
+            fields = info.get("fields") or {}
+            patch: dict[str, str] = {}
+            for name in wanted:
+                raw = ((fields.get(name) or {}).get("value") or "").strip()
+                if not raw or (raw.startswith("[sound:") and raw.endswith("]")):
+                    continue
+                if "[" in raw or "]" in raw or " " in raw:
+                    continue
+                patch[name] = f"[sound:{raw}]"
+            if not patch:
+                continue
+            anki_connect(
+                base_url,
+                "updateNoteFields",
+                note={"id": info["noteId"], "fields": patch},
+            )
+            updated += 1
+    return updated
 
 
 def ensure_audio_fields(base_url: str, model_name: str) -> None:
@@ -210,6 +301,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.cloze_only:
         ensure_audio_fields(args.anki_connect, args.model)
+        ensure_immersion_deck_audio_config(args.anki_connect)
+        wrapped = wrap_bare_audio_fields(args.anki_connect, args.model)
+        if wrapped:
+            print(f"Wrapped bare audio filenames as [sound:] on {wrapped} note(s).")
         if args.model == SATORI_NOTE_TYPE_NAME:
             model = make_satori_model()
             version_label = SATORI_TEMPLATE_VERSION

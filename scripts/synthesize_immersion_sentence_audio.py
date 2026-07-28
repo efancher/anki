@@ -214,18 +214,21 @@ def store_field_audio(
 def unwrap_satori_normal_if_needed(
     *, base_url: str, note_id: int, note_type_name: str, sentence_audio: str
 ) -> str:
-    """Rewrite Satori SentenceAudio from [sound:x] to bare x (no autoplay)."""
+    """Ensure Satori SentenceAudio is ``[sound:]`` (deck options control autoplay)."""
     if note_type_name != SATORI_NOTE_TYPE:
         return sentence_audio
     bare = unwrap_sound_tag(sentence_audio)
-    if not bare or bare == (sentence_audio or "").strip():
+    if not bare:
+        return sentence_audio
+    tagged = audio_field_value(bare, autoplay=True)
+    if tagged == (sentence_audio or "").strip():
         return sentence_audio
     anki_request(
         base_url,
         "updateNoteFields",
-        note={"id": note_id, "fields": {FIELD_SENTENCE_AUDIO: bare}},
+        note={"id": note_id, "fields": {FIELD_SENTENCE_AUDIO: tagged}},
     )
-    return bare
+    return tagged
 
 
 def main() -> None:

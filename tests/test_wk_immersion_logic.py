@@ -196,9 +196,9 @@ class ImmersionTtsLogicTests(unittest.TestCase):
 
     def test_audio_field_value_autoplay_and_manual(self) -> None:
         self.assertEqual(audio_field_value("foo.wav", autoplay=True), "[sound:foo.wav]")
-        self.assertEqual(audio_field_value("foo.wav", autoplay=False), "foo.wav")
+        self.assertEqual(audio_field_value("foo.wav", autoplay=False), "[sound:foo.wav]")
         self.assertEqual(
-            audio_field_value("[sound:foo.wav]", autoplay=False), "foo.wav"
+            audio_field_value("[sound:foo.wav]", autoplay=False), "[sound:foo.wav]"
         )
         self.assertEqual(unwrap_sound_tag("[sound:bar.mp3]"), "bar.mp3")
 

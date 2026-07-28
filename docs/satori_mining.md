@@ -6,7 +6,7 @@ Same pedagogy as Migaku mining: blank the target word in context, type it in kan
 
 ## One-shot refresh
 
-Build cloze + conjugations, open import dialogs, push templates, regenerate TTS,
+Live-import cloze notes, rebuild conjugations, push templates, regenerate TTS,
 and unlock the immersion closure:
 
 ```bash
@@ -16,58 +16,51 @@ python3 scripts/refresh_satori.py export.csv --from-anki   # also Shadowing/Yomi
 ```
 
 Useful flags: `--skip-tts`, `--no-force-tts` (fill missing only), `--skip-conjugations`,
-`--skip-import-dialogs`, `--skip-unlock`.
+`--skip-import-dialogs` (conjugations `.apkg` only), `--write-apkg`, `--skip-unlock`.
 
 ## Export from Satori
 
 In Satori Reader, export your cards to CSV (includes `CardType`, `Expression`, `Context1`, translations, readings).
 
-## Build the deck (any machine with this repo)
+## Import into Anki (recommended)
+
+Anki open with AnkiConnect:
 
 ```bash
 python3 scripts/import_satori.py /path/to/satori_export.csv
 ```
 
-Writes `out/wk_satori.apkg` by default.
+Writes notes **directly** into **Immersion · Satori** (`WK Satori Immersion`): adds new cards,
+updates existing ones by Satori CardID / DuplicateKey, and **preserves** SentenceAudio /
+Target / Reading audio. No File → Import dialog and no `WK Satori Immersion+` forks.
 
 | Flag | Effect |
 |------|--------|
-| `-o path.apkg` | Custom output path |
+| `--apkg` | Also write `out/wk_satori.apkg` (backup / sharing) |
+| `--apkg-only` | Package only; do not talk to Anki |
+| `--dry-run` | Report adds/updates without writing |
 | `--include-ej` | Also import EJ recognition cards (default: **JE only**) |
 | `--wk-index path` | Optional `wk_mining_vocab_index.json` for WK linking |
+| `-o path.apkg` | Custom `.apkg` path when `--apkg` / `--apkg-only` |
 
-Import the `.apkg` in Anki (**Add** first time only).
+**Gloss worksheet:** unchanged — it already queries `note:"WK Satori Immersion"`. Live
+import keeps notes on that type, so new sentences show up in the glossbook after import.
 
-**Notes already exist?** Anki will report every note “could not be imported” / skipped — that is normal. Do **not** enable **Update existing notes when first field matches**: the package ships empty **SentenceAudio** fields and would wipe TTS you already generated.
-
-**Import offers to create `WK Satori Immersion+`?** Stop — do not accept it. Anki
-forks a note type (appending `+`) when the incoming `.apkg`'s field *order*
-differs from your existing note type. Notes stuck under the fork are then skipped
-on every future import (Anki dedups by GUID) and go invisible to the gloss
-worksheet, audio backfill, and new-card prioritization — you'll see far fewer
-sentences than you mined. Refresh templates with
-`push_satori_template_ankiconnect.py` instead of importing. If a fork already
-exists, consolidate it back (scheduling is preserved):
+**Still have a `WK Satori Immersion+` / `++` fork from an old `.apkg` import?** Consolidate
+(scheduling is preserved), then delete the empty fork types:
 
 ```bash
-python3 scripts/consolidate_satori_note_types_ankiconnect.py --dry-run  # preview
-python3 scripts/consolidate_satori_note_types_ankiconnect.py            # migrate
+python3 scripts/consolidate_satori_note_types_ankiconnect.py --dry-run
+python3 scripts/consolidate_satori_note_types_ankiconnect.py
 ```
 
-then delete the emptied `+` type via **Tools → Manage Note Types → Delete**, and
-re-run the audio backfill for the migrated notes.
-
-For template-only upgrades (Easy autoplay / Normal manual, template **v6**), push via AnkiConnect instead:
+For template-only upgrades, push via AnkiConnect:
 
 ```bash
 python3 scripts/push_satori_template_ankiconnect.py
 ```
 
-Then (if Normal still autoplays) unwrap existing Normal fields:
-
-```bash
-python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion"
-```
+(Immersion decks use **WK Immersion Audio** options with autoplay off; Easy still autoplays via template JS.)
 
 ## What you get
 
@@ -102,19 +95,21 @@ Satori’s CSV export has **no audio**. The **wk_immersion** add-on synthesizes:
 
 1. Sync add-ons and restart Anki: `./scripts/sync_anki_addons.sh`
 2. Start **VOICEVOX** — see [voicevox_setup.md](voicevox_setup.md)
-3. Push the card template (Easy autoplay only — template **v6**):
+3. Push templates + wrap bare audio as `[sound:]` + assign **WK Immersion Audio** (autoplay off; Easy autoplays via JS):
    ```bash
    python3 scripts/push_satori_template_ankiconnect.py
    ```
    Do **not** re-import the `.apkg` just to refresh templates — existing notes are skipped, and “Update existing notes” would blank audio.
-4. Backfill / unwrap Normal so it stops autoplaying:
+4. Backfill audio if needed:
    - **Tools → WK Synthesize Immersion Sentence Audio**, or
    - `python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion"`
    - Use `--force` to regenerate both Normal and Easy after syncing a TTS fix.
 
 If audio sounds doubled or choppy (`親鳥おやどり…`), an older build was reading furigana brackets. Sync add-ons, restart Anki, then re-synthesize with `--force`.
 
-New Satori notes added through AnkiConnect also get TTS when `on_mine` is enabled (CSV import still needs the backfill step above).
+New Satori notes added through AnkiConnect (live import or Migaku mine) also get TTS when
+`on_mine` is enabled. After a live CSV import, run synthesize (or `refresh_satori.py`) if
+audio fields are still empty.
 
 ## Immersion conjugations
 

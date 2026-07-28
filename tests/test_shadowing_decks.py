@@ -155,6 +155,15 @@ class ShadowingIdentityTests(unittest.TestCase):
         self.assertIn("{{ReadingAudio}}", cand.templates[0]["afmt"])
         self.assertIn("Target", cand.templates[0]["afmt"])
         self.assertIn("Reading", cand.templates[0]["afmt"])
+        afmt = cand.templates[0]["afmt"]
+        self.assertIn("autoplay-audio", afmt)
+        self.assertIn("manual-tts-sound", afmt)
+        self.assertNotIn("[sound:{{Audio}}]", afmt)
+        self.assertNotIn("<audio", afmt)
+        model_afmt = model.templates[0]["afmt"]
+        self.assertIn("autoplay-audio", model_afmt)
+        self.assertIn("manual-tts-sound", model_afmt)
+        self.assertNotIn("<audio", model_afmt)
 
     def test_native_media_stem_from_duplicate_key(self) -> None:
         from shadowing_decks import native_shadowing_media_stem_from_duplicate_key

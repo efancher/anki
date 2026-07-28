@@ -134,6 +134,27 @@ SHADOWING_CANDIDATE_FIELD_NAMES: Tuple[str, ...] = (
 
 _SAFE_MEDIA_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
+# AnkiMobile only plays collection media via [sound:], not HTML5 <audio>.
+# Manual Target/Reading/Normal fields store [sound:…]; immersion decks use a
+# dedicated options group with autoplay off; JS clicks .autoplay-audio on reveal.
+_MANUAL_TTS_BIND_SCRIPT = """
+<script>
+(function () {
+  function playAutoplayAudio() {
+    var node = document.querySelector(
+      ".autoplay-audio .replay-button, .autoplay-audio .replaybutton, .autoplay-audio a.soundLink"
+    );
+    if (node) node.click();
+  }
+  if (typeof onShownHook !== "undefined") {
+    onShownHook.push(playAutoplayAudio);
+  } else {
+    setTimeout(playAutoplayAudio, 50);
+  }
+})();
+</script>
+"""
+
 
 SHADOWING_FRONT = """
 <div class="mining-card">
@@ -161,19 +182,19 @@ SHADOWING_BACK = """
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
-  <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
+  <div class="manual-tts-sound">{{Audio}}</div>
 </div>
 {{/Audio}}
 {{#ReadingAudio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Reading</div>
-  <audio class="surface-audio-manual" controls preload="none" src="{{ReadingAudio}}"></audio>
+  <div class="manual-tts-sound">{{ReadingAudio}}</div>
 </div>
 {{/ReadingAudio}}
 {{#Sentence}}
 <div class="context">
   {{#SentenceAudio}}
-  <div class="sentence-audio sentence-tts-file">{{SentenceAudio}}</div>
+  <div class="sentence-audio sentence-tts-file autoplay-audio">{{SentenceAudio}}</div>
   {{/SentenceAudio}}
   {{#SentenceFurigana}}<div class="jp context-furigana">{{furigana:SentenceFurigana}}</div>{{/SentenceFurigana}}
   {{^SentenceFurigana}}<div class="jp">{{Sentence}}</div>{{/SentenceFurigana}}
@@ -195,17 +216,7 @@ SHADOWING_BACK = """
 {{#SourceTitle}}<div class="source">{{SourceTitle}}</div>{{/SourceTitle}}
 {{#SourceUrl}}<div class="source"><a href="{{SourceUrl}}">{{SourceUrl}}</a></div>{{/SourceUrl}}
 <div class="meta">{{Meta}}</div>
-<script>
-(function () {
-  document.querySelectorAll("audio.surface-audio-manual").forEach(function (audio) {
-    var src = (audio.getAttribute("src") || "").trim();
-    var match = src.match(/\\[sound:([^\\]]+)\\]/);
-    if (match) {
-      audio.setAttribute("src", match[1]);
-    }
-  });
-})();
-</script>
+""" + _MANUAL_TTS_BIND_SCRIPT + """
 """
 
 SHADOWING_CANDIDATE_FRONT = """
@@ -234,19 +245,19 @@ SHADOWING_CANDIDATE_BACK = """
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
-  <audio class="surface-audio-manual" controls preload="none" src="{{Audio}}"></audio>
+  <div class="manual-tts-sound">{{Audio}}</div>
 </div>
 {{/Audio}}
 {{#ReadingAudio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Reading</div>
-  <audio class="surface-audio-manual" controls preload="none" src="{{ReadingAudio}}"></audio>
+  <div class="manual-tts-sound">{{ReadingAudio}}</div>
 </div>
 {{/ReadingAudio}}
 {{#Sentence}}
 <div class="context">
   {{#SentenceAudio}}
-  <div class="sentence-audio sentence-tts-file">{{SentenceAudio}}</div>
+  <div class="sentence-audio sentence-tts-file autoplay-audio">{{SentenceAudio}}</div>
   {{/SentenceAudio}}
   <div class="jp">{{Sentence}}</div>
   {{#Translation}}<div class="sentence-en">{{Translation}}</div>{{/Translation}}
@@ -260,17 +271,7 @@ SHADOWING_CANDIDATE_BACK = """
 {{/Glossary}}
 {{#SourceTitle}}<div class="source">{{SourceTitle}}</div>{{/SourceTitle}}
 <div class="meta">{{Meta}}</div>
-<script>
-(function () {
-  document.querySelectorAll("audio.surface-audio-manual").forEach(function (audio) {
-    var src = (audio.getAttribute("src") || "").trim();
-    var match = src.match(/\\[sound:([^\\]]+)\\]/);
-    if (match) {
-      audio.setAttribute("src", match[1]);
-    }
-  });
-})();
-</script>
+""" + _MANUAL_TTS_BIND_SCRIPT + """
 """
 
 SHADOWING_CSS = """
@@ -308,12 +309,11 @@ SHADOWING_CSS = """
 .audio-row { margin: 6px 0; }
 .audio-label { font-size: 13px; margin-bottom: 2px; opacity: 0.85; }
 .surface-audio-row { margin: 10px auto; max-width: 520px; }
-.surface-audio-manual {
-  display: block;
-  width: 100%;
-  max-width: 420px;
-  margin: 2px 0 6px;
-  height: 32px;
+.manual-tts-sound { margin: 2px 0 8px; }
+.manual-tts-sound .replay-button,
+.manual-tts-sound .replaybutton,
+.manual-tts-sound .soundLink {
+  vertical-align: middle;
 }
 .sentence-en { font-size: 18px; color: #c8e6c9; margin-top: 10px; }
 .word-def {

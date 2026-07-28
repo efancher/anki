@@ -155,7 +155,11 @@ class SatoriDecksTests(unittest.TestCase):
         self.assertIn("{{SentenceAudioEasy}}", back)
         self.assertIn("Normal", back)
         self.assertIn("Easy", back)
-        self.assertIn("sentence-audio-manual", back)
+        self.assertIn("autoplay-audio", back)
+        self.assertIn("manual-tts-sound", back)
+        self.assertNotIn("[sound:{{Audio}}]", back)
+        self.assertNotIn("<audio", back)
+        self.assertNotIn("sentence-audio-manual", back)
         self.assertLess(back.index("Easy"), back.index("Normal"))
         self.assertIn("{{tts ja_JP:Sentence}}", back)
         with tempfile.TemporaryDirectory() as tmp:

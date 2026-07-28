@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-One-shot Satori refresh: build cloze + conjugations, push templates, regenerate TTS.
+One-shot Satori refresh: live-import cloze notes, conjugations, TTS, unlock.
 
 Typical use (Anki open with AnkiConnect; VOICEVOX running for TTS):
 
@@ -8,11 +8,12 @@ Typical use (Anki open with AnkiConnect; VOICEVOX running for TTS):
   python3 scripts/refresh_satori.py export.csv --from-anki
   python3 scripts/refresh_satori.py export.csv --skip-tts
   python3 scripts/refresh_satori.py export.csv --no-force-tts   # only fill missing audio
+  python3 scripts/refresh_satori.py export.csv --write-apkg    # also emit out/wk_satori.apkg
 
 Steps:
-  1. Build Immersion · Satori cloze .apkg
+  1. Live-import Immersion · Satori cloze notes via AnkiConnect (preserve audio)
   2. Build Immersion · Conjugations .apkg (CSV ± live Anki mines)
-  3. Optionally open Anki import dialogs for those packages
+  3. Optionally open Anki import dialog for conjugations only
   4. Push Satori card templates via AnkiConnect
   5. Synthesize / regenerate sentence + target TTS for WK Satori Immersion
   6. Unlock Satori immersion closure in core new queues
@@ -79,7 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skip-import-dialogs",
         action="store_true",
-        help="Do not open Anki's import dialog for the built .apkg files",
+        help="Do not open Anki's import dialog for the conjugations .apkg",
+    )
+    parser.add_argument(
+        "--write-apkg",
+        action="store_true",
+        help="Also write out/wk_satori.apkg (live import is still the source of truth)",
     )
     parser.add_argument(
         "--skip-conjugations",
@@ -126,16 +132,25 @@ def main(argv: list[str] | None = None) -> int:
     conj_apkg = output_dir / "wk_immersion_conjugations.apkg"
     py = sys.executable
 
-    run_step(
-        "Build Immersion · Satori cloze deck",
-        [
-            py,
-            str(SCRIPT_DIR / "import_satori.py"),
-            str(csv_path),
-            "-o",
-            str(cloze_apkg),
-        ],
-    )
+    anki_up = anki_reachable(args.anki_connect)
+    if not anki_up:
+        print(
+            "\nAnkiConnect not reachable — open Anki with AnkiConnect, then re-run.\n"
+            f"  AnkiConnect URL: {args.anki_connect}",
+            file=sys.stderr,
+        )
+        return 1
+
+    live_cmd = [
+        py,
+        str(SCRIPT_DIR / "import_satori.py"),
+        str(csv_path),
+        "--anki-connect",
+        args.anki_connect,
+    ]
+    if args.write_apkg:
+        live_cmd.extend(["--apkg", "-o", str(cloze_apkg)])
+    run_step("Live-import Immersion · Satori cloze notes", live_cmd)
 
     if not args.skip_conjugations:
         conj_cmd = [
@@ -151,28 +166,11 @@ def main(argv: list[str] | None = None) -> int:
             conj_cmd.extend(["--anki-connect", args.anki_connect])
         run_step("Build Immersion · Conjugations deck", conj_cmd)
 
-    anki_up = anki_reachable(args.anki_connect)
-    if not anki_up:
-        print(
-            "\nAnkiConnect not reachable — packages are built; import them in Anki, then re-run "
-            "with the same CSV and --skip-conjugations if you only need TTS/templates:\n"
-            f"  {cloze_apkg}\n"
-            + (f"  {conj_apkg}\n" if not args.skip_conjugations else "")
-            + f"  AnkiConnect URL: {args.anki_connect}"
-        )
-        return 0
-
-    if not args.skip_import_dialogs:
-        for path, label in (
-            (cloze_apkg, "Satori cloze"),
-            (None if args.skip_conjugations else conj_apkg, "Immersion conjugations"),
-        ):
-            if path is None or not path.is_file():
-                continue
-            print(f"\n=== Open Anki import dialog ({label}) ===")
-            print(f"  {path}")
+        if not args.skip_import_dialogs and conj_apkg.is_file():
+            print("\n=== Open Anki import dialog (Immersion conjugations) ===")
+            print(f"  {conj_apkg}")
             try:
-                anki_connect(args.anki_connect, "guiImportFile", path=str(path))
+                anki_connect(args.anki_connect, "guiImportFile", path=str(conj_apkg))
             except RuntimeError as exc:
                 print(f"  Warning: could not open import dialog: {exc}")
                 print("  Import the file manually (File → Import), then continue.")
@@ -208,7 +206,9 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     print("\nDone.")
-    print(f"  Cloze package:         {cloze_apkg}")
+    print("  Cloze notes: live in Immersion · Satori (WK Satori Immersion)")
+    if args.write_apkg:
+        print(f"  Cloze package:         {cloze_apkg}")
     if not args.skip_conjugations:
         print(f"  Conjugations package:  {conj_apkg}")
     print("  Study: Immersion · Satori / Immersion · Conjugations")

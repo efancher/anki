@@ -25,7 +25,7 @@ python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Im
 
 Or **Tools → WK Synthesize Immersion Sentence Audio** after deleting **SentenceAudio** / **SentenceAudioEasy** on those notes.
 
-**Two speeds (Satori):** Easy (`voicevox_easy_speed_scale`, default `0.75`) autoplays on the card back; Normal (`voicevox_speed_scale`, default `1.0`) is a manual control only. Template **v6** stores Normal as a bare media filename so Anki does not autoplay both.
+**Two speeds (Satori):** Easy (`voicevox_easy_speed_scale`, default `0.75`) autoplays on the card back; Normal (`voicevox_speed_scale`, default `1.0`) is a manual control only. Both store `[sound:]`; immersion decks use **WK Immersion Audio** (autoplay off) and template JS plays Easy only.
 
 ---
 

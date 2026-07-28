@@ -430,14 +430,14 @@ def unwrap_sound_tag(field_value: str) -> str:
 
 
 def audio_field_value(stored_filename: str, *, autoplay: bool) -> str:
+    """Always store Anki ``[sound:]`` so media syncs and AnkiMobile can play.
+
+    ``autoplay`` is retained for callers; card templates + the immersion deck
+    options group (autoplay off + JS click on ``.autoplay-audio``) control which
+    clips play on reveal. HTML5 ``<audio>`` is not used — AnkiMobile ignores it.
     """
-    autoplay=True → Anki `[sound:]` (card autoplay).
-    autoplay=False → bare filename for HTML5 `<audio controls>` (no autoplay).
-    """
-    name = unwrap_sound_tag(stored_filename)
-    if autoplay:
-        return sound_field_value(name)
-    return name
+    del autoplay  # storage format no longer differs; see docstring
+    return sound_field_value(unwrap_sound_tag(stored_filename))
 
 
 def sentence_audio_autoplay(*, note_type_name: str, field_name: str) -> bool:
