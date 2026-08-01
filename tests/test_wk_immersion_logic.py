@@ -345,6 +345,74 @@ class ImmersionTtsLogicTests(unittest.TestCase):
         updated_odaka = apply_voicevox_accent_phrases(query, pitch_accent=9)
         self.assertEqual(updated_odaka["accent_phrases"][0]["accent"], 4)
 
+    def test_sentence_accent_targets_matching_phrase(self) -> None:
+        query = {
+            "accent_phrases": [
+                {
+                    "moras": [
+                        {"text": "ト"},
+                        {"text": "モ"},
+                        {"text": "ダ"},
+                        {"text": "チ"},
+                        {"text": "ガ"},
+                    ],
+                    "accent": 5,
+                },
+                {
+                    "moras": [{"text": "キ"}, {"text": "マ"}, {"text": "シ"}, {"text": "タ"}],
+                    "accent": 2,
+                },
+            ]
+        }
+        # 友達 heiban → phrase 0 becomes 0; 来ました left alone.
+        updated = apply_voicevox_accent_phrases(
+            query, pitch_accent=0, match_kana="ともだち"
+        )
+        self.assertEqual(updated["accent_phrases"][0]["accent"], 0)
+        self.assertEqual(updated["accent_phrases"][1]["accent"], 2)
+
+        # Dictionary reading くる is not inside conjugated キマシタ → leave default.
+        updated_kuru = apply_voicevox_accent_phrases(
+            query, pitch_accent=1, match_kana="くる"
+        )
+        self.assertEqual(updated_kuru["accent_phrases"][1]["accent"], 2)
+
+        # When the spoken form is known, alignment still works.
+        updated_kimashita = apply_voicevox_accent_phrases(
+            query, pitch_accent=1, match_kana="きました"
+        )
+        self.assertEqual(updated_kimashita["accent_phrases"][1]["accent"], 1)
+
+        # Unknown reading → unchanged.
+        unchanged = apply_voicevox_accent_phrases(
+            query, pitch_accent=0, match_kana="ねこ"
+        )
+        self.assertEqual(unchanged["accent_phrases"][0]["accent"], 5)
+
+    def test_sentence_accent_long_vowel_reading_matches_voicevox(self) -> None:
+        """Kanjium ぎんこう vs VOICEVOX ギンコオ."""
+        find_voicevox_accent_phrase = _logic.find_voicevox_accent_phrase
+
+        phrases = [
+            {
+                "moras": [
+                    {"text": "ギ"},
+                    {"text": "ン"},
+                    {"text": "コ"},
+                    {"text": "オ"},
+                    {"text": "エ"},
+                ],
+                "accent": 5,
+            },
+            {"moras": [{"text": "イ"}, {"text": "キ"}, {"text": "マ"}, {"text": "ス"}], "accent": 3},
+        ]
+        located = find_voicevox_accent_phrase(phrases, "ぎんこう")
+        self.assertEqual(located, (0, 0, 4))
+        updated = apply_voicevox_accent_phrases(
+            {"accent_phrases": phrases}, pitch_accent=0, match_kana="ぎんこう"
+        )
+        self.assertEqual(updated["accent_phrases"][0]["accent"], 0)
+
     def test_synthesize_voicevox_wav(self) -> None:
         import unittest.mock
 

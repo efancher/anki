@@ -160,13 +160,17 @@ python3 scripts/push_satori_template_ankiconnect.py
 python3 scripts/push_satori_template_ankiconnect.py --model "WK Shadowing Immersion"
 ```
 
-**VOICEVOX:** Target/Reading TTS uses `PitchPositions` when present (dictionary form). Regenerate with:
+**VOICEVOX:** Target/Reading TTS uses `PitchPositions` when present (dictionary form).
+Sentence / Easy audio also applies that pitch to the VOICEVOX phrase matching the
+note `Reading` when alignment succeeds (conjugated forms and mid-phrase heiban fall
+back to VOICEVOX’s default). Regenerate with:
 
 ```bash
 python3 scripts/synthesize_immersion_sentence_audio.py --surface-only --force
+python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion" --force
 ```
 
-Full-sentence Easy/Normal audio still uses VOICEVOX’s default accent (multi-word alignment is harder).
+## Gloss worksheet
 
 Not an Anki card — a practice sheet so you map **Japanese order → sticky English** before looking at fluent English. CHUNK / ROLE / LIT are blanks; Satori’s translation stays on the EN line. Duplicate sentences (same JP mined for different target words) are collapsed.
 

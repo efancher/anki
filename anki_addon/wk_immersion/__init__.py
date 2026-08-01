@@ -23,6 +23,8 @@ from aqt.qt import QAction
 from aqt.utils import showInfo, showWarning, tooltip
 
 from .logic import (
+    FIELD_READING,
+    FIELD_PITCH_POSITIONS,
     FIELD_SENTENCE,
     FIELD_SENTENCE_AUDIO,
     FIELD_SENTENCE_AUDIO_EASY,
@@ -31,6 +33,7 @@ from .logic import (
     MINING_NOTE_TYPE,
     ImmersionTtsConfig,
     audio_field_value,
+    parse_primary_pitch_position,
     sentence_audio_autoplay,
     sentence_audio_fields_needing_synth,
     sentence_media_basename,
@@ -155,6 +158,8 @@ def _store_one_sentence_audio(
     speed_scale: float,
     silent: bool,
     force: bool = False,
+    pitch_accent=None,
+    match_kana: str = "",
 ) -> bool:
     with tempfile.TemporaryDirectory(prefix="wk_immersion_tts_") as tmp:
         temp_dir = Path(tmp)
@@ -165,6 +170,8 @@ def _store_one_sentence_audio(
             edge_tts_script=EDGE_TTS_SCRIPT,
             speed_scale=speed_scale,
             force=force,
+            pitch_accent=pitch_accent,
+            match_kana=match_kana,
         )
         if not audio_bytes or not ext:
             if not silent:
@@ -182,6 +189,8 @@ def _store_one_sentence_audio(
             speaker_id=speaker_id,
             volume_scale=volume_scale,
             speed_scale=speed_scale if engine_label == "voicevox" else 1.0,
+            pitch_accent=pitch_accent if engine_label == "voicevox" else None,
+            match_kana=match_kana if engine_label == "voicevox" else "",
             ext=ext,
         )
         stored_name = _add_media_bytes(col, audio_bytes, basename, ext)
@@ -263,6 +272,9 @@ def _store_sentence_audio(
     if not needed:
         return unwrapped
 
+    pitch_accent = parse_primary_pitch_position(_field_value(note, FIELD_PITCH_POSITIONS))
+    match_kana = (_field_value(note, FIELD_READING) or "").strip()
+
     any_ok = unwrapped
     for field_name in needed:
         speed = (
@@ -279,6 +291,8 @@ def _store_sentence_audio(
             speed_scale=speed,
             silent=silent,
             force=force,
+            pitch_accent=pitch_accent,
+            match_kana=match_kana,
         ):
             any_ok = True
         elif not silent and field_name == FIELD_SENTENCE_AUDIO:

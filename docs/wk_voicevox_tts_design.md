@@ -1,7 +1,7 @@
 # VOICEVOX TTS for immersion cards — design plan (deferred)
 
-**Status:** Partial — immersion Target/Reading TTS can override VOICEVOX accent from Kanjium `PitchPositions`; full-sentence accent alignment still deferred  
-**Last updated:** 2026-07-30  
+**Status:** Partial — Target/Reading TTS and **sentence** TTS can override VOICEVOX accent from Kanjium `PitchPositions` when the word’s reading aligns to an accent phrase  
+**Last updated:** 2026-08-01  
 **Scope v1:** Migaku immersion deck (`WK Migaku Immersion`); extend to grammar cloze later if useful
 
 > **Prerequisite:** [Migaku immersion mining](migaku_mining.md) deck imported.
@@ -14,21 +14,17 @@
 |------|-----|
 | High-quality Japanese sentence audio | Local [VOICEVOX](https://voicevox.hiroshiba.jp/) engine (`http://127.0.0.1:50021`) |
 | Cards ready before tooling exists | **VoicevoxAudio** + **VoicevoxSpeakerId** fields; template prefers VOICEVOX over mined/TTS |
-| Optional Kanjium pitch alignment | **Word-level done** (Target/Reading). **Sentence-level still open** — see Phase 3 revisit |
+| Optional Kanjium pitch alignment | **Word-level done**; **sentence-level done** when `Reading` aligns to a VOICEVOX phrase (see Phase 3) |
 | No breakage today | Empty **VoicevoxAudio** → existing **Audio** (Yomitan) → Anki `{{tts}}` fallback |
 
-## Revisit — sentence accents (~mid-August 2026)
+## Sentence accents (done 2026-08-01)
 
-**Reminder (set 2026-07-30):** around **2026-08-13**, pick up multi-word **Sentence** / Easy/Normal TTS pitch.
+Sentence / Easy TTS passes `PitchPositions` plus the note `Reading`. The synthesizer finds the accent phrase whose morae match that reading (noun+particle prefixes like トモダチガ count; ぎんこう≈ギンコオ long-vowel folding). Limits:
 
-Word TTS already overrides `accent_phrases[].accent` from note `PitchPositions`. What’s left:
-
-1. Map the mined word’s Kanjium position onto the matching phrase inside a multi-phrase `/audio_query` for the full sentence.
-2. Decide fallback when the surface is conjugated or the word spans multiple VOICEVOX phrases.
-3. Wire through `synthesize_immersion_sentence_audio.py` (not only `--surface-only`).
-4. Document limits when alignment fails (keep VOICEVOX default).
-
-Tracker: Phase 3 checkbox “Handle multi-word **Sentence** audio” below.
+1. **Conjugated surfaces:** dictionary `くる` will not match キマシタ — keep VOICEVOX default for that phrase.
+2. **Heiban mid-phrase:** if the word is not phrase-initial, heiban (0) cannot be encoded; leave default.
+3. **No match:** leave the whole query unchanged.
+4. Regenerate Satori sentence audio with `python3 scripts/synthesize_immersion_sentence_audio.py --note-type "WK Satori Immersion" --force` (not `--surface-only`). Shadowing keeps native clips for `SentenceAudio`.
 
 ## Non-goals (v1)
 
@@ -85,11 +81,12 @@ Tracker: Phase 3 checkbox “Handle multi-word **Sentence** audio” below.
 ### Phase 3 — Kanjium pitch → VOICEVOX accent phrases (research)
 
 - [x] Parse **PitchPositions** + apply to Target / Reading word TTS via `accent_phrases[].accent`
-- [ ] Handle multi-word **Sentence** audio (align word pitch inside multi-phrase queries)
-- [x] Fallback to VOICEVOX default accent when Kanjium / PitchPositions missing  
+- [x] Handle multi-word **Sentence** audio (align word reading inside multi-phrase queries)
+- [x] Fallback to VOICEVOX default accent when Kanjium / PitchPositions missing or unaligned  
 
 **Exit (word-level):** ReadingAudio (and lemma Target) follow Kanjium; conjugated surface Target keeps VOICEVOX default.
 
+**Exit (sentence-level):** SentenceAudio / Easy override the phrase matching `Reading` when possible; otherwise VOICEVOX default.
 ---
 
 ## VOICEVOX API sketch (phase 1)

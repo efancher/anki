@@ -170,6 +170,7 @@ def store_field_audio(
     speed_scale: float,
     force: bool = False,
     pitch_positions: str = "",
+    match_kana: str = "",
 ) -> bool:
     pitch_accent = parse_primary_pitch_position(pitch_positions)
     with tempfile.TemporaryDirectory(prefix="wk_immersion_cli_") as tmp:
@@ -181,6 +182,7 @@ def store_field_audio(
             speed_scale=speed_scale,
             force=force,
             pitch_accent=pitch_accent,
+            match_kana=match_kana,
         )
     if not audio_bytes:
         return False
@@ -193,6 +195,7 @@ def store_field_audio(
         volume_scale=volume_scale,
         speed_scale=speed_scale if engine_label == "voicevox" else 1.0,
         pitch_accent=pitch_accent if engine_label == "voicevox" else None,
+        match_kana=match_kana if engine_label == "voicevox" else "",
         ext=ext,
     )
     stored = anki_request(
@@ -360,6 +363,8 @@ def main() -> None:
                             config=config,
                             speed_scale=speed,
                             force=args.force,
+                            pitch_positions=pitch_positions,
+                            match_kana=(reading or "").strip(),
                         ):
                             note_ok = True
                         else:

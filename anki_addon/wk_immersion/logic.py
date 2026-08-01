@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 try:
     from .mining_note_types import MINING_NOTE_TYPE, is_mining_note_type
@@ -29,6 +29,7 @@ FIELD_AUDIO = "Audio"
 FIELD_READING_AUDIO = "ReadingAudio"
 FIELD_EXPRESSION = "Expression"
 FIELD_READING = "Reading"
+FIELD_PITCH_POSITIONS = "PitchPositions"
 FIELD_SPEAKER = "VoicevoxSpeakerId"
 
 DEFAULT_VOICEVOX_ENGINE_URL = "http://127.0.0.1:50021"
@@ -198,12 +199,14 @@ def sentence_media_basename(
     volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
     speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
     pitch_accent: Optional[int] = None,
+    match_kana: str = "",
     ext: str,
 ) -> str:
     pitch_token = "" if pitch_accent is None else str(int(pitch_accent))
+    match_token = (match_kana or "").strip()
     raw = (
         f"{engine}\0{speaker_id}\0{volume_scale:g}\0{speed_scale:g}\0"
-        f"{pitch_token}\0{text}".encode("utf-8")
+        f"{pitch_token}\0{match_token}\0{text}".encode("utf-8")
     )
     digest = hashlib.sha256(raw).hexdigest()[:24]
     return f"{SENTENCE_AUDIO_FILENAME_PREFIX}{digest}{ext}"
@@ -232,6 +235,7 @@ def immersion_audio_cache_path(
     ext: str,
     cache_dir: Path,
     pitch_accent: Optional[int] = None,
+    match_kana: str = "",
 ) -> Path:
     return cache_dir / sentence_media_basename(
         text,
@@ -240,6 +244,7 @@ def immersion_audio_cache_path(
         volume_scale=volume_scale,
         speed_scale=speed_scale,
         pitch_accent=pitch_accent,
+        match_kana=match_kana,
         ext=ext,
     )
 
@@ -264,16 +269,115 @@ def parse_primary_pitch_position(pitch_positions_field: str) -> Optional[int]:
     return None
 
 
+# Small kana that attach to the previous character as one mora (Voicevox-style).
+_SMALL_KANA = frozenset("ゃゅょぁぃぅぇぉャュョァィゥェォ")
+# Preceding mora ends in these → following ウ/オ are interchangeable long vowels.
+_O_COLUMN_ENDS = frozenset("おこそとのほもよろごぞどぼぽオコソトノホモヨロゴゾドボポ")
+_E_COLUMN_ENDS = frozenset("えけせてねへめれげぜでべペエケセテネヘメレゲゼデベペ")
+
+
+def hiragana_to_katakana(text: str) -> str:
+    out: List[str] = []
+    for ch in text or "":
+        code = ord(ch)
+        if 0x3041 <= code <= 0x3096:
+            out.append(chr(code + 0x60))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def split_kana_morae(reading: str) -> List[str]:
+    """Split kana into mora strings (ゃ/ゅ/ょ attach); output is katakana."""
+    text = hiragana_to_katakana((reading or "").strip())
+    if not text:
+        return []
+    morae: List[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if index + 1 < len(text) and text[index + 1] in _SMALL_KANA:
+            morae.append(char + text[index + 1])
+            index += 2
+            continue
+        morae.append(char)
+        index += 1
+    return morae
+
+
+def _long_vowel_equivalent(left: str, right: str, prev: str) -> bool:
+    if left == right:
+        return True
+    prev_tail = prev[-1] if prev else ""
+    if {left, right} <= {"ウ", "オ"} and prev_tail in _O_COLUMN_ENDS:
+        return True
+    if {left, right} <= {"イ", "エ"} and prev_tail in _E_COLUMN_ENDS:
+        return True
+    return False
+
+
+def _morae_match_at(haystack: Sequence[str], needle: Sequence[str], start: int) -> bool:
+    if start < 0 or start + len(needle) > len(haystack):
+        return False
+    prev = haystack[start - 1] if start > 0 else ""
+    for offset, piece in enumerate(needle):
+        current = haystack[start + offset]
+        if not _long_vowel_equivalent(current, piece, prev if offset == 0 else needle[offset - 1]):
+            # Compare against haystack previous mora for long-vowel context.
+            hay_prev = haystack[start + offset - 1] if offset > 0 else prev
+            if not _long_vowel_equivalent(current, piece, hay_prev):
+                return False
+        prev = current
+    return True
+
+
+def find_voicevox_accent_phrase(
+    accent_phrases: Sequence[dict],
+    match_kana: str,
+) -> Optional[Tuple[int, int, int]]:
+    """Locate ``match_kana`` inside VOICEVOX phrases.
+
+    Returns ``(phrase_index, mora_offset, word_mora_count)`` preferring a
+    phrase-initial hit (noun+particle like トモダチガ). ``None`` when the
+    reading cannot be aligned — caller should keep VOICEVOX's default accent.
+    """
+    needle = split_kana_morae(match_kana)
+    if not needle:
+        return None
+    fallback: Optional[Tuple[int, int, int]] = None
+    for phrase_index, phrase in enumerate(accent_phrases):
+        if not isinstance(phrase, dict):
+            continue
+        moras = phrase.get("moras") or []
+        if not isinstance(moras, list):
+            continue
+        hay = [str(mora.get("text") or "") for mora in moras if isinstance(mora, dict)]
+        if not hay:
+            continue
+        for start in range(0, len(hay) - len(needle) + 1):
+            if not _morae_match_at(hay, needle, start):
+                continue
+            hit = (phrase_index, start, len(needle))
+            if start == 0:
+                return hit
+            if fallback is None:
+                fallback = hit
+    return fallback
+
+
 def apply_voicevox_accent_phrases(
     audio_query: dict,
     *,
     pitch_accent: Optional[int],
+    match_kana: str = "",
 ) -> dict:
-    """Override VOICEVOX accent on the first usable accent phrase (word-level TTS).
+    """Override VOICEVOX ``accent`` from a Kanjium pitch position.
 
-    Kanjium ``position`` matches VOICEVOX ``accent`` (0 = heiban; N = drop after mora N).
-    Multi-phrase sentence queries are left alone except the first phrase — prefer
-    calling this only for Target/Reading (single-word) synthesis.
+    * Word-level TTS (empty ``match_kana``): first accent phrase, as before.
+    * Sentence TTS (``match_kana`` set): only the phrase that contains that
+      reading. Heiban (0) applies only when the word starts the phrase; mid-phrase
+      heiban cannot be encoded with a single phrase accent, so we leave default.
+    * No match → unchanged query (VOICEVOX default).
     """
     if pitch_accent is None:
         return audio_query
@@ -285,18 +389,37 @@ def apply_voicevox_accent_phrases(
     phrases = updated.get("accent_phrases")
     if not isinstance(phrases, list) or not phrases:
         return updated
+
+    match = (match_kana or "").strip()
+    if match:
+        located = find_voicevox_accent_phrase(phrases, match)
+        if located is None:
+            return updated
+        phrase_index, mora_offset, word_mora_count = located
+        if desired == 0 and mora_offset != 0:
+            return updated
+        drop_after_word = 0 if desired == 0 else min(desired, word_mora_count)
+        target_indices = {phrase_index}
+        absolute_drop = mora_offset + drop_after_word
+    else:
+        target_indices = None  # first usable phrase
+        absolute_drop = desired
+
     new_phrases: List[dict] = []
     applied = False
-    for phrase in phrases:
+    for index, phrase in enumerate(phrases):
         if not isinstance(phrase, dict):
             new_phrases.append(phrase)
             continue
         phrase_copy = dict(phrase)
         moras = phrase_copy.get("moras") or []
         mora_count = len(moras) if isinstance(moras, list) else 0
-        if not applied and mora_count > 0:
-            # VOICEVOX accepts 0..mora_count (odaka == mora_count).
-            phrase_copy["accent"] = max(0, min(desired, mora_count))
+        should_apply = mora_count > 0 and (
+            (target_indices is None and not applied)
+            or (target_indices is not None and index in target_indices)
+        )
+        if should_apply:
+            phrase_copy["accent"] = max(0, min(absolute_drop, mora_count))
             applied = True
         new_phrases.append(phrase_copy)
     updated["accent_phrases"] = new_phrases
@@ -330,6 +453,7 @@ def synthesize_voicevox_wav(
     volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
     speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
     pitch_accent: Optional[int] = None,
+    match_kana: str = "",
     timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     if not text.strip():
@@ -348,7 +472,9 @@ def synthesize_voicevox_wav(
                 speed_scale=speed_scale,
             )
             audio_query = apply_voicevox_accent_phrases(
-                audio_query, pitch_accent=pitch_accent
+                audio_query,
+                pitch_accent=pitch_accent,
+                match_kana=match_kana,
             )
         synth_url = f"{base}/synthesis?{urllib.parse.urlencode({'speaker': str(speaker_id)})}"
         body = json.dumps(audio_query).encode("utf-8")
@@ -399,12 +525,14 @@ def synthesize_sentence_audio(
     force: bool = False,
     cache_dir: Optional[Path] = None,
     pitch_accent: Optional[int] = None,
+    match_kana: str = "",
 ) -> Tuple[Optional[bytes], str, str]:
     """
     Return (audio_bytes, media_ext_including_dot, engine_label).
     engine_label is voicevox or edge.
     speed_scale overrides config.voicevox_speed_scale for VOICEVOX only.
-    pitch_accent (Kanjium position) overrides VOICEVOX accent on word-level TTS.
+    pitch_accent (Kanjium position) overrides VOICEVOX accent; with match_kana,
+    the matching accent phrase inside a multi-word sentence is updated.
     When cache_enabled, reads/writes .wk_cache/immersion_sentence_audio (or config.cache_dir).
     force=True regenerates even when a cache file exists.
     """
@@ -437,6 +565,7 @@ def synthesize_sentence_audio(
                     volume_scale=config.voicevox_volume_scale,
                     speed_scale=voicevox_speed,
                     pitch_accent=pitch_accent,
+                    match_kana=match_kana,
                     ext=".wav",
                     cache_dir=resolved_cache,
                 )
@@ -450,6 +579,7 @@ def synthesize_sentence_audio(
                 volume_scale=config.voicevox_volume_scale,
                 speed_scale=voicevox_speed,
                 pitch_accent=pitch_accent,
+                match_kana=match_kana,
             )
             if wav:
                 if cache_path is not None:
