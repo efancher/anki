@@ -18,6 +18,49 @@ _KATAKANA_WORD_RE = re.compile(r"[\u30a0-\u30ff\u31f0-\u31ffー]{2,}")
 _KANJI_RUN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{1,}")
 _HIRAGANA_CHAR_RE = re.compile(r"[\u3041-\u3096]")
 _KATAKANA_CHAR_RE = re.compile(r"[\u30A1-\u30F6]")
+# Shadowing ASR / scripts put stage directions in square brackets; Migaku readings
+# use the same delimiters. Strip them before matching so 息/音 inside [息をのむ音]
+# cannot become cards for the spoken line that follows.
+_BRACKET_NOTE_RE = re.compile(r"\[(?!sound:)[^\]]*\]")
+
+
+def study_sentence_text(sentence: str) -> str:
+    """Spoken line only — drop [stage directions] / Migaku reading brackets."""
+    text = _BRACKET_NOTE_RE.sub("", sentence or "")
+    return re.sub(r"  +", " ", text).strip()
+
+
+# WK writes counters and suffixes with a leading tilde placeholder (〜歳, 〜君).
+_PLACEHOLDER_TILDES = "〜～"
+
+# Godan te/ta forms mutate the final kana out of its row (使って, 担いで, 読んで).
+_EUPHONIC_INFLECTION_KANA = frozenset("っんい")
+
+# An i-adjective whose whole okurigana is い inflects into the か row instead of
+# its own (良かった, 良く, 良ければ, 良さ). Longer okurigana already starts in the
+# right row (暖かい → 暖かく), so only the bare-い case needs this.
+_I_ADJECTIVE_CONTINUATIONS = frozenset("かきくけこさそ")
+
+# わ rides with the あ row: the negative stem of a う-verb is わ (使わない).
+_GOJUON_ROWS = (
+    "あいうえおわ",
+    "かきくけこ",
+    "がぎぐげご",
+    "さしすせそ",
+    "ざじずぜぞ",
+    "たちつてと",
+    "だぢづでど",
+    "なにぬねの",
+    "はひふへほ",
+    "ばびぶべぼ",
+    "ぱぴぷぺぽ",
+    "まみむめも",
+    "やゆよ",
+    "らりるれろ",
+)
+
+# Resolved on first use: the conjugator callable, or False when unavailable.
+_CONJUGATOR = None
 
 # UniDic coarse POS prefixes treated as content words for candidate generation.
 _CONTENT_POS_PREFIXES = (
@@ -135,6 +178,22 @@ def kanji_stem(text: str) -> str:
     return text[indices[0] : indices[-1] + 1]
 
 
+def conjugation_match_key(expression: str) -> str:
+    """Search key for an inflected occurrence: expression minus trailing okurigana.
+
+    Only trailing kana is dropped, because that is what inflection changes. Any
+    leading kana is kept (お知らせ → お知), so a bare kanji cannot claim a word
+    whose prefix is absent from the sentence — 知らなかった is 知る, not お知らせ,
+    and the 年 of 同い年 is not ２０１１年. A WK placeholder tilde is dropped so
+    〜歳 can still match after a number (22歳).
+    """
+    text = (expression or "").lstrip(_PLACEHOLDER_TILDES)
+    indices = [index for index, ch in enumerate(text) if _KANJI_RE.match(ch)]
+    if not indices:
+        return ""
+    return text[: indices[-1] + 1]
+
+
 def _fugashi_tagger():
     try:
         import fugashi  # type: ignore
@@ -208,10 +267,15 @@ def match_wk_vocab_in_sentence(
 ) -> List[WkMatch]:
     """Return unique WK vocabulary matches in sentence order.
 
-    Prefers fugashi token lemma/surface lookups; falls back to longest-match on
-    WK expressions (and kanji stems for conjugated forms).
+    Prefers fugashi token lemma/surface lookups, then fills remaining gaps with
+    longest-match on WK expressions (and okurigana-stripped stems). Tokenization
+    alone is not enough: UniDic often emits a compound lemma that is not itself
+    a WK entry (``同い年``), while the stem of ``同じ`` still sits inside it.
+
+    Matching runs on the spoken line only (``[stage directions]`` stripped), so
+    indices align with the Sentence field the cloze builder stores.
     """
-    plain = (sentence or "").strip()
+    plain = study_sentence_text(sentence)
     if not plain:
         return []
     by_expression: Dict[str, dict] = index.get("by_expression") or {}
@@ -219,9 +283,69 @@ def match_wk_vocab_in_sentence(
         return []
 
     tokens = tokenize_japanese(plain)
-    if tokens:
-        return _match_with_tokens(plain, tokens, index)
-    return _match_longest(plain, by_expression, sentence_reading=sentence_reading)
+    token_matches = _match_with_tokens(plain, tokens, index) if tokens else []
+    longest_matches = _match_longest(
+        plain, by_expression, sentence_reading=sentence_reading
+    )
+    return _merge_wk_matches(token_matches, longest_matches)
+
+
+def _spans_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    return a_start < b_end and b_start < a_end
+
+
+def _merge_wk_matches(
+    preferred: Sequence[WkMatch], extras: Sequence[WkMatch]
+) -> List[WkMatch]:
+    """Greedy by span length so お姉さん beats 姉 and 急に beats 急."""
+    candidates = list(preferred) + list(extras)
+    candidates.sort(key=lambda match: (-(match.end - match.start), match.start))
+    merged: List[WkMatch] = []
+    seen_ids: Set[int] = set()
+    for match in candidates:
+        subject_id = int(match.wk_entry["id"])
+        if subject_id in seen_ids:
+            continue
+        if any(
+            _spans_overlap(match.start, match.end, kept.start, kept.end)
+            for kept in merged
+        ):
+            continue
+        seen_ids.add(subject_id)
+        merged.append(match)
+    merged.sort(key=lambda item: (item.start, item.end))
+    return merged
+
+
+def _surface_supports_wk_entry(surface: str, expression: str, reading: str) -> bool:
+    """True when the written token is a plausible form of this WK entry.
+
+    UniDic lemmas are dictionary forms, not spellings. Colloquial いや is lemmatized
+    as 否, and the 吾 in し吾 as 我 — both are real lemmas, but neither spelling is
+    what appears in the sentence. Require the surface to share the expression's
+    writing, its okurigana-stripped stem, its reading, or a conjugated variant.
+    """
+    surf = (surface or "").strip()
+    expr = (expression or "").lstrip(_PLACEHOLDER_TILDES).strip()
+    if not surf or not expr:
+        return False
+    if surf == expr or expr in surf or surf in expr:
+        return True
+    stem = conjugation_match_key(expr)
+    if stem and (stem in surf or surf in stem):
+        return True
+    surf_h = normalize_ja_reading(surf)
+    read_h = normalize_ja_reading(reading)
+    if surf_h and read_h and surf_h == read_h:
+        return True
+    if not any(_KANJI_RE.match(ch) for ch in surf) and len(surf) < _MIN_KANA_EXPR_LEN:
+        return False
+    for variant in _conjugated_surface_variants(expr, reading):
+        if not variant:
+            continue
+        if surf == variant or variant.startswith(surf) or surf.startswith(variant):
+            return True
+    return False
 
 
 def _match_with_tokens(
@@ -241,14 +365,18 @@ def _match_with_tokens(
             entry = _lookup_candidates(key, reading, index)
             if entry is None:
                 continue
+            expression = str(entry.get("expression") or key)
+            entry_reading = str(entry.get("reading") or reading or "")
+            if not _surface_supports_wk_entry(token.surface, expression, entry_reading):
+                continue
             subject_id = int(entry["id"])
             if subject_id in seen_ids:
                 break
             seen_ids.add(subject_id)
             matches.append(
                 WkMatch(
-                    expression=str(entry.get("expression") or key),
-                    reading=str(entry.get("reading") or reading or ""),
+                    expression=expression,
+                    reading=entry_reading,
                     surface=token.surface,
                     start=token.start,
                     end=token.end,
@@ -261,20 +389,98 @@ def _match_with_tokens(
     return matches
 
 
+def _conjugated_surface_variants(expression: str, reading: str) -> Sequence[str]:
+    """satori_decks' conjugator, imported lazily to avoid an import cycle.
+
+    satori_decks → immersion_pitch → shadowing_match, so this module cannot
+    import it at load time.
+    """
+    global _CONJUGATOR
+    if _CONJUGATOR is None:
+        try:
+            from satori_decks import conjugated_surface_variants
+        except ImportError:  # genanki or WK deps missing — fall back to kana rules
+            _CONJUGATOR = False
+        else:
+            _CONJUGATOR = conjugated_surface_variants
+    if not _CONJUGATOR:
+        return ()
+    return _CONJUGATOR(expression, reading)
+
+
+def _okurigana(expression: str) -> str:
+    """Trailing kana of an expression — what inflection rewrites (怒る → る)."""
+    text = (expression or "").lstrip(_PLACEHOLDER_TILDES)
+    indices = [index for index, ch in enumerate(text) if _KANJI_RE.match(ch)]
+    if not indices:
+        return ""
+    return text[indices[-1] + 1 :]
+
+
+def _inflection_continuations(okurigana: str) -> Set[str]:
+    """Kana that may follow a stem when its okurigana inflects.
+
+    An inflected okurigana stays in its own gojūon row (任す → 任し/任さ), so a
+    kana from another row means the stem is part of an unrelated word: the 任 of
+    「担任も」 is not 任す, and the 察 of 「警察やってる」 is not 察する.
+    """
+    if not okurigana:
+        return set()
+    allowed = set(_EUPHONIC_INFLECTION_KANA)
+    if okurigana == "い":
+        allowed |= _I_ADJECTIVE_CONTINUATIONS
+    for row in _GOJUON_ROWS:
+        if okurigana[0] in row:
+            return allowed | set(row)
+    return set()
+
+
+def _stem_match_is_plausible_inflection(
+    sentence: str,
+    key: str,
+    expression: str,
+    reading: str,
+    start: int,
+    end: int,
+) -> bool:
+    """Whether an okurigana-stripped key really landed on an inflected occurrence.
+
+    A stem stands in for an inflected form, so what follows it decides:
+    kanji means the stem is inside another compound (the 担 of 担任 is not 担ぐ,
+    the 生 of 年生 is not 生まれる). Otherwise a real conjugated surface at this
+    position settles it, including irregulars the row rule cannot model (来ない).
+    The row rule is the fallback for forms the conjugator does not emit, such as
+    the causative 怒らせ.
+    """
+    following = sentence[end] if end < len(sentence) else ""
+    if following and _KANJI_RE.match(following):
+        return False
+    okurigana = _okurigana(expression)
+    if not okurigana:
+        # Counters and suffixes (〜歳, 〜ヶ月) have nothing to inflect.
+        return True
+    if any(
+        sentence.startswith(variant, start)
+        for variant in _conjugated_surface_variants(expression, reading)
+    ):
+        return True
+    return following in _inflection_continuations(okurigana)
+
+
 def _match_longest(
     sentence: str,
     by_expression: Dict[str, dict],
     *,
     sentence_reading: str = "",
 ) -> List[WkMatch]:
-    # Build search keys: full expression + kanji stem when useful.
+    # Build search keys: full expression + okurigana-stripped stem when useful.
     keys: List[Tuple[str, dict, str]] = []
     for expr, entry in by_expression.items():
         if not expr:
             continue
         keys.append((expr, entry, expr))
-        stem = kanji_stem(expr)
-        if stem and stem != expr and len(stem) >= 1:
+        stem = conjugation_match_key(expr)
+        if stem and stem != expr:
             keys.append((stem, entry, expr))
     keys.sort(key=lambda item: len(item[0]), reverse=True)
 
@@ -285,6 +491,7 @@ def _match_longest(
     for key, entry, canonical_expr in keys:
         if all(not _KANJI_RE.match(ch) for ch in key) and len(key) < _MIN_KANA_EXPR_LEN:
             continue
+        is_stem_key = key != canonical_expr
         start = 0
         while True:
             idx = sentence.find(key, start)
@@ -292,6 +499,16 @@ def _match_longest(
                 break
             end = idx + len(key)
             if any(occupied[idx:end]):
+                start = idx + 1
+                continue
+            if is_stem_key and not _stem_match_is_plausible_inflection(
+                sentence,
+                key,
+                canonical_expr,
+                str(entry.get("reading") or ""),
+                idx,
+                end,
+            ):
                 start = idx + 1
                 continue
             subject_id = int(entry["id"])
@@ -440,7 +657,7 @@ def candidate_lemmas_in_sentence(
     wk_matched_spans: Optional[Iterable[Tuple[int, int]]] = None,
 ) -> List[CandidateLemma]:
     """Content-word lemmas not present in the WK vocabulary index."""
-    plain = (sentence or "").strip()
+    plain = study_sentence_text(sentence)
     if not plain:
         return []
     by_expression = index.get("by_expression") or {}

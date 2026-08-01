@@ -41,6 +41,10 @@ from shadowing_decks import (  # noqa: E402
     load_default_wk_index,
     load_shadowing_input,
 )
+from immersion_pitch import (  # noqa: E402
+    load_immersion_pitch_index,
+    resolve_pitch_dict_path,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -71,6 +75,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip sentences still labeled transcriptStatus=auto-caption",
     )
+    parser.add_argument(
+        "--pitch-dict",
+        type=Path,
+        default=None,
+        help="Yomitan pitch dict zip/folder (default: auto-detect Kanjium in Downloads)",
+    )
+    parser.add_argument(
+        "--no-pitch",
+        action="store_true",
+        help="Skip pitch accent lookup",
+    )
     args = parser.parse_args(argv)
 
     project_path = args.project.expanduser().resolve()
@@ -91,11 +106,27 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
+    pitch_index = None
+    if not args.no_pitch:
+        pitch_path = resolve_pitch_dict_path(
+            args.pitch_dict.expanduser().resolve() if args.pitch_dict else None
+        )
+        if pitch_path is None:
+            print(
+                "Pitch dict not found (set --pitch-dict or WK_PITCH_DICT); "
+                "continuing without pitch.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"Loading pitch dictionary: {pitch_path}")
+            pitch_index = load_immersion_pitch_index(pitch_path)
+
     wk_path, cand_path, stats = build_shadowing_decks(
         project,
         output_dir,
         wk_index=wk_index,
         include_auto_caption=not args.skip_auto_caption,
+        pitch_index=pitch_index,
     )
 
     mode = "curated mining package" if project.curated else "automatic project import"

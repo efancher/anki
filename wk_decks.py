@@ -291,8 +291,8 @@ MODEL_TEMPLATE_VERSIONS = {
     "kanji_meaning": "v3",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
-    "satori": "v17",
-    "shadowing": "v8",
+    "satori": "v18",
+    "shadowing": "v9",
     "shadowing_candidate": "v11",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
@@ -2652,7 +2652,19 @@ def normalize_yomitan_pitch_payload(payload: Any) -> List[dict]:
             for p in pitches:
                 if isinstance(p, dict):
                     position = p.get("position")
-                    out.append({"reading": reading, "pitch": str(position), "pattern": f"accent={position}", "source": "yomitan"})
+                    try:
+                        position_int = int(position)
+                    except (TypeError, ValueError):
+                        continue
+                    out.append(
+                        {
+                            "reading": reading,
+                            "pitch": str(position_int),
+                            "positions": [position_int],
+                            "pattern": f"accent={position_int}",
+                            "source": "yomitan",
+                        }
+                    )
     elif isinstance(payload, list):
         for item in payload:
             out.extend(normalize_yomitan_pitch_payload(item))
@@ -2676,8 +2688,31 @@ def load_yomitan_pitch(path: Optional[str]) -> Dict[Tuple[str, str], dict]:
                 continue
             for entry in normalize_yomitan_pitch_payload(payload):
                 reading = entry.get("reading") or ""
-                if term and reading:
-                    pitch[(term, reading)] = entry
+                if not (term and reading):
+                    continue
+                key = (term, reading)
+                existing = pitch.get(key)
+                new_positions = [
+                    int(position)
+                    for position in (entry.get("positions") or [])
+                    if str(position).strip() != ""
+                ]
+                if existing is None:
+                    pitch[key] = {
+                        "reading": reading,
+                        "pitch": entry.get("pitch") or "",
+                        "positions": list(new_positions),
+                        "pattern": entry.get("pattern") or "",
+                        "source": entry.get("source") or "yomitan",
+                    }
+                    continue
+                merged = list(existing.get("positions") or [])
+                for position in new_positions:
+                    if position not in merged:
+                        merged.append(position)
+                existing["positions"] = merged
+                existing["pitch"] = ", ".join(str(position) for position in merged)
+                existing["pattern"] = f"accent={existing['pitch']}"
     print(f"Scanned Yomitan pitch rows: {rows}; usable pitch entries: {len(pitch)}")
     return pitch
 

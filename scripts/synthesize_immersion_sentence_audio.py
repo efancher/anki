@@ -65,12 +65,14 @@ FIELD_AUDIO = _logic.FIELD_AUDIO
 FIELD_READING_AUDIO = _logic.FIELD_READING_AUDIO
 FIELD_EXPRESSION = _logic.FIELD_EXPRESSION
 FIELD_READING = _logic.FIELD_READING
+FIELD_PITCH_POSITIONS = "PitchPositions"
 MINING_NOTE_TYPES = _note_types.MINING_NOTE_TYPES
 SATORI_NOTE_TYPE = _note_types.SATORI_NOTE_TYPE
 SHADOWING_NOTE_TYPE = _note_types.SHADOWING_NOTE_TYPE
 SHADOWING_CANDIDATE_NOTE_TYPE = _note_types.SHADOWING_CANDIDATE_NOTE_TYPE
 ImmersionTtsConfig = _logic.ImmersionTtsConfig
 audio_field_value = _logic.audio_field_value
+parse_primary_pitch_position = _logic.parse_primary_pitch_position
 sentence_audio_already_set = _logic.sentence_audio_already_set
 sentence_audio_autoplay = _logic.sentence_audio_autoplay
 sentence_audio_fields_needing_synth = _logic.sentence_audio_fields_needing_synth
@@ -167,7 +169,9 @@ def store_field_audio(
     config: ImmersionTtsConfig,
     speed_scale: float,
     force: bool = False,
+    pitch_positions: str = "",
 ) -> bool:
+    pitch_accent = parse_primary_pitch_position(pitch_positions)
     with tempfile.TemporaryDirectory(prefix="wk_immersion_cli_") as tmp:
         audio_bytes, ext, engine_label = synthesize_sentence_audio(
             tts_text,
@@ -176,6 +180,7 @@ def store_field_audio(
             edge_tts_script=EDGE_TTS_SCRIPT,
             speed_scale=speed_scale,
             force=force,
+            pitch_accent=pitch_accent,
         )
     if not audio_bytes:
         return False
@@ -187,6 +192,7 @@ def store_field_audio(
         speaker_id=speaker_id,
         volume_scale=volume_scale,
         speed_scale=speed_scale if engine_label == "voicevox" else 1.0,
+        pitch_accent=pitch_accent if engine_label == "voicevox" else None,
         ext=ext,
     )
     stored = anki_request(
@@ -306,6 +312,7 @@ def main() -> None:
         reading_audio = value(FIELD_READING_AUDIO) if has_reading_audio else ""
         expression = value(FIELD_EXPRESSION)
         reading = value(FIELD_READING)
+        pitch_positions = value(FIELD_PITCH_POSITIONS)
 
         did_sentence = False
         if not args.surface_only and not _logic.uses_native_sentence_clip(model_name):
@@ -383,22 +390,30 @@ def main() -> None:
                 tts_surface = surface or reading_text
                 if not tts_surface:
                     surface_skipped += 1
-                elif store_field_audio(
-                    base_url=args.anki_connect,
-                    note_id=nid,
-                    note_type_name=model_name,
-                    field_name=FIELD_AUDIO,
-                    tts_text=tts_surface,
-                    config=config,
-                    speed_scale=config.voicevox_speed_scale,
-                    force=args.force or (
-                        # Candidate Audio held Reading TTS before ReadingAudio existed.
-                        model_name == SHADOWING_CANDIDATE_NOTE_TYPE and args.surface_only
-                    ),
-                ):
-                    surface_ok += 1
                 else:
-                    surface_failed += 1
+                    # Dictionary pitch maps cleanly to lemma/reading TTS, not conjugations.
+                    surface_pitch = (
+                        pitch_positions
+                        if tts_surface in {(reading_text or "").strip(), (expression or "").strip()}
+                        else ""
+                    )
+                    if store_field_audio(
+                        base_url=args.anki_connect,
+                        note_id=nid,
+                        note_type_name=model_name,
+                        field_name=FIELD_AUDIO,
+                        tts_text=tts_surface,
+                        config=config,
+                        speed_scale=config.voicevox_speed_scale,
+                        force=args.force or (
+                            # Candidate Audio held Reading TTS before ReadingAudio existed.
+                            model_name == SHADOWING_CANDIDATE_NOTE_TYPE and args.surface_only
+                        ),
+                        pitch_positions=surface_pitch,
+                    ):
+                        surface_ok += 1
+                    else:
+                        surface_failed += 1
             elif has_audio:
                 surface_skipped += 1
 
@@ -418,6 +433,7 @@ def main() -> None:
                     config=config,
                     speed_scale=config.voicevox_speed_scale,
                     force=args.force,
+                    pitch_positions=pitch_positions,
                 ):
                     reading_ok += 1
                 else:

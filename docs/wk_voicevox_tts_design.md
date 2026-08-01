@@ -1,7 +1,7 @@
 # VOICEVOX TTS for immersion cards — design plan (deferred)
 
-**Status:** Planned — note type reserved (template v5+); synthesis tooling not built  
-**Last updated:** 2026-07-04  
+**Status:** Partial — immersion Target/Reading TTS can override VOICEVOX accent from Kanjium `PitchPositions`; full-sentence accent alignment still deferred  
+**Last updated:** 2026-07-30  
 **Scope v1:** Migaku immersion deck (`WK Migaku Immersion`); extend to grammar cloze later if useful
 
 > **Prerequisite:** [Migaku immersion mining](migaku_mining.md) deck imported.
@@ -14,8 +14,21 @@
 |------|-----|
 | High-quality Japanese sentence audio | Local [VOICEVOX](https://voicevox.hiroshiba.jp/) engine (`http://127.0.0.1:50021`) |
 | Cards ready before tooling exists | **VoicevoxAudio** + **VoicevoxSpeakerId** fields; template prefers VOICEVOX over mined/TTS |
-| Optional Kanjium pitch alignment | Future: map **PitchPositions** → VOICEVOX `accent_phrases` before `/synthesis` |
+| Optional Kanjium pitch alignment | **Word-level done** (Target/Reading). **Sentence-level still open** — see Phase 3 revisit |
 | No breakage today | Empty **VoicevoxAudio** → existing **Audio** (Yomitan) → Anki `{{tts}}` fallback |
+
+## Revisit — sentence accents (~mid-August 2026)
+
+**Reminder (set 2026-07-30):** around **2026-08-13**, pick up multi-word **Sentence** / Easy/Normal TTS pitch.
+
+Word TTS already overrides `accent_phrases[].accent` from note `PitchPositions`. What’s left:
+
+1. Map the mined word’s Kanjium position onto the matching phrase inside a multi-phrase `/audio_query` for the full sentence.
+2. Decide fallback when the surface is conjugated or the word spans multiple VOICEVOX phrases.
+3. Wire through `synthesize_immersion_sentence_audio.py` (not only `--surface-only`).
+4. Document limits when alignment fails (keep VOICEVOX default).
+
+Tracker: Phase 3 checkbox “Handle multi-word **Sentence** audio” below.
 
 ## Non-goals (v1)
 
@@ -71,12 +84,11 @@
 
 ### Phase 3 — Kanjium pitch → VOICEVOX accent phrases (research)
 
-- [ ] Parse **PitchPositions** + **Reading** for target mora  
-- [ ] `POST /accent_phrases` → edit `accent` on matching **AccentPhrase** → `/synthesis`  
-- [ ] Handle multi-word sentences (one mined word vs full sentence accent)  
-- [ ] Fallback to VOICEVOX default accent when Kanjium missing  
+- [x] Parse **PitchPositions** + apply to Target / Reading word TTS via `accent_phrases[].accent`
+- [ ] Handle multi-word **Sentence** audio (align word pitch inside multi-phrase queries)
+- [x] Fallback to VOICEVOX default accent when Kanjium / PitchPositions missing  
 
-**Exit:** Synthesized audio matches Kanjium display for single-word mines; documented limits for full sentences.
+**Exit (word-level):** ReadingAudio (and lemma Target) follow Kanjium; conjugated surface Target keeps VOICEVOX default.
 
 ---
 

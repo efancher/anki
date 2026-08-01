@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -42,6 +43,8 @@ unwrap_sound_tag = _logic.unwrap_sound_tag
 uses_native_sentence_clip = _logic.uses_native_sentence_clip
 synthesize_sentence_audio = _logic.synthesize_sentence_audio
 synthesize_voicevox_wav = _logic.synthesize_voicevox_wav
+parse_primary_pitch_position = _logic.parse_primary_pitch_position
+apply_voicevox_accent_phrases = _logic.apply_voicevox_accent_phrases
 
 
 class ImmersionTtsLogicTests(unittest.TestCase):
@@ -322,6 +325,26 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             self.assertEqual(audio, b"RIFF-NEW")
             self.assertEqual(cache_path.read_bytes(), b"RIFF-NEW")
 
+    def test_parse_primary_pitch_position(self) -> None:
+        self.assertEqual(parse_primary_pitch_position("2"), 2)
+        self.assertEqual(parse_primary_pitch_position("1, 0"), 1)
+        self.assertIsNone(parse_primary_pitch_position(""))
+
+    def test_apply_voicevox_accent_phrases(self) -> None:
+        query = {
+            "accent_phrases": [
+                {
+                    "moras": [{"text": "ハ"}, {"text": "ジ"}, {"text": "メ"}, {"text": "ル"}],
+                    "accent": 4,
+                }
+            ]
+        }
+        updated = apply_voicevox_accent_phrases(query, pitch_accent=0)
+        self.assertEqual(updated["accent_phrases"][0]["accent"], 0)
+        # Odaka clamps to mora count.
+        updated_odaka = apply_voicevox_accent_phrases(query, pitch_accent=9)
+        self.assertEqual(updated_odaka["accent_phrases"][0]["accent"], 4)
+
     def test_synthesize_voicevox_wav(self) -> None:
         import unittest.mock
 
@@ -332,13 +355,27 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             mock_resp.__exit__ = unittest.mock.Mock(return_value=False)
             return mock_resp
 
+        query = {
+            "accent_phrases": [
+                {"moras": [{"text": "ア"}, {"text": "オ"}, {"text": "イ"}], "accent": 1}
+            ]
+        }
         responses = [
-            _response(b'{"accent_phrases":[]}'),
+            _response(json.dumps(query).encode()),
             _response(b"RIFF"),
         ]
-        with unittest.mock.patch.object(_logic.urllib.request, "urlopen", side_effect=responses):
-            wav = synthesize_voicevox_wav("頭が痛い。", engine_url="http://127.0.0.1:50021", speaker_id=3)
+        with unittest.mock.patch.object(_logic.urllib.request, "urlopen", side_effect=responses) as urlopen:
+            wav = synthesize_voicevox_wav(
+                "あおい",
+                engine_url="http://127.0.0.1:50021",
+                speaker_id=3,
+                pitch_accent=2,
+            )
         self.assertEqual(wav, b"RIFF")
+        # Second call is synthesis; body should carry overridden accent.
+        synth_req = urlopen.call_args_list[1][0][0]
+        body = json.loads(synth_req.data.decode("utf-8"))
+        self.assertEqual(body["accent_phrases"][0]["accent"], 2)
 
 
 if __name__ == "__main__":

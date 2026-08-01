@@ -36,6 +36,12 @@ SATORI_AUDIO_PRESERVE_FIELDS: Tuple[str, ...] = (
     "VoicevoxAudio",
     "VoicevoxSpeakerId",
 )
+# Keep previously backfilled pitch when a later CSV row has no dictionary hit.
+SATORI_PITCH_PRESERVE_IF_EMPTY_FIELDS: Tuple[str, ...] = (
+    "PitchAccents",
+    "PitchPositions",
+    "PitchGraphs",
+)
 
 
 @dataclass
@@ -80,12 +86,17 @@ def merge_satori_fields_for_update(
     new_fields: Mapping[str, str],
     existing_fields: Mapping[str, str],
 ) -> Dict[str, str]:
-    """Prefer new content, but keep non-empty live audio fields."""
+    """Prefer new content, but keep non-empty live audio / pitch when new is blank."""
     merged = dict(new_fields)
     for name in SATORI_AUDIO_PRESERVE_FIELDS:
         old = (existing_fields.get(name) or "").strip()
         if old:
             merged[name] = existing_fields[name]
+    for name in SATORI_PITCH_PRESERVE_IF_EMPTY_FIELDS:
+        if not (merged.get(name) or "").strip():
+            old = (existing_fields.get(name) or "").strip()
+            if old:
+                merged[name] = existing_fields[name]
     return merged
 
 
@@ -251,6 +262,7 @@ def import_satori_cards_to_anki(
     *,
     base_url: str = DEFAULT_ANKI_CONNECT,
     wk_index: Optional[dict] = None,
+    pitch_index: Optional[dict] = None,
     deck_name: str = SATORI_DECK_NAME,
     model_name: str = SATORI_NOTE_TYPE_NAME,
     dry_run: bool = False,
@@ -272,7 +284,9 @@ def import_satori_cards_to_anki(
             continue
 
         wk_entry = by_expression.get(card.expression)
-        desired_all = satori_note_field_map(card, wk_entry=wk_entry)
+        desired_all = satori_note_field_map(
+            card, wk_entry=wk_entry, pitch_index=pitch_index
+        )
         desired = {name: desired_all[name] for name in desired_all if name in model_field_set}
         tags = satori_note_tags(card)
 

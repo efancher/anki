@@ -40,6 +40,10 @@ from satori_live_import import (  # noqa: E402
     format_live_import_summary,
     import_satori_cards_to_anki,
 )
+from immersion_pitch import (  # noqa: E402
+    load_immersion_pitch_index,
+    resolve_pitch_dict_path,
+)
 
 
 def load_wk_index(path: Path) -> dict | None:
@@ -101,6 +105,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="With live import: report adds/updates without writing",
     )
+    parser.add_argument(
+        "--pitch-dict",
+        type=Path,
+        default=None,
+        help="Yomitan pitch dict zip/folder (default: auto-detect Kanjium in Downloads)",
+    )
+    parser.add_argument(
+        "--no-pitch",
+        action="store_true",
+        help="Skip pitch accent lookup",
+    )
     args = parser.parse_args(argv)
 
     if args.apkg_only and args.dry_run:
@@ -149,6 +164,20 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     wk_index = load_wk_index(args.wk_index.expanduser().resolve())
+    pitch_index = None
+    if not args.no_pitch:
+        pitch_path = resolve_pitch_dict_path(
+            args.pitch_dict.expanduser().resolve() if args.pitch_dict else None
+        )
+        if pitch_path is None:
+            print(
+                "Pitch dict not found (set --pitch-dict or WK_PITCH_DICT); "
+                "continuing without pitch.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"Loading pitch dictionary: {pitch_path}")
+            pitch_index = load_immersion_pitch_index(pitch_path)
     wrote_apkg = False
     live_ok = False
 
@@ -164,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             cards,
             base_url=args.anki_connect,
             wk_index=wk_index,
+            pitch_index=pitch_index,
             dry_run=bool(args.dry_run),
         )
         live_ok = True
@@ -177,7 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     if args.apkg_only or args.apkg:
-        apkg_path, deck = build_satori_deck(cards, output_dir, wk_index=wk_index)
+        apkg_path, deck = build_satori_deck(
+            cards, output_dir, wk_index=wk_index, pitch_index=pitch_index
+        )
         if output_path != apkg_path:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             apkg_path.replace(output_path)

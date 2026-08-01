@@ -41,6 +41,7 @@ from wk_decks import (
     versioned_css,
     write_apkg,
 )
+from immersion_pitch import pitch_field_values
 
 REPO_ROOT = Path(__file__).resolve().parent
 IMMERSION_LOGIC = REPO_ROOT / "anki_addon" / "wk_immersion"
@@ -884,6 +885,10 @@ SATORI_BACK = """
   {{^Furigana}}{{Expression}}{{#Reading}} <span class="reading answer">{{Reading}}</span>{{/Reading}}{{/Furigana}}
 </div>
 {{#WkMeaning}}<div class="meaning answer">{{WkMeaning}}</div>{{/WkMeaning}}
+{{#PitchAccents}}
+<div class="pitch"><b>Pitch:</b> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>
+{{/PitchAccents}}
+{{#PitchGraphs}}<div class="pitch-graphs">{{PitchGraphs}}</div>{{/PitchGraphs}}
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
@@ -967,6 +972,14 @@ SATORI_CSS = """
 }
 .hint-block { margin: 12px auto; max-width: 640px; font-size: 20px; line-height: 1.5; }
 .hint-meaning { color: #c8e6c9; margin-bottom: 6px; }
+.pitch { margin: 8px auto; max-width: 640px; font-size: 18px; color: #ffe0b2; }
+.pitch-pos { color: #b0bec5; font-size: 15px; }
+.pitch-graphs { margin: 8px auto; max-width: 760px; }
+.pitch-graph { display: inline-flex; gap: 2px; margin-right: 10px; vertical-align: middle; }
+.pitch-mora { display: inline-block; min-width: 1.1em; text-align: center; font-size: 20px; line-height: 1.2; padding: 2px 3px; border-radius: 3px; }
+.pitch-mora.h { background: #37474f; color: #fff; border-bottom: 3px solid #ffcc80; }
+.pitch-mora.l { background: transparent; color: #cfd8dc; border-bottom: 3px solid #546e7a; }
+.pitch-mora.drop { box-shadow: inset 0 -2px 0 #ef5350; }
 .type-prompt { margin: 18px auto; max-width: 520px; font-size: 28px; }
 .answer-word { font-size: 36px; margin: 12px auto; line-height: 1.8; }
 .answer-word ruby rt { font-size: 14px; color: #d8d8d8; }
@@ -1131,7 +1144,12 @@ def parse_satori_csv(
     return cards
 
 
-def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> List[str]:
+def satori_note_fields(
+    card: SatoriCard,
+    *,
+    wk_entry: Optional[dict] = None,
+    pitch_index: Optional[dict] = None,
+) -> List[str]:
     cloze_html, plain_sentence = build_satori_cloze_sentence(
         card.sentence, card.expression, card.reading
     )
@@ -1159,12 +1177,18 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
     sentence_furigana = (card.sentence_furigana or "").strip()
     # Hide the Jisho chip when a word gloss is already on the front.
     dict_links_en = "" if wk_meaning else enrichment.dict_links_en
+    pitch_fields = pitch_field_values(
+        enrichment.expression,
+        enrichment.reading or card.reading,
+        pitch_index,
+    )
     raw_html_fields = {
         "ClozeSentence",
         "DictLinksJa",
         "DictLinksEn",
         "SentenceFurigana",
         "Furigana",
+        "PitchGraphs",
     }
     values = {
         "DuplicateKey": duplicate_key,
@@ -1172,9 +1196,9 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
         "Reading": enrichment.reading or card.reading,
         "Translation": translation,
         "Furigana": expression_furigana,
-        "PitchAccents": "",
-        "PitchPositions": "",
-        "PitchGraphs": "",
+        "PitchAccents": pitch_fields["PitchAccents"],
+        "PitchPositions": pitch_fields["PitchPositions"],
+        "PitchGraphs": pitch_fields["PitchGraphs"],
         "Glossary": glossary,
         "Synonyms": "",
         "Antonyms": "",
@@ -1215,9 +1239,19 @@ def satori_note_fields(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> 
     return fields
 
 
-def satori_note_field_map(card: SatoriCard, *, wk_entry: Optional[dict] = None) -> Dict[str, str]:
+def satori_note_field_map(
+    card: SatoriCard,
+    *,
+    wk_entry: Optional[dict] = None,
+    pitch_index: Optional[dict] = None,
+) -> Dict[str, str]:
     """Field name → value map for AnkiConnect add/update."""
-    return dict(zip(SATORI_FIELD_NAMES, satori_note_fields(card, wk_entry=wk_entry)))
+    return dict(
+        zip(
+            SATORI_FIELD_NAMES,
+            satori_note_fields(card, wk_entry=wk_entry, pitch_index=pitch_index),
+        )
+    )
 
 
 def satori_note_tags(card: SatoriCard) -> List[str]:
@@ -1229,6 +1263,7 @@ def build_satori_deck(
     output_dir: Path,
     *,
     wk_index: Optional[dict] = None,
+    pitch_index: Optional[dict] = None,
 ) -> Tuple[Path, genanki.Deck]:
     deck = genanki.Deck(SATORI_DECK_ID, SATORI_DECK_NAME)
     model = make_satori_model()
@@ -1243,7 +1278,9 @@ def build_satori_deck(
         guid = stable_guid(SATORI_KIND, card.card_id)
         note = genanki.Note(
             model=model,
-            fields=satori_note_fields(card, wk_entry=wk_entry),
+            fields=satori_note_fields(
+                card, wk_entry=wk_entry, pitch_index=pitch_index
+            ),
             tags=["immersion", SATORI_TAG, f"satori-{card.card_type.lower()}"],
             guid=guid,
         )

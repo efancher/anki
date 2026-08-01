@@ -34,6 +34,7 @@ from shadowing_match import (
     reading_for_surface_in_sentence,
 )
 from satori_decks import build_satori_cloze_sentence, should_skip_copula_cloze
+from immersion_pitch import pitch_field_values
 from wk_decks import (
     COMMON_CSS,
     DECK_IDS,
@@ -179,6 +180,10 @@ SHADOWING_BACK = """
   {{^Furigana}}{{Expression}}{{#Reading}} <span class="reading answer">{{Reading}}</span>{{/Reading}}{{/Furigana}}
 </div>
 {{#WkMeaning}}<div class="meaning answer">{{WkMeaning}}</div>{{/WkMeaning}}
+{{#PitchAccents}}
+<div class="pitch"><b>Pitch:</b> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>
+{{/PitchAccents}}
+{{#PitchGraphs}}<div class="pitch-graphs">{{PitchGraphs}}</div>{{/PitchGraphs}}
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
@@ -299,6 +304,14 @@ SHADOWING_CSS = """
 }
 .hint-block { margin: 12px auto; max-width: 640px; font-size: 20px; line-height: 1.5; }
 .hint-meaning { color: #c8e6c9; margin-bottom: 6px; }
+.pitch { margin: 8px auto; max-width: 640px; font-size: 18px; color: #ffe0b2; }
+.pitch-pos { color: #b0bec5; font-size: 15px; }
+.pitch-graphs { margin: 8px auto; max-width: 760px; }
+.pitch-graph { display: inline-flex; gap: 2px; margin-right: 10px; vertical-align: middle; }
+.pitch-mora { display: inline-block; min-width: 1.1em; text-align: center; font-size: 20px; line-height: 1.2; padding: 2px 3px; border-radius: 3px; }
+.pitch-mora.h { background: #37474f; color: #fff; border-bottom: 3px solid #ffcc80; }
+.pitch-mora.l { background: transparent; color: #cfd8dc; border-bottom: 3px solid #546e7a; }
+.pitch-mora.drop { box-shadow: inset 0 -2px 0 #ef5350; }
 .type-prompt { margin: 18px auto; max-width: 520px; font-size: 28px; }
 .answer-word { font-size: 36px; margin: 12px auto; line-height: 1.8; }
 .answer-word ruby rt { font-size: 14px; color: #d8d8d8; }
@@ -756,6 +769,7 @@ def shadowing_note_fields(
     audio_filename: str,
     transcript_tag: str,
     surface: str = "",
+    pitch_index: Optional[dict] = None,
 ) -> List[str]:
     cloze_html, plain_sentence = build_satori_cloze_sentence(
         sentence.japanese, expression, reading, surface=surface
@@ -779,12 +793,18 @@ def shadowing_note_fields(
         f"template {SHADOWING_TEMPLATE_VERSION}"
     )
     sound = f"[sound:{audio_filename}]" if audio_filename else ""
+    pitch_fields = pitch_field_values(
+        enrichment.expression,
+        enrichment.reading or reading,
+        pitch_index,
+    )
     raw_html_fields = {
         "ClozeSentence",
         "DictLinksJa",
         "DictLinksEn",
         "SentenceFurigana",
         "Furigana",
+        "PitchGraphs",
     }
     values = {
         "DuplicateKey": duplicate_key,
@@ -792,9 +812,9 @@ def shadowing_note_fields(
         "Reading": enrichment.reading or reading,
         "Translation": sentence.english,
         "Furigana": "",
-        "PitchAccents": "",
-        "PitchPositions": "",
-        "PitchGraphs": "",
+        "PitchAccents": pitch_fields["PitchAccents"],
+        "PitchPositions": pitch_fields["PitchPositions"],
+        "PitchGraphs": pitch_fields["PitchGraphs"],
         "Glossary": transcript_tag,
         "Synonyms": "",
         "Antonyms": "",
@@ -903,6 +923,7 @@ def build_shadowing_decks(
     *,
     wk_index: Optional[dict] = None,
     include_auto_caption: bool = True,
+    pitch_index: Optional[dict] = None,
 ) -> Tuple[Path, Path, ShadowingBuildStats]:
     """Build WK cloze + candidate APKGs. Returns (wk_path, candidate_path, stats)."""
     index = wk_index or {}
@@ -979,6 +1000,7 @@ def build_shadowing_decks(
                             audio_filename=audio_name,
                             transcript_tag=sentence.transcript_status,
                             surface=selection.surface,
+                            pitch_index=pitch_index,
                         ),
                         tags=_trust_tags(sentence) + ["shadowing-curated"],
                         guid=guid,
@@ -1060,6 +1082,7 @@ def build_shadowing_decks(
                     audio_filename=audio_name,
                     transcript_tag=sentence.transcript_status,
                     surface=match.surface,
+                    pitch_index=pitch_index,
                 ),
                 tags=_trust_tags(sentence),
                 guid=guid,

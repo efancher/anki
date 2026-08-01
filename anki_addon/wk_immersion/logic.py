@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 try:
     from .mining_note_types import MINING_NOTE_TYPE, is_mining_note_type
@@ -197,10 +197,13 @@ def sentence_media_basename(
     speaker_id: int,
     volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
     speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
+    pitch_accent: Optional[int] = None,
     ext: str,
 ) -> str:
+    pitch_token = "" if pitch_accent is None else str(int(pitch_accent))
     raw = (
-        f"{engine}\0{speaker_id}\0{volume_scale:g}\0{speed_scale:g}\0{text}".encode("utf-8")
+        f"{engine}\0{speaker_id}\0{volume_scale:g}\0{speed_scale:g}\0"
+        f"{pitch_token}\0{text}".encode("utf-8")
     )
     digest = hashlib.sha256(raw).hexdigest()[:24]
     return f"{SENTENCE_AUDIO_FILENAME_PREFIX}{digest}{ext}"
@@ -228,6 +231,7 @@ def immersion_audio_cache_path(
     speed_scale: float,
     ext: str,
     cache_dir: Path,
+    pitch_accent: Optional[int] = None,
 ) -> Path:
     return cache_dir / sentence_media_basename(
         text,
@@ -235,12 +239,68 @@ def immersion_audio_cache_path(
         speaker_id=speaker_id,
         volume_scale=volume_scale,
         speed_scale=speed_scale,
+        pitch_accent=pitch_accent,
         ext=ext,
     )
 
 
 def audio_cache_is_usable(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
+
+
+def parse_primary_pitch_position(pitch_positions_field: str) -> Optional[int]:
+    """First Kanjium pitch position from a PitchPositions field (e.g. ``2`` or ``1, 0``)."""
+    text = (pitch_positions_field or "").strip()
+    if not text:
+        return None
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            return int(part)
+        except ValueError:
+            continue
+    return None
+
+
+def apply_voicevox_accent_phrases(
+    audio_query: dict,
+    *,
+    pitch_accent: Optional[int],
+) -> dict:
+    """Override VOICEVOX accent on the first usable accent phrase (word-level TTS).
+
+    Kanjium ``position`` matches VOICEVOX ``accent`` (0 = heiban; N = drop after mora N).
+    Multi-phrase sentence queries are left alone except the first phrase — prefer
+    calling this only for Target/Reading (single-word) synthesis.
+    """
+    if pitch_accent is None:
+        return audio_query
+    try:
+        desired = int(pitch_accent)
+    except (TypeError, ValueError):
+        return audio_query
+    updated = dict(audio_query)
+    phrases = updated.get("accent_phrases")
+    if not isinstance(phrases, list) or not phrases:
+        return updated
+    new_phrases: List[dict] = []
+    applied = False
+    for phrase in phrases:
+        if not isinstance(phrase, dict):
+            new_phrases.append(phrase)
+            continue
+        phrase_copy = dict(phrase)
+        moras = phrase_copy.get("moras") or []
+        mora_count = len(moras) if isinstance(moras, list) else 0
+        if not applied and mora_count > 0:
+            # VOICEVOX accepts 0..mora_count (odaka == mora_count).
+            phrase_copy["accent"] = max(0, min(desired, mora_count))
+            applied = True
+        new_phrases.append(phrase_copy)
+    updated["accent_phrases"] = new_phrases
+    return updated
 
 
 def apply_voicevox_query_scales(
@@ -269,6 +329,7 @@ def synthesize_voicevox_wav(
     speaker_id: int,
     volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
     speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
+    pitch_accent: Optional[int] = None,
     timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
     if not text.strip():
@@ -285,6 +346,9 @@ def synthesize_voicevox_wav(
                 json.loads(resp.read().decode("utf-8")),
                 volume_scale=volume_scale,
                 speed_scale=speed_scale,
+            )
+            audio_query = apply_voicevox_accent_phrases(
+                audio_query, pitch_accent=pitch_accent
             )
         synth_url = f"{base}/synthesis?{urllib.parse.urlencode({'speaker': str(speaker_id)})}"
         body = json.dumps(audio_query).encode("utf-8")
@@ -334,11 +398,13 @@ def synthesize_sentence_audio(
     speed_scale: Optional[float] = None,
     force: bool = False,
     cache_dir: Optional[Path] = None,
+    pitch_accent: Optional[int] = None,
 ) -> Tuple[Optional[bytes], str, str]:
     """
     Return (audio_bytes, media_ext_including_dot, engine_label).
     engine_label is voicevox or edge.
     speed_scale overrides config.voicevox_speed_scale for VOICEVOX only.
+    pitch_accent (Kanjium position) overrides VOICEVOX accent on word-level TTS.
     When cache_enabled, reads/writes .wk_cache/immersion_sentence_audio (or config.cache_dir).
     force=True regenerates even when a cache file exists.
     """
@@ -370,6 +436,7 @@ def synthesize_sentence_audio(
                     speaker_id=config.voicevox_speaker_id,
                     volume_scale=config.voicevox_volume_scale,
                     speed_scale=voicevox_speed,
+                    pitch_accent=pitch_accent,
                     ext=".wav",
                     cache_dir=resolved_cache,
                 )
@@ -382,6 +449,7 @@ def synthesize_sentence_audio(
                 speaker_id=config.voicevox_speaker_id,
                 volume_scale=config.voicevox_volume_scale,
                 speed_scale=voicevox_speed,
+                pitch_accent=pitch_accent,
             )
             if wav:
                 if cache_path is not None:
@@ -396,6 +464,7 @@ def synthesize_sentence_audio(
                 engine="edge",
                 speaker_id=0,
                 speed_scale=voicevox_speed,
+                pitch_accent=None,
                 ext=".mp3",
             )
             cache_path = None

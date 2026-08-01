@@ -53,6 +53,15 @@ cd /path/to/anki
 python3 scripts/import_shadowing.py ~/Downloads/VIDEO.mining.zip
 ```
 
+Pitch accents (`PitchAccents` / graphs) are filled from Kanjium when available (auto-detect
+`~/Downloads/kanjium_pitch_accents.zip`, or `--pitch-dict` / `WK_PITCH_DICT`). **WK Shadowing
+Immersion** cards get pitch; candidate cards do not. To backfill existing notes:
+
+```bash
+python3 scripts/backfill_immersion_pitch_ankiconnect.py
+python3 scripts/push_satori_template_ankiconnect.py --model "WK Shadowing Immersion"
+```
+
 ### Legacy: build from a project directory (automatic matching)
 
 Use the **shadowing CLI venv** so morphology matching works:
@@ -204,6 +213,7 @@ Legacy single-key `immersion_tag` still works if `immersion_tags` is omitted.
 | Sentence plays Voicevox, not the video clip | `python3 scripts/restore_shadowing_native_audio.py` |
 | WK cloze shows no blank/highlight | `push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Immersion"` |
 | Still no blank/highlight after that | The lemma is not in the sentence at all — a bad WK match (担ぐ/任す pulled out of 担任, 息/音 out of a sentence with neither). Delete the note; it is not a cloze bug |
+| Answer belongs to a different word than the sentence (`え、同い年じゃないですか?` answered `２０１１年`) | Legacy kanji-stem mis-match. Audit and remove: `python3 scripts/audit_shadowing_wk_matches_ankiconnect.py` (add `--delete`), then live-add corrected notes: `python3 scripts/live_import_shadowing_ankiconnect.py ~/shadowing/cli/projects/VIDEO_ID` (or rebuild `.apkg` and import without updating existing notes) |
 | Core new queue ignores shadowing vocab | Confirm `shadowing-mining` tag + **WK Adjust New Limits**; check `immersion_tags` in adaptive-new config |
 | `fugashi ok` fails | Use `~/shadowing/cli/.venv/bin/python`, or `pip install fugashi unidic-lite` into the env you run imports with |
 

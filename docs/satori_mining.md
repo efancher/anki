@@ -145,7 +145,28 @@ Legacy Satori-only builder still works:
 python3 scripts/import_satori.py /path/to/satori_export.csv --conjugations
 ```
 
-## Gloss worksheet (Cure Dolly–style mapping practice)
+## Pitch accent (Satori / Shadowing)
+
+Immersion notes include `PitchAccents` / `PitchPositions` / `PitchGraphs`. Yomitan mining
+fills these when Kanjium is installed in Yomitan. **Satori CSV** and **Shadowing** imports
+fill them from the same Kanjium zip (auto-detected under `~/Downloads/kanjium_pitch_accents.zip`,
+or pass `--pitch-dict` / set `WK_PITCH_DICT`).
+
+Backfill existing notes (Anki open):
+
+```bash
+python3 scripts/backfill_immersion_pitch_ankiconnect.py
+python3 scripts/push_satori_template_ankiconnect.py
+python3 scripts/push_satori_template_ankiconnect.py --model "WK Shadowing Immersion"
+```
+
+**VOICEVOX:** Target/Reading TTS uses `PitchPositions` when present (dictionary form). Regenerate with:
+
+```bash
+python3 scripts/synthesize_immersion_sentence_audio.py --surface-only --force
+```
+
+Full-sentence Easy/Normal audio still uses VOICEVOX’s default accent (multi-word alignment is harder).
 
 Not an Anki card — a practice sheet so you map **Japanese order → sticky English** before looking at fluent English. CHUNK / ROLE / LIT are blanks; Satori’s translation stays on the EN line. Duplicate sentences (same JP mined for different target words) are collapsed.
 
