@@ -291,9 +291,9 @@ MODEL_TEMPLATE_VERSIONS = {
     "kanji_meaning": "v3",
     "vocab_sentence_meaning": "v1",
     "vocab_sentence_reading": "v1",
-    "satori": "v18",
-    "shadowing": "v9",
-    "shadowing_candidate": "v11",
+    "satori": "v19",
+    "shadowing": "v10",
+    "shadowing_candidate": "v12",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 

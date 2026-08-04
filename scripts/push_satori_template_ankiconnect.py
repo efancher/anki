@@ -163,11 +163,12 @@ def ensure_audio_fields(base_url: str, model_name: str) -> None:
             "SentenceAudioEasy",
             "Audio",
             "ReadingAudio",
+            "SentencePitchGraphs",
         )
     elif model_name == SHADOWING_NOTE_TYPE_NAME:
-        wanted = ("Audio", "ReadingAudio")
+        wanted = ("Audio", "ReadingAudio", "SentencePitchGraphs")
     elif model_name == SHADOWING_CANDIDATE_NOTE_TYPE_NAME:
-        wanted = ("Audio", "ReadingAudio")
+        wanted = ("Audio", "ReadingAudio", "SentencePitchGraphs")
     else:
         return
     for name in wanted:

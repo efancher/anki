@@ -86,7 +86,7 @@ Sentence / Easy TTS passes `PitchPositions` plus the note `Reading`. The synthes
 
 **Exit (word-level):** ReadingAudio (and lemma Target) follow Kanjium; conjugated surface Target keeps VOICEVOX default.
 
-**Exit (sentence-level):** SentenceAudio / Easy override the phrase matching `Reading` when possible; otherwise VOICEVOX default.
+**Exit (sentence-level):** SentenceAudio / Easy override the phrase matching `Reading` when possible; otherwise VOICEVOX default. Card backs show **SentencePitchGraphs** (mora charts from the same post-override `accent_phrases`) under the word pitch chart.
 ---
 
 ## VOICEVOX API sketch (phase 1)

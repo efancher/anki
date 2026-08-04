@@ -46,6 +46,7 @@ class MiningDeckTests(unittest.TestCase):
             "PitchAccents",
             "PitchPositions",
             "PitchGraphs",
+            "SentencePitchGraphs",
             "Audio",
         ):
             self.assertIn(name, fields)
@@ -82,6 +83,7 @@ class MiningDeckTests(unittest.TestCase):
         self.assertIn("{{SentenceAudio}}", shadow["qfmt"])
         self.assertIn("{{PitchAccents}}", shadow["afmt"])
         self.assertIn("{{PitchGraphs}}", shadow["afmt"])
+        self.assertIn("{{SentencePitchGraphs}}", shadow["afmt"])
         self.assertIn("{{SentenceKana}}", shadow["afmt"])
 
     def test_back_shows_image_and_audio(self) -> None:

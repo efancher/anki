@@ -30,6 +30,7 @@ FIELD_READING_AUDIO = "ReadingAudio"
 FIELD_EXPRESSION = "Expression"
 FIELD_READING = "Reading"
 FIELD_PITCH_POSITIONS = "PitchPositions"
+FIELD_SENTENCE_PITCH_GRAPHS = "SentencePitchGraphs"
 FIELD_SPEAKER = "VoicevoxSpeakerId"
 
 DEFAULT_VOICEVOX_ENGINE_URL = "http://127.0.0.1:50021"
@@ -287,6 +288,19 @@ def hiragana_to_katakana(text: str) -> str:
     return "".join(out)
 
 
+def katakana_to_hiragana(text: str) -> str:
+    out: List[str] = []
+    for ch in text or "":
+        code = ord(ch)
+        if 0x30A1 <= code <= 0x30F6:
+            out.append(chr(code - 0x60))
+        elif ch == "ヴ":
+            out.append("ゔ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def split_kana_morae(reading: str) -> List[str]:
     """Split kana into mora strings (ゃ/ゅ/ょ attach); output is katakana."""
     text = hiragana_to_katakana((reading or "").strip())
@@ -426,6 +440,78 @@ def apply_voicevox_accent_phrases(
     return updated
 
 
+def pitch_pattern_label(position: int, mora_count: int) -> str:
+    if position <= 0:
+        return "平板"
+    if position == 1:
+        return "頭高"
+    if mora_count > 0 and position >= mora_count:
+        return "尾高"
+    return "中高"
+
+
+def pitch_graph_html(morae: Sequence[str], position: int) -> str:
+    """Compact high/low mora graph (same markup as immersion PitchGraphs)."""
+    if not morae:
+        return ""
+    count = len(morae)
+    if position <= 0:
+        classes = ["l"] + ["h"] * (count - 1) if count > 1 else ["h"]
+    elif position == 1:
+        classes = ["h"] + ["l"] * (count - 1)
+    else:
+        drop_after = min(position, count)
+        classes = []
+        for index in range(count):
+            mora_number = index + 1
+            if mora_number == 1:
+                classes.append("l")
+            elif mora_number <= drop_after:
+                classes.append("h")
+            else:
+                classes.append("l")
+    spans: List[str] = []
+    for index, mora in enumerate(morae):
+        css = classes[index]
+        drop = " drop" if position > 0 and index + 1 == position and index + 1 < count else ""
+        if position > 0 and index + 1 == count and position >= count:
+            drop = " drop"
+        spans.append(f'<span class="pitch-mora {css}{drop}">{mora}</span>')
+    label = pitch_pattern_label(position, count)
+    return (
+        f'<span class="pitch-graph" title="{label} ({position})">'
+        f'{"".join(spans)}</span>'
+    )
+
+
+def sentence_pitch_graphs_html(accent_phrases: Sequence[dict]) -> str:
+    """Sentence pitch chart HTML from VOICEVOX accent_phrases (hiragana morae)."""
+    parts: List[str] = []
+    for phrase in accent_phrases:
+        if not isinstance(phrase, dict):
+            continue
+        raw_moras = phrase.get("moras") or []
+        if not isinstance(raw_moras, list):
+            continue
+        morae: List[str] = []
+        for mora in raw_moras:
+            if not isinstance(mora, dict):
+                continue
+            text = katakana_to_hiragana(str(mora.get("text") or "").strip())
+            if text:
+                morae.append(text)
+        if not morae:
+            continue
+        try:
+            position = int(phrase.get("accent") or 0)
+        except (TypeError, ValueError):
+            position = 0
+        graph = pitch_graph_html(morae, position)
+        if graph:
+            parts.append(graph)
+    return "".join(parts)
+
+
 def apply_voicevox_query_scales(
     audio_query: dict,
     *,
@@ -456,8 +542,33 @@ def synthesize_voicevox_wav(
     match_kana: str = "",
     timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
 ) -> Optional[bytes]:
+    wav, _phrases = synthesize_voicevox_with_phrases(
+        text,
+        engine_url=engine_url,
+        speaker_id=speaker_id,
+        volume_scale=volume_scale,
+        speed_scale=speed_scale,
+        pitch_accent=pitch_accent,
+        match_kana=match_kana,
+        timeout_seconds=timeout_seconds,
+    )
+    return wav
+
+
+def synthesize_voicevox_with_phrases(
+    text: str,
+    *,
+    engine_url: str,
+    speaker_id: int,
+    volume_scale: float = DEFAULT_VOICEVOX_VOLUME_SCALE,
+    speed_scale: float = DEFAULT_VOICEVOX_SPEED_SCALE,
+    pitch_accent: Optional[int] = None,
+    match_kana: str = "",
+    timeout_seconds: int = VOICEVOX_SYNTH_TIMEOUT_SECONDS,
+) -> Tuple[Optional[bytes], List[dict]]:
+    """Return ``(wav_bytes_or_None, accent_phrases_after_pitch_override)``."""
     if not text.strip():
-        return None
+        return None, []
     base = engine_url.rstrip("/")
     query_url = (
         f"{base}/audio_query?"
@@ -476,6 +587,8 @@ def synthesize_voicevox_wav(
                 pitch_accent=pitch_accent,
                 match_kana=match_kana,
             )
+        phrases = audio_query.get("accent_phrases")
+        phrase_list = list(phrases) if isinstance(phrases, list) else []
         synth_url = f"{base}/synthesis?{urllib.parse.urlencode({'speaker': str(speaker_id)})}"
         body = json.dumps(audio_query).encode("utf-8")
         req = urllib.request.Request(
@@ -486,9 +599,9 @@ def synthesize_voicevox_wav(
         )
         with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             wav = resp.read()
-        return wav if wav else None
+        return (wav if wav else None), phrase_list
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return None
+        return None, []
 
 
 def synthesize_edge_tts_mp3(
@@ -526,19 +639,14 @@ def synthesize_sentence_audio(
     cache_dir: Optional[Path] = None,
     pitch_accent: Optional[int] = None,
     match_kana: str = "",
-) -> Tuple[Optional[bytes], str, str]:
+) -> Tuple[Optional[bytes], str, str, str]:
     """
-    Return (audio_bytes, media_ext_including_dot, engine_label).
-    engine_label is voicevox or edge.
-    speed_scale overrides config.voicevox_speed_scale for VOICEVOX only.
-    pitch_accent (Kanjium position) overrides VOICEVOX accent; with match_kana,
-    the matching accent phrase inside a multi-word sentence is updated.
-    When cache_enabled, reads/writes .wk_cache/immersion_sentence_audio (or config.cache_dir).
-    force=True regenerates even when a cache file exists.
+    Return (audio_bytes, media_ext, engine_label, sentence_pitch_graphs_html).
+    engine_label is voicevox or edge. Pitch HTML is empty for edge or cache hits.
     """
     plain = sentence_plain_text(text)
     if not plain:
-        return None, "", ""
+        return None, "", "", ""
 
     engines = []
     if config.engine == "auto":
@@ -570,9 +678,9 @@ def synthesize_sentence_audio(
                     cache_dir=resolved_cache,
                 )
                 if not force and audio_cache_is_usable(cache_path):
-                    return cache_path.read_bytes(), ".wav", "voicevox"
+                    return cache_path.read_bytes(), ".wav", "voicevox", ""
 
-            wav = synthesize_voicevox_wav(
+            wav, phrases = synthesize_voicevox_with_phrases(
                 plain,
                 engine_url=config.voicevox_engine_url,
                 speaker_id=config.voicevox_speaker_id,
@@ -584,7 +692,7 @@ def synthesize_sentence_audio(
             if wav:
                 if cache_path is not None:
                     cache_path.write_bytes(wav)
-                return wav, ".wav", "voicevox"
+                return wav, ".wav", "voicevox", sentence_pitch_graphs_html(phrases)
         elif engine == "edge":
             python_exe = resolve_python_executable(config.python_executable)
             if not python_exe:
@@ -601,7 +709,7 @@ def synthesize_sentence_audio(
             if resolved_cache is not None:
                 cache_path = resolved_cache / basename
                 if not force and audio_cache_is_usable(cache_path):
-                    return cache_path.read_bytes(), ".mp3", "edge"
+                    return cache_path.read_bytes(), ".mp3", "edge", ""
 
             dest = (cache_path if cache_path is not None else temp_dir / basename)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -612,8 +720,8 @@ def synthesize_sentence_audio(
                 python_executable=python_exe,
                 script_path=edge_tts_script,
             ):
-                return dest.read_bytes(), ".mp3", "edge"
-    return None, "", ""
+                return dest.read_bytes(), ".mp3", "edge", ""
+    return None, "", "", ""
 
 
 def sound_field_value(stored_filename: str) -> str:

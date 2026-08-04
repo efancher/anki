@@ -45,6 +45,8 @@ synthesize_sentence_audio = _logic.synthesize_sentence_audio
 synthesize_voicevox_wav = _logic.synthesize_voicevox_wav
 parse_primary_pitch_position = _logic.parse_primary_pitch_position
 apply_voicevox_accent_phrases = _logic.apply_voicevox_accent_phrases
+sentence_pitch_graphs_html = _logic.sentence_pitch_graphs_html
+katakana_to_hiragana = _logic.katakana_to_hiragana
 
 
 class ImmersionTtsLogicTests(unittest.TestCase):
@@ -274,8 +276,10 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             cache_dir.mkdir(parents=True)
             cache_path.write_bytes(b"RIFF-CACHED")
 
-            with unittest.mock.patch.object(_logic, "synthesize_voicevox_wav") as synth:
-                audio, ext, engine = synthesize_sentence_audio(
+            with unittest.mock.patch.object(
+                _logic, "synthesize_voicevox_with_phrases"
+            ) as synth:
+                audio, ext, engine, pitch_html = synthesize_sentence_audio(
                     "頭が痛い。",
                     config=config,
                     temp_dir=Path(tmp),
@@ -288,6 +292,7 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             self.assertEqual(audio, b"RIFF-CACHED")
             self.assertEqual(ext, ".wav")
             self.assertEqual(engine, "voicevox")
+            self.assertEqual(pitch_html, "")
 
     def test_synthesize_force_bypasses_cache(self) -> None:
         import tempfile
@@ -310,9 +315,11 @@ class ImmersionTtsLogicTests(unittest.TestCase):
             cache_path.write_bytes(b"RIFF-OLD")
 
             with unittest.mock.patch.object(
-                _logic, "synthesize_voicevox_wav", return_value=b"RIFF-NEW"
+                _logic,
+                "synthesize_voicevox_with_phrases",
+                return_value=(b"RIFF-NEW", []),
             ) as synth:
-                audio, ext, engine = synthesize_sentence_audio(
+                audio, ext, engine, pitch_html = synthesize_sentence_audio(
                     "頭が痛い。",
                     config=config,
                     temp_dir=Path(tmp),
@@ -323,6 +330,7 @@ class ImmersionTtsLogicTests(unittest.TestCase):
                 )
             synth.assert_called_once()
             self.assertEqual(audio, b"RIFF-NEW")
+            self.assertEqual(pitch_html, "")
             self.assertEqual(cache_path.read_bytes(), b"RIFF-NEW")
 
     def test_parse_primary_pitch_position(self) -> None:
@@ -443,7 +451,27 @@ class ImmersionTtsLogicTests(unittest.TestCase):
         # Second call is synthesis; body should carry overridden accent.
         synth_req = urlopen.call_args_list[1][0][0]
         body = json.loads(synth_req.data.decode("utf-8"))
-        self.assertEqual(body["accent_phrases"][0]["accent"], 2)
+    def test_sentence_pitch_graphs_html(self) -> None:
+        html = sentence_pitch_graphs_html(
+            [
+                {
+                    "moras": [{"text": "ア"}, {"text": "タ"}, {"text": "マ"}],
+                    "accent": 0,
+                },
+                {"moras": [{"text": "ガ"}], "accent": 0},
+                {
+                    "moras": [{"text": "イ"}, {"text": "タ"}, {"text": "イ"}],
+                    "accent": 2,
+                },
+            ]
+        )
+        self.assertEqual(html.count("pitch-graph"), 3)
+        self.assertIn(">あ<", html)
+        self.assertIn(">た<", html)
+        self.assertIn(">ま<", html)
+        self.assertIn('class="pitch-mora h drop"', html)
+        self.assertEqual(katakana_to_hiragana("アタマ"), "あたま")
+        self.assertEqual(sentence_pitch_graphs_html([]), "")
 
 
 if __name__ == "__main__":

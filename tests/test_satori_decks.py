@@ -153,6 +153,8 @@ class SatoriDecksTests(unittest.TestCase):
         self.assertIn("Reading", back)
         self.assertIn("{{SentenceAudio}}", back)
         self.assertIn("{{SentenceAudioEasy}}", back)
+        self.assertIn("{{SentencePitchGraphs}}", back)
+        self.assertIn("Sentence pitch", back)
         self.assertIn("Normal", back)
         self.assertIn("Easy", back)
         self.assertIn("autoplay-audio", back)

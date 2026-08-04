@@ -802,13 +802,19 @@ def reposition_new_cards_by_priority(
         score = priority_scores.get(subject_id, UNRANKED_BASELINE_SCORE) if subject_id is not None else UNRANKED_BASELINE_SCORE
         entries.append((subject_id, score, int(card_id)))
     ordered_card_ids = sorted_new_card_ids(entries, immersion)
+    changed = 0
     for position, card_id in enumerate(ordered_card_ids, start=1):
         card = col.get_card(card_id)
         if int(card.type) != ANKI_CARD_TYPE_NEW:
             continue
+        # Skip no-ops: unconditional update_card dirties USN and makes every
+        # post-sync refresh look like thousands of modified cards.
+        if int(card.due) == position:
+            continue
         card.due = position
         col.update_card(card)
-    return len(entries)
+        changed += 1
+    return changed
 
 
 def count_available_new(col: Any, deck_name: str) -> int:

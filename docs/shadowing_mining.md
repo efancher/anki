@@ -115,6 +115,7 @@ python3 scripts/synthesize_immersion_sentence_audio.py \
 | Conjugated-only lemmas | A lemma that never appears in dictionary form is still located by conjugating it (する → しました, できる → できませんでした, すごい → すごく, 来る → きました, わし → ワシ). A kana surface right after kanji is skipped, so する does not claim the しました of 電話しました. |
 | English | Front hint: `WkMeaning` → `HintGlossary` → sentence `Translation`. Candidates often only have sentence English. |
 | Audio | Native clip in `SentenceAudio` (autoplays via template JS). Optional Voicevox **Target** / **Reading** are Anki `[sound:]` replay buttons — they never replace the sentence clip. |
+| Sentence furigana | Built from the project’s kana `reading` into Anki `漢字[かんじ]` markup (`SentenceFurigana`). Backfills: `scripts/backfill_shadowing_furigana_ankiconnect.py`. |
 | Priority tag | `shadowing-mining` (seeds `wk_adaptive_new`) |
 | Candidates | Non-WK content words only. Tag `shadowing-candidate` does **not** seed core priority. Prefer studying the WK cloze when both exist (e.g. 敬語 / 使う, not a glued `敬語使`). |
 
@@ -157,6 +158,17 @@ python3 scripts/restore_shadowing_native_audio.py --note-type "WK Shadowing Cand
 ```
 
 Looks up `wk_shadowing_{source}_{sentence}.*` in Anki media (and can re-copy from `~/shadowing/cli/projects` when missing). Clears `SentenceAudioEasy`.
+
+### Backfill sentence furigana
+
+Older imports left `SentenceFurigana` empty even when the project had a kana `reading`.
+
+```bash
+python3 scripts/backfill_shadowing_furigana_ankiconnect.py \
+  ~/shadowing/cli/projects/FkX4A-ZLBrc
+# or all projects under a parent:
+python3 scripts/backfill_shadowing_furigana_ankiconnect.py ~/shadowing/cli/projects
+```
 
 ### Delete a bad candidate
 

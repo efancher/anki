@@ -41,6 +41,7 @@ SATORI_PITCH_PRESERVE_IF_EMPTY_FIELDS: Tuple[str, ...] = (
     "PitchAccents",
     "PitchPositions",
     "PitchGraphs",
+    "SentencePitchGraphs",
 )
 
 

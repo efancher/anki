@@ -50,6 +50,10 @@ MINING_BACK_STAGE2 = """
 {{#SentenceKana}}<div class="sentence-kana-block"><div class="meta">Speak (kana)</div><div class="sentence-kana jp">{{SentenceKana}}</div></div>{{/SentenceKana}}
 {{#PitchAccents}}<div class="pitch"><b>Pitch:</b> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>{{/PitchAccents}}
 {{#PitchGraphs}}<div class="pitch-graphs">{{PitchGraphs}}</div>{{/PitchGraphs}}
+{{#SentencePitchGraphs}}
+<div class="pitch sentence-pitch"><b>Sentence pitch:</b></div>
+<div class="pitch-graphs">{{SentencePitchGraphs}}</div>
+{{/SentencePitchGraphs}}
 {{{DictLinksJa}}}
 {{#Glossary}}
 <div class="word-def word-def-glossary">
@@ -141,6 +145,10 @@ MINING_SHADOW_BACK = (
 <div class="answer-word jp">{{Expression}}{{#Reading}} <span class="reading answer">{{Reading}}</span>{{/Reading}}</div>
 {{#PitchAccents}}<div class="pitch"><b>Pitch:</b> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>{{/PitchAccents}}
 {{#PitchGraphs}}<div class="pitch-graphs">{{PitchGraphs}}</div>{{/PitchGraphs}}
+{{#SentencePitchGraphs}}
+<div class="pitch sentence-pitch"><b>Sentence pitch:</b></div>
+<div class="pitch-graphs">{{SentencePitchGraphs}}</div>
+{{/SentencePitchGraphs}}
 {{#Audio}}
 <div class="word-audio-block">
   <div class="audio-label meta">Word</div>

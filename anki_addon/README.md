@@ -88,6 +88,8 @@ then restart Anki.
 
 Runs automatically on collection load, after apkg import, and after sync when
 `auto_run_on_load` is true (default). The Tools menu is always a manual backstop.
+New-card reordering only writes cards whose queue position actually changed, so
+a no-op refresh does not mark thousands of cards as modified for the next sync.
 
 ## Immersion core tags (filtered decks retired)
 

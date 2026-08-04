@@ -147,9 +147,12 @@ python3 scripts/import_satori.py /path/to/satori_export.csv --conjugations
 
 ## Pitch accent (Satori / Shadowing)
 
-Immersion notes include `PitchAccents` / `PitchPositions` / `PitchGraphs`. Yomitan mining
-fills these when Kanjium is installed in Yomitan. **Satori CSV** and **Shadowing** imports
-fill them from the same Kanjium zip (auto-detected under `~/Downloads/kanjium_pitch_accents.zip`,
+Immersion notes include `PitchAccents` / `PitchPositions` / `PitchGraphs` (word-level,
+from Kanjium). Satori also stores `SentencePitchGraphs`: mora charts for the full
+sentence from VOICEVOX `accent_phrases` after the same pitch override used for TTS, so
+the chart matches the spoken audio. Yomitan mining fills word pitch when Kanjium is
+installed in Yomitan. **Satori CSV** and **Shadowing** imports fill word pitch from the
+same Kanjium zip (auto-detected under `~/Downloads/kanjium_pitch_accents.zip`,
 or pass `--pitch-dict` / set `WK_PITCH_DICT`).
 
 Backfill existing notes (Anki open):
@@ -163,7 +166,8 @@ python3 scripts/push_satori_template_ankiconnect.py --model "WK Shadowing Immers
 **VOICEVOX:** Target/Reading TTS uses `PitchPositions` when present (dictionary form).
 Sentence / Easy audio also applies that pitch to the VOICEVOX phrase matching the
 note `Reading` when alignment succeeds (conjugated forms and mid-phrase heiban fall
-back to VOICEVOX’s default). Regenerate with:
+back to VOICEVOX’s default). Sentence pitch charts are written when sentence audio is
+(re)synthesized (`--force` needed if audio was cached). Regenerate with:
 
 ```bash
 python3 scripts/synthesize_immersion_sentence_audio.py --surface-only --force

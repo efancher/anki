@@ -171,10 +171,11 @@ def store_field_audio(
     force: bool = False,
     pitch_positions: str = "",
     match_kana: str = "",
+    update_sentence_pitch_graphs: bool = False,
 ) -> bool:
     pitch_accent = parse_primary_pitch_position(pitch_positions)
     with tempfile.TemporaryDirectory(prefix="wk_immersion_cli_") as tmp:
-        audio_bytes, ext, engine_label = synthesize_sentence_audio(
+        audio_bytes, ext, engine_label, sentence_pitch_html = synthesize_sentence_audio(
             tts_text,
             config=config,
             temp_dir=Path(tmp),
@@ -207,14 +208,21 @@ def store_field_audio(
     autoplay = sentence_audio_autoplay(
         note_type_name=note_type_name, field_name=field_name
     )
+    update_fields = {
+        field_name: audio_field_value(stored or basename, autoplay=autoplay)
+    }
+    if (
+        update_sentence_pitch_graphs
+        and sentence_pitch_html
+        and field_name in {FIELD_SENTENCE_AUDIO, FIELD_SENTENCE_AUDIO_EASY}
+    ):
+        update_fields[_logic.FIELD_SENTENCE_PITCH_GRAPHS] = sentence_pitch_html
     anki_request(
         base_url,
         "updateNoteFields",
         note={
             "id": note_id,
-            "fields": {
-                field_name: audio_field_value(stored or basename, autoplay=autoplay)
-            },
+            "fields": update_fields,
         },
     )
     return True
@@ -295,11 +303,13 @@ def main() -> None:
     has_reading_audio = FIELD_READING_AUDIO in field_names
 
     note_ids = find_immersion_note_ids(args.anki_connect, args.note_id, note_types)
+    total = len(note_ids)
+    print(f"Processing {total} note(s)…", flush=True)
     ok = failed = skipped = 0
     surface_ok = surface_failed = surface_skipped = 0
     reading_ok = reading_failed = reading_skipped = 0
 
-    for nid in note_ids:
+    for index, nid in enumerate(note_ids, start=1):
         info = anki_request(args.anki_connect, "notesInfo", notes=[nid])[0]
         fields = info.get("fields") or {}
         model_name = info.get("modelName") or check_type
@@ -317,6 +327,7 @@ def main() -> None:
         reading = value(FIELD_READING)
         pitch_positions = value(FIELD_PITCH_POSITIONS)
 
+        note_actions: list[str] = []
         did_sentence = False
         if not args.surface_only and not _logic.uses_native_sentence_clip(model_name):
             sentence_audio = unwrap_satori_normal_if_needed(
@@ -365,6 +376,7 @@ def main() -> None:
                             force=args.force,
                             pitch_positions=pitch_positions,
                             match_kana=(reading or "").strip(),
+                            update_sentence_pitch_graphs=True,
                         ):
                             note_ok = True
                         else:
@@ -372,8 +384,10 @@ def main() -> None:
                     if note_ok:
                         ok += 1
                         did_sentence = True
+                        note_actions.append("sentence")
                     elif note_failed:
                         failed += 1
+                        note_actions.append("sentence-fail")
                     else:
                         skipped += 1
                 else:
@@ -417,8 +431,10 @@ def main() -> None:
                         pitch_positions=surface_pitch,
                     ):
                         surface_ok += 1
+                        note_actions.append("target")
                     else:
                         surface_failed += 1
+                        note_actions.append("target-fail")
             elif has_audio:
                 surface_skipped += 1
 
@@ -441,12 +457,17 @@ def main() -> None:
                     pitch_positions=pitch_positions,
                 ):
                     reading_ok += 1
+                    note_actions.append("reading")
                 else:
                     reading_failed += 1
+                    note_actions.append("reading-fail")
             elif has_reading_audio:
                 reading_skipped += 1
 
         _ = did_sentence  # keep branch clarity for sentence counters above
+        label = expression or reading or sentence[:20] or str(nid)
+        action = ",".join(note_actions) if note_actions else "skip"
+        print(f"[{index}/{total}] {label} · {action}", flush=True)
 
     print(f"Sentence audio: {ok} synthesized, {failed} failed, {skipped} skipped.")
     print(

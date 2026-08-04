@@ -22,6 +22,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import genanki
 
+from anki_furigana import anki_furigana_brackets, word_furigana_brackets
 from mining_vocab_index import load_mining_vocab_index, lookup_wk_vocab
 from shadowing_match import (
     CandidateLemma,
@@ -86,6 +87,7 @@ SHADOWING_FIELD_NAMES: Tuple[str, ...] = (
     "PitchAccents",
     "PitchPositions",
     "PitchGraphs",
+    "SentencePitchGraphs",
     "Glossary",
     "Synonyms",
     "Antonyms",
@@ -184,6 +186,10 @@ SHADOWING_BACK = """
 <div class="pitch"><b>Pitch:</b> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>
 {{/PitchAccents}}
 {{#PitchGraphs}}<div class="pitch-graphs">{{PitchGraphs}}</div>{{/PitchGraphs}}
+{{#SentencePitchGraphs}}
+<div class="pitch sentence-pitch"><b>Sentence pitch:</b></div>
+<div class="pitch-graphs">{{SentencePitchGraphs}}</div>
+{{/SentencePitchGraphs}}
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
@@ -774,11 +780,13 @@ def shadowing_note_fields(
     cloze_html, plain_sentence = build_satori_cloze_sentence(
         sentence.japanese, expression, reading, surface=surface
     )
+    sentence_plain = plain_sentence or sentence.japanese
+    sentence_furigana = anki_furigana_brackets(sentence_plain, sentence.reading)
     enrichment = enrich_mining_note_fields(
         expression=expression,
         reading=reading,
-        sentence=plain_sentence or sentence.japanese,
-        sentence_furigana="",
+        sentence=sentence_plain,
+        sentence_furigana=sentence_furigana,
         glossary=transcript_tag,
         translation=sentence.english,
         wk_entry=wk_entry,
@@ -798,6 +806,13 @@ def shadowing_note_fields(
         enrichment.reading or reading,
         pitch_index,
     )
+    sentence_plain = enrichment.sentence or sentence_plain
+    if sentence_plain != (plain_sentence or sentence.japanese):
+        sentence_furigana = anki_furigana_brackets(sentence_plain, sentence.reading)
+    expression_furigana = word_furigana_brackets(
+        enrichment.expression, enrichment.reading or reading
+    )
+    sentence_kana = (sentence.reading or "").strip() or enrichment.sentence_kana
     raw_html_fields = {
         "ClozeSentence",
         "DictLinksJa",
@@ -805,16 +820,18 @@ def shadowing_note_fields(
         "SentenceFurigana",
         "Furigana",
         "PitchGraphs",
+        "SentencePitchGraphs",
     }
     values = {
         "DuplicateKey": duplicate_key,
         "Expression": enrichment.expression,
         "Reading": enrichment.reading or reading,
         "Translation": sentence.english,
-        "Furigana": "",
+        "Furigana": expression_furigana,
         "PitchAccents": pitch_fields["PitchAccents"],
         "PitchPositions": pitch_fields["PitchPositions"],
         "PitchGraphs": pitch_fields["PitchGraphs"],
+        "SentencePitchGraphs": "",
         "Glossary": transcript_tag,
         "Synonyms": "",
         "Antonyms": "",
@@ -828,11 +845,11 @@ def shadowing_note_fields(
         "ShowEnglish": "1",
         "ShowKana": "",
         "ShowJjBack": "",
-        "SentenceKana": enrichment.sentence_kana,
+        "SentenceKana": sentence_kana,
         "DictLinksJa": enrichment.dict_links_ja,
         "DictLinksEn": enrichment.dict_links_en,
-        "Sentence": enrichment.sentence,
-        "SentenceFurigana": "",
+        "Sentence": sentence_plain,
+        "SentenceFurigana": sentence_furigana,
         "SentenceAudio": sound,
         "SentenceAudioEasy": "",
         "Audio": "",

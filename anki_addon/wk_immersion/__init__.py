@@ -29,6 +29,7 @@ from .logic import (
     FIELD_SENTENCE_AUDIO,
     FIELD_SENTENCE_AUDIO_EASY,
     FIELD_SENTENCE_FURIGANA,
+    FIELD_SENTENCE_PITCH_GRAPHS,
     FIELD_SPEAKER,
     MINING_NOTE_TYPE,
     ImmersionTtsConfig,
@@ -163,7 +164,7 @@ def _store_one_sentence_audio(
 ) -> bool:
     with tempfile.TemporaryDirectory(prefix="wk_immersion_tts_") as tmp:
         temp_dir = Path(tmp)
-        audio_bytes, ext, engine_label = synthesize_sentence_audio(
+        audio_bytes, ext, engine_label, sentence_pitch_html = synthesize_sentence_audio(
             tts_text,
             config=config,
             temp_dir=temp_dir,
@@ -201,6 +202,12 @@ def _store_one_sentence_audio(
         changed = _set_field(
             note, field_name, audio_field_value(stored_name, autoplay=autoplay)
         )
+        if sentence_pitch_html and field_name in {
+            FIELD_SENTENCE_AUDIO,
+            FIELD_SENTENCE_AUDIO_EASY,
+        }:
+            if _set_field(note, FIELD_SENTENCE_PITCH_GRAPHS, sentence_pitch_html):
+                changed = True
         if not changed:
             if field_name not in _field_map(note):
                 if not silent:

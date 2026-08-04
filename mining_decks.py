@@ -67,6 +67,7 @@ MINING_FIELD_NAMES: Tuple[str, ...] = (
     "PitchAccents",
     "PitchPositions",
     "PitchGraphs",
+    "SentencePitchGraphs",
     "Glossary",
     "Synonyms",
     "Antonyms",

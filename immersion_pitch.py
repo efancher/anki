@@ -137,6 +137,39 @@ def pitch_graph_html(morae: Sequence[str], position: int) -> str:
     )
 
 
+def sentence_pitch_graphs_html(accent_phrases: Sequence[Mapping[str, object]]) -> str:
+    """High/low mora graphs for a full VOICEVOX ``accent_phrases`` list.
+
+    Uses the same ``pitch-graph`` / ``pitch-mora`` markup as word PitchGraphs so
+    existing card CSS applies. Mora text is shown in hiragana. Phrase breaks get a
+    thin separator (particles usually stay attached to their content phrase).
+    """
+    parts: List[str] = []
+    for phrase in accent_phrases:
+        if not isinstance(phrase, Mapping):
+            continue
+        raw_moras = phrase.get("moras") or []
+        if not isinstance(raw_moras, (list, tuple)):
+            continue
+        morae: List[str] = []
+        for mora in raw_moras:
+            if not isinstance(mora, Mapping):
+                continue
+            text = katakana_to_hiragana(str(mora.get("text") or "").strip())
+            if text:
+                morae.append(text)
+        if not morae:
+            continue
+        try:
+            position = int(phrase.get("accent") or 0)
+        except (TypeError, ValueError):
+            position = 0
+        graph = pitch_graph_html(morae, position)
+        if graph:
+            parts.append(graph)
+    return "".join(parts)
+
+
 def _positions_from_entry(entry: Mapping[str, object]) -> List[int]:
     raw_positions = entry.get("positions")
     positions: List[int] = []

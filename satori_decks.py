@@ -809,6 +809,7 @@ SATORI_FIELD_NAMES: Tuple[str, ...] = (
     "PitchAccents",
     "PitchPositions",
     "PitchGraphs",
+    "SentencePitchGraphs",
     "Glossary",
     "Synonyms",
     "Antonyms",
@@ -889,6 +890,10 @@ SATORI_BACK = """
 <div class="pitch"><b>Pitch:</b> {{PitchAccents}}{{#PitchPositions}} <span class="pitch-pos">({{PitchPositions}})</span>{{/PitchPositions}}</div>
 {{/PitchAccents}}
 {{#PitchGraphs}}<div class="pitch-graphs">{{PitchGraphs}}</div>{{/PitchGraphs}}
+{{#SentencePitchGraphs}}
+<div class="pitch sentence-pitch"><b>Sentence pitch:</b></div>
+<div class="pitch-graphs">{{SentencePitchGraphs}}</div>
+{{/SentencePitchGraphs}}
 {{#Audio}}
 <div class="audio-row surface-audio-row">
   <div class="audio-label meta">Target</div>
@@ -1189,6 +1194,7 @@ def satori_note_fields(
         "SentenceFurigana",
         "Furigana",
         "PitchGraphs",
+        "SentencePitchGraphs",
     }
     values = {
         "DuplicateKey": duplicate_key,
@@ -1199,6 +1205,7 @@ def satori_note_fields(
         "PitchAccents": pitch_fields["PitchAccents"],
         "PitchPositions": pitch_fields["PitchPositions"],
         "PitchGraphs": pitch_fields["PitchGraphs"],
+        "SentencePitchGraphs": "",
         "Glossary": glossary,
         "Synonyms": "",
         "Antonyms": "",

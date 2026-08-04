@@ -107,7 +107,14 @@ def ensure_immersion_model(col: "Collection") -> bool:
         if FIELD_SENTENCE_AUDIO_EASY not in field_names:
             col.models.add_field(model, col.models.new_field(FIELD_SENTENCE_AUDIO_EASY))
             changed = True
-        for extra in ("Synonyms", "Antonyms", "PitchAccents", "PitchPositions", "PitchGraphs"):
+        for extra in (
+            "Synonyms",
+            "Antonyms",
+            "PitchAccents",
+            "PitchPositions",
+            "PitchGraphs",
+            "SentencePitchGraphs",
+        ):
             if extra not in field_names:
                 col.models.add_field(model, col.models.new_field(extra))
                 changed = True

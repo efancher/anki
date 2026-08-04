@@ -15,6 +15,7 @@ from immersion_pitch import (
     format_immersion_pitch,
     pitch_pattern_label,
     resolve_pitch_dict_path,
+    sentence_pitch_graphs_html,
     split_morae,
 )
 
@@ -49,6 +50,15 @@ class ImmersionPitchTests(unittest.TestCase):
         self.assertIn("あお↓い", fields.accents)
         self.assertIn("中高", fields.accents)
         self.assertIn("pitch-mora", fields.graphs)
+
+    def test_sentence_pitch_graphs_from_voicevox_phrases(self) -> None:
+        html = sentence_pitch_graphs_html(
+            [{"moras": [{"text": "ハ"}, {"text": "ジ"}, {"text": "メ"}], "accent": 0}]
+        )
+        self.assertIn(">は<", html)
+        self.assertIn(">じ<", html)
+        self.assertIn(">め<", html)
+        self.assertIn("pitch-graph", html)
 
     def test_resolve_default_kanjium_if_present(self) -> None:
         path = resolve_pitch_dict_path()
