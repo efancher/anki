@@ -20,19 +20,26 @@ class AnkiFuriganaTests(unittest.TestCase):
                 "私は隣の町です。電車で",
                 "わたくしはとなりのまちです。でんしゃで",
             ),
-            "私[わたくし]は隣[となり]の町[まち]です。電車[でんしゃ]で",
+            "私[わたくし]は 隣[となり]の 町[まち]です。 電車[でんしゃ]で",
+        )
+
+    def test_space_before_kanji_after_kana_prefix(self) -> None:
+        """Anki needs a space so せんせい sits on 先生, not ひし先生."""
+        self.assertEqual(
+            anki_furigana_brackets("はい。ひし先生です。", "はい。ひしせんせいです。"),
+            "はい。ひし 先生[せんせい]です。",
         )
 
     def test_neighborhood_kana_run(self) -> None:
         self.assertEqual(
             anki_furigana_brackets("え、マジで?近所じゃん。", "え、マジで?きんじょじゃん。"),
-            "え、マジで?近所[きんじょ]じゃん。",
+            "え、マジで? 近所[きんじょ]じゃん。",
         )
 
     def test_counter_ke(self) -> None:
         self.assertEqual(
             anki_furigana_brackets("1ヶ月だよ。", "1かげつだよ。"),
-            "1ヶ月[かげつ]だよ。",
+            "1 ヶ月[かげつ]だよ。",
         )
 
     def test_mismatch_returns_empty(self) -> None:
@@ -40,7 +47,7 @@ class AnkiFuriganaTests(unittest.TestCase):
 
     def test_word_furigana(self) -> None:
         self.assertEqual(word_furigana_brackets("電車", "でんしゃ"), "電車[でんしゃ]")
-        self.assertEqual(word_furigana_brackets("〜歳", "さい"), "〜歳[さい]")
+        self.assertEqual(word_furigana_brackets("〜歳", "さい"), "〜 歳[さい]")
         self.assertEqual(word_furigana_brackets("こんにちは", "こんにちは"), "")
 
 

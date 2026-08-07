@@ -358,6 +358,10 @@ def expand_surface_span(
         # Conjugated: keep te-form て/で; still drop は/が/を/…
         min_len = len(core) if core else 1
         particles = _CONJUGATED_TRAILING_PARTICLES
+        # Kana spelling of a kanji+okurigana lemma (何とか → なんとか): okurigana
+        # can look like particles (と/か). Do not strip that lexical suffix.
+        if okurigana and not kanji_stem(span) and span.endswith(okurigana):
+            min_len = max(min_len, len(span))
     else:
         # Exact kana (or empty) match — still drop a trailing particle if one
         # was included by a too-long provisional span.

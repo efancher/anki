@@ -47,6 +47,8 @@ parse_primary_pitch_position = _logic.parse_primary_pitch_position
 apply_voicevox_accent_phrases = _logic.apply_voicevox_accent_phrases
 sentence_pitch_graphs_html = _logic.sentence_pitch_graphs_html
 katakana_to_hiragana = _logic.katakana_to_hiragana
+voicevox_reading_tts_text = _logic.voicevox_reading_tts_text
+repair_voicevox_hiragana_au_long_vowel = _logic.repair_voicevox_hiragana_au_long_vowel
 
 
 class ImmersionTtsLogicTests(unittest.TestCase):
@@ -451,6 +453,33 @@ class ImmersionTtsLogicTests(unittest.TestCase):
         # Second call is synthesis; body should carry overridden accent.
         synth_req = urlopen.call_args_list[1][0][0]
         body = json.loads(synth_req.data.decode("utf-8"))
+    def test_voicevox_reading_tts_prefers_kanji(self) -> None:
+        self.assertEqual(voicevox_reading_tts_text("使う", "つかう"), "使う")
+        self.assertEqual(voicevox_reading_tts_text("できる", "できる"), "できる")
+        self.assertEqual(voicevox_reading_tts_text("", "つかう"), "つかう")
+
+    def test_repair_voicevox_hiragana_au_long_vowel(self) -> None:
+        query = {
+            "accent_phrases": [
+                {"moras": [{"text": "ツ"}, {"text": "カ"}, {"text": "ア"}], "accent": 1}
+            ]
+        }
+        fixed = repair_voicevox_hiragana_au_long_vowel(query, "つかう")
+        self.assertEqual(
+            [m["text"] for m in fixed["accent_phrases"][0]["moras"]],
+            ["ツ", "カ", "ウ"],
+        )
+        # Kanji input is left alone (VOICEVOX already correct).
+        kanji_query = {
+            "accent_phrases": [
+                {"moras": [{"text": "ツ"}, {"text": "カ"}, {"text": "ウ"}], "accent": 3}
+            ]
+        }
+        self.assertIs(
+            repair_voicevox_hiragana_au_long_vowel(kanji_query, "使う"),
+            kanji_query,
+        )
+
     def test_sentence_pitch_graphs_html(self) -> None:
         html = sentence_pitch_graphs_html(
             [

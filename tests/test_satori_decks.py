@@ -439,6 +439,23 @@ class ConjugatedSurfaceMatchTests(unittest.TestCase):
         sentence = "なんか仕事中偉そうな態度を取ってしまってすいません。"
         self.assertEqual(self.surface(sentence, "偉い", "えらい"), "偉そう")
 
+    def test_kanji_lemma_kana_spelling_keeps_particle_like_okurigana(self) -> None:
+        """何とか → なんとか must not trim と/か as particles (leave ＿＿＿とか)."""
+        sentence = "ひなは必死に羽ばたいて、なんとか飛ぶことができました。"
+        self.assertEqual(
+            self.surface(sentence, "何とか", "なんとか"),
+            "なんとか",
+        )
+        cloze, _ = build_satori_cloze_sentence(sentence, "何とか", "なんとか")
+        self.assertIn("cloze-blank", cloze)
+        self.assertNotIn("＿＿＿</span>とか", cloze)
+        self.assertIn("＿＿＿</span>飛ぶ", cloze)
+        # Particle after the full adverb still strips.
+        self.assertEqual(
+            self.surface("なんとかが必要です。", "何とか", "なんとか"),
+            "なんとか",
+        )
+
     def test_kanji_lemma_matches_kana_spelling(self) -> None:
         """来る is written き in 飛んできました."""
         sentence = "タカが飛んできました。"

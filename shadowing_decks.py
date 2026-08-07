@@ -24,11 +24,17 @@ import genanki
 
 from anki_furigana import anki_furigana_brackets, word_furigana_brackets
 from mining_vocab_index import load_mining_vocab_index, lookup_wk_vocab
+from jmdict_gloss import (
+    enrich_shadowing_candidate,
+    load_or_build_jmdict_gloss_index,
+)
 from shadowing_match import (
+    ATOMIC_COMPOUND_READINGS,
     CandidateLemma,
     WkMatch,
     candidate_lemmas_in_sentence,
     candidate_reading_looks_truncated,
+    has_spoken_japanese,
     match_wk_vocab_in_sentence,
     name_surface_for_shogo,
     reading_for_candidate_lemma,
@@ -133,6 +139,8 @@ SHADOWING_CANDIDATE_FIELD_NAMES: Tuple[str, ...] = (
     "SourceUrl",
     "SourceTitle",
     "Meta",
+    # Appended so live Anki models can add the field without reshuffling.
+    "HintGlossary",
 )
 
 _SAFE_MEDIA_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -877,7 +885,10 @@ def shadowing_candidate_note_fields(
     sentence: ShadowingSentence,
     candidate: CandidateLemma,
     audio_filename: str,
-) -> List[str]:
+    gloss_index: Optional[dict] = None,
+    require_dict_for_kanji: bool = True,
+) -> Optional[List[str]]:
+    """Build candidate fields, or ``None`` when JMDict vetting drops the lemma."""
     surface = name_surface_for_shogo(
         sentence.japanese, candidate.surface or candidate.lemma
     )
@@ -885,6 +896,17 @@ def shadowing_candidate_note_fields(
     reading = reading_for_surface_in_sentence(
         sentence.japanese, surface
     ) or reading_for_candidate_lemma(candidate.lemma, candidate.reading)
+    enrichment = enrich_shadowing_candidate(
+        lemma=expression,
+        reading=reading,
+        pos=candidate.pos or "",
+        gloss_index=gloss_index,
+        atomic_readings=ATOMIC_COMPOUND_READINGS,
+        require_dict_for_kanji=require_dict_for_kanji,
+    )
+    if not enrichment.keep:
+        return None
+    reading = enrichment.reading or reading
     cloze_html, plain_sentence = build_satori_cloze_sentence(
         sentence.japanese,
         expression,
@@ -907,11 +929,13 @@ def shadowing_candidate_note_fields(
         "SentenceAudio": sound,
         "Audio": "",
         "ReadingAudio": "",
-        "Glossary": f"POS: {candidate.pos}" if candidate.pos else "non-WK candidate",
+        "Glossary": enrichment.glossary
+        or (f"POS: {candidate.pos}" if candidate.pos else "non-WK candidate"),
         "UserNotes": sentence.notes,
         "SourceUrl": source.url,
         "SourceTitle": source.title,
         "Meta": meta,
+        "HintGlossary": enrichment.hint_glossary,
     }
     fields: List[str] = []
     for name in SHADOWING_CANDIDATE_FIELD_NAMES:
@@ -941,9 +965,17 @@ def build_shadowing_decks(
     wk_index: Optional[dict] = None,
     include_auto_caption: bool = True,
     pitch_index: Optional[dict] = None,
+    jmdict_gloss_index: Optional[dict] = None,
+    download_jmdict: bool = True,
 ) -> Tuple[Path, Path, ShadowingBuildStats]:
     """Build WK cloze + candidate APKGs. Returns (wk_path, candidate_path, stats)."""
     index = wk_index or {}
+    gloss_index = jmdict_gloss_index
+    if gloss_index is None:
+        try:
+            gloss_index = load_or_build_jmdict_gloss_index(download=download_jmdict)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError):
+            gloss_index = {"by_key": {}, "by_expression": {}}
     media_dir = output_dir / "media" / "shadowing"
     media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -968,6 +1000,9 @@ def build_shadowing_decks(
     for sentence in project.sentences:
         if not include_auto_caption and sentence.transcript_status == "auto-caption":
             skipped_auto += 1
+            continue
+        # Caption cues like [音楽] have no spoken Japanese after bracket strip.
+        if not has_spoken_japanese(sentence.japanese):
             continue
 
         audio_name, media_path = stage_clip_media(project, sentence, media_dir)
@@ -1038,6 +1073,17 @@ def build_shadowing_decks(
                     start=selection.start,
                     end=selection.end,
                 )
+                fields = shadowing_candidate_note_fields(
+                    source=project.source,
+                    sentence=sentence,
+                    candidate=candidate,
+                    audio_filename=audio_name,
+                    gloss_index=gloss_index,
+                    # Curated Glossbook picks stay even without a JMDict hit.
+                    require_dict_for_kanji=False,
+                )
+                if fields is None:
+                    continue
                 guid = stable_guid(
                     SHADOWING_CANDIDATE_KIND,
                     project.source.source_id,
@@ -1046,12 +1092,7 @@ def build_shadowing_decks(
                 )
                 note = genanki.Note(
                     model=cand_model,
-                    fields=shadowing_candidate_note_fields(
-                        source=project.source,
-                        sentence=sentence,
-                        candidate=candidate,
-                        audio_filename=audio_name,
-                    ),
+                    fields=fields,
                     tags=[
                         "immersion",
                         SHADOWING_CANDIDATE_TAG,
@@ -1123,6 +1164,16 @@ def build_shadowing_decks(
             ) or candidate.reading
             if candidate_reading_looks_truncated(reading):
                 continue
+            fields = shadowing_candidate_note_fields(
+                source=project.source,
+                sentence=sentence,
+                candidate=candidate,
+                audio_filename=audio_name,
+                gloss_index=gloss_index,
+                require_dict_for_kanji=True,
+            )
+            if fields is None:
+                continue
             seen_candidate_lemmas.add(candidate.lemma)
             guid = stable_guid(
                 SHADOWING_CANDIDATE_KIND,
@@ -1132,12 +1183,7 @@ def build_shadowing_decks(
             )
             note = genanki.Note(
                 model=cand_model,
-                fields=shadowing_candidate_note_fields(
-                    source=project.source,
-                    sentence=sentence,
-                    candidate=candidate,
-                    audio_filename=audio_name,
-                ),
+                fields=fields,
                 tags=[
                     "immersion",
                     SHADOWING_CANDIDATE_TAG,

@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 from shadowing_match import (  # noqa: E402
     candidate_lemmas_in_sentence,
     conjugation_match_key,
+    has_spoken_japanese,
     kanji_stem,
     katakana_to_hiragana,
     match_wk_vocab_in_sentence,
@@ -161,6 +162,43 @@ class MatchWkVocabTests(unittest.TestCase):
         self.assertIn("同じ", expressions)
         self.assertNotIn("２０１１年", expressions)
 
+    def test_chuukowai_compound_not_split_into_naka_and_kowai(self) -> None:
+        """バイト中怖い is ちゅうこわい, not WK 中/なか + 怖い."""
+        index = _index(
+            {
+                "id": 2520,
+                "expression": "中",
+                "reading": "なか",
+                "meaning": "Inside; In",
+                "prerequisite_ids": "",
+            },
+            {
+                "id": 5233,
+                "expression": "怖い",
+                "reading": "こわい",
+                "meaning": "Scary",
+                "prerequisite_ids": "",
+            },
+            {
+                "id": 3005,
+                "expression": "君",
+                "reading": "きみ",
+                "meaning": "you",
+                "prerequisite_ids": "",
+            },
+        )
+        sentence = "だってし吾君バイト中怖いからレイカずっと怖がってたんだよ。"
+        matches = match_wk_vocab_in_sentence(sentence, index)
+        expressions = [m.expression for m in matches]
+        self.assertIn("君", expressions)
+        self.assertNotIn("中", expressions)
+        self.assertNotIn("怖い", expressions)
+        candidates = candidate_lemmas_in_sentence(sentence, index)
+        compounds = [c for c in candidates if c.lemma == "中怖い"]
+        self.assertEqual(len(compounds), 1)
+        self.assertEqual(compounds[0].reading, "ちゅうこわい")
+        self.assertEqual(compounds[0].surface, "中怖い")
+
     def test_longer_expression_beats_shorter_overlap(self) -> None:
         """お姉さん must win over 姉; 急に must win over 急."""
         index = _index(
@@ -203,6 +241,26 @@ class MatchWkVocabTests(unittest.TestCase):
         )
 
     def test_stage_directions_in_brackets_are_ignored(self) -> None:
+        index = _index(
+            {
+                "id": 3072,
+                "expression": "音楽",
+                "reading": "おんがく",
+                "meaning": "Music",
+                "prerequisite_ids": "",
+            },
+            {
+                "id": 1,
+                "expression": "息",
+                "reading": "いき",
+                "meaning": "breath",
+                "prerequisite_ids": "",
+            },
+        )
+        self.assertEqual(match_wk_vocab_in_sentence("[音楽]", index), [])
+        self.assertFalse(has_spoken_japanese("[音楽]"))
+        self.assertTrue(has_spoken_japanese("音楽が好きです。"))
+
         index = _index(
             {
                 "id": 3323,

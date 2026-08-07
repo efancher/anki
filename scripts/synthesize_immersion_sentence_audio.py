@@ -81,6 +81,7 @@ sentence_text_for_tts = _logic.sentence_text_for_tts
 should_synthesize_note = _logic.should_synthesize_note
 synthesize_sentence_audio = _logic.synthesize_sentence_audio
 unwrap_sound_tag = _logic.unwrap_sound_tag
+voicevox_reading_tts_text = _logic.voicevox_reading_tts_text
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -327,6 +328,17 @@ def main() -> None:
         reading = value(FIELD_READING)
         pitch_positions = value(FIELD_PITCH_POSITIONS)
 
+        # Per-note field presence ( --note-id may resolve field flags from another type).
+        note_has_audio = FIELD_AUDIO in fields
+        note_has_reading_audio = FIELD_READING_AUDIO in fields
+        note_has_easy = FIELD_SENTENCE_AUDIO_EASY in fields
+        if note_has_easy:
+            sentence_audio_easy = value(FIELD_SENTENCE_AUDIO_EASY)
+        if note_has_audio:
+            word_audio = value(FIELD_AUDIO)
+        if note_has_reading_audio:
+            reading_audio = value(FIELD_READING_AUDIO)
+
         note_actions: list[str] = []
         did_sentence = False
         if not args.surface_only and not _logic.uses_native_sentence_clip(model_name):
@@ -401,19 +413,24 @@ def main() -> None:
             surface = surface_span_text(sentence, expression, reading)
             reading_text = (reading or "").strip()
 
-            if has_audio and (
+            if note_has_audio and (
                 args.force or args.surface_only or not sentence_audio_already_set(word_audio)
             ):
                 # Candidates previously stored Reading TTS in Audio — always
                 # (re)fill Target from the surface span when forcing/surface-only.
-                tts_surface = surface or reading_text
+                tts_surface = surface or voicevox_reading_tts_text(expression, reading_text)
                 if not tts_surface:
                     surface_skipped += 1
                 else:
                     # Dictionary pitch maps cleanly to lemma/reading TTS, not conjugations.
                     surface_pitch = (
                         pitch_positions
-                        if tts_surface in {(reading_text or "").strip(), (expression or "").strip()}
+                        if tts_surface
+                        in {
+                            (reading_text or "").strip(),
+                            (expression or "").strip(),
+                            voicevox_reading_tts_text(expression, reading_text),
+                        }
                         else ""
                     )
                     if store_field_audio(
@@ -435,33 +452,35 @@ def main() -> None:
                     else:
                         surface_failed += 1
                         note_actions.append("target-fail")
-            elif has_audio:
+            elif note_has_audio:
                 surface_skipped += 1
 
-            if has_reading_audio and (
+            if note_has_reading_audio and (
                 args.force
                 or args.surface_only
                 or not sentence_audio_already_set(reading_audio)
             ):
-                if not reading_text:
+                reading_tts = voicevox_reading_tts_text(expression, reading_text)
+                if not reading_tts:
                     reading_skipped += 1
                 elif store_field_audio(
                     base_url=args.anki_connect,
                     note_id=nid,
                     note_type_name=model_name,
                     field_name=FIELD_READING_AUDIO,
-                    tts_text=reading_text,
+                    tts_text=reading_tts,
                     config=config,
                     speed_scale=config.voicevox_speed_scale,
                     force=args.force,
                     pitch_positions=pitch_positions,
+                    match_kana=reading_text,
                 ):
                     reading_ok += 1
                     note_actions.append("reading")
                 else:
                     reading_failed += 1
                     note_actions.append("reading-fail")
-            elif has_reading_audio:
+            elif note_has_reading_audio:
                 reading_skipped += 1
 
         _ = did_sentence  # keep branch clarity for sentence counters above

@@ -22,12 +22,25 @@ _KATAKANA_CHAR_RE = re.compile(r"[\u30A1-\u30F6]")
 # use the same delimiters. Strip them before matching so 息/音 inside [息をのむ音]
 # cannot become cards for the spoken line that follows.
 _BRACKET_NOTE_RE = re.compile(r"\[(?!sound:)[^\]]*\]")
+# Colloquial compounds that contain WK pieces but are one phonological word.
+# (中怖い = ちゅうこわい, not 中/なか + 怖い/こわい.)
+_ATOMIC_COMPOUNDS: Tuple[Tuple[str, str], ...] = (
+    ("中怖い", "ちゅうこわい"),
+)
+ATOMIC_COMPOUND_READINGS: Dict[str, str] = {
+    surface: reading for surface, reading in _ATOMIC_COMPOUNDS
+}
 
 
 def study_sentence_text(sentence: str) -> str:
     """Spoken line only — drop [stage directions] / Migaku reading brackets."""
     text = _BRACKET_NOTE_RE.sub("", sentence or "")
     return re.sub(r"  +", " ", text).strip()
+
+
+def has_spoken_japanese(sentence: str) -> bool:
+    """False for music/SFX cues like ``[音楽]`` after bracket stripping."""
+    return bool(study_sentence_text(sentence))
 
 
 # WK writes counters and suffixes with a leading tilde placeholder (〜歳, 〜君).
@@ -259,6 +272,53 @@ def _lookup_candidates(expression: str, reading: str, index: dict) -> Optional[d
     return lookup_wk_vocab(expression, reading, index)
 
 
+def _atomic_compound_hits(sentence: str) -> List[Tuple[int, int, str, str]]:
+    """Non-overlapping ``(start, end, surface, reading)`` for known compounds."""
+    hits: List[Tuple[int, int, str, str]] = []
+    for surface, reading in sorted(_ATOMIC_COMPOUNDS, key=lambda item: -len(item[0])):
+        start = 0
+        while True:
+            idx = sentence.find(surface, start)
+            if idx < 0:
+                break
+            end = idx + len(surface)
+            if not any(_spans_overlap(idx, end, kept[0], kept[1]) for kept in hits):
+                hits.append((idx, end, surface, reading))
+            start = idx + 1
+    hits.sort(key=lambda item: item[0])
+    return hits
+
+
+def _drop_matches_inside_atomic_compounds(
+    sentence: str, matches: Sequence[WkMatch]
+) -> List[WkMatch]:
+    compounds = _atomic_compound_hits(sentence)
+    if not compounds:
+        return list(matches)
+    return [
+        match
+        for match in matches
+        if not any(
+            _spans_overlap(match.start, match.end, start, end)
+            for start, end, _surface, _reading in compounds
+        )
+    ]
+
+
+def _atomic_compound_candidates(sentence: str) -> List[CandidateLemma]:
+    return [
+        CandidateLemma(
+            lemma=surface,
+            reading=reading,
+            surface=surface,
+            pos="colloquial-compound",
+            start=start,
+            end=end,
+        )
+        for start, end, surface, reading in _atomic_compound_hits(sentence)
+    ]
+
+
 def match_wk_vocab_in_sentence(
     sentence: str,
     index: dict,
@@ -287,7 +347,8 @@ def match_wk_vocab_in_sentence(
     longest_matches = _match_longest(
         plain, by_expression, sentence_reading=sentence_reading
     )
-    return _merge_wk_matches(token_matches, longest_matches)
+    merged = _merge_wk_matches(token_matches, longest_matches)
+    return _drop_matches_inside_atomic_compounds(plain, merged)
 
 
 def _spans_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
@@ -671,8 +732,19 @@ def candidate_lemmas_in_sentence(
 
     tokens = tokenize_japanese(plain)
     if tokens:
-        return _candidates_from_tokens(tokens, excluded_expr, by_expression)
-    return _candidates_fallback(plain, excluded_expr, by_expression, occupied)
+        candidates = _candidates_from_tokens(tokens, excluded_expr, by_expression)
+    else:
+        candidates = _candidates_fallback(plain, excluded_expr, by_expression, occupied)
+    # Known colloquial compounds (中怖い) even when WK would claim the pieces.
+    seen = {(item.lemma, item.start) for item in candidates}
+    for compound in _atomic_compound_candidates(plain):
+        key = (compound.lemma, compound.start)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(compound)
+    candidates.sort(key=lambda item: (item.start, item.end))
+    return candidates
 
 
 def _subtract_occupied_spans(

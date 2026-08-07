@@ -113,11 +113,11 @@ python3 scripts/synthesize_immersion_sentence_audio.py \
 | Curated selections | Glossbook `.mining.zip` is authoritative — Anki does **not** run kanji-stem auto-match on those sentences. Exact WK lookup by expression/reading; otherwise a Candidate card. |
 | Cloze style | Highlight/blank the **surface span** in the sentence; type the **dictionary reading** (e.g. 使う → つかう even when the sentence has 使って). |
 | Conjugated-only lemmas | A lemma that never appears in dictionary form is still located by conjugating it (する → しました, できる → できませんでした, すごい → すごく, 来る → きました, わし → ワシ). A kana surface right after kanji is skipped, so する does not claim the しました of 電話しました. |
-| English | Front hint: `WkMeaning` → `HintGlossary` → sentence `Translation`. Candidates often only have sentence English. |
+| English | Front hint: `WkMeaning` → `HintGlossary` → sentence `Translation`. Candidates fill `HintGlossary` from JMDict when available; otherwise sentence English. |
 | Audio | Native clip in `SentenceAudio` (autoplays via template JS). Optional Voicevox **Target** / **Reading** are Anki `[sound:]` replay buttons — they never replace the sentence clip. |
 | Sentence furigana | Built from the project’s kana `reading` into Anki `漢字[かんじ]` markup (`SentenceFurigana`). Backfills: `scripts/backfill_shadowing_furigana_ankiconnect.py`. |
 | Priority tag | `shadowing-mining` (seeds `wk_adaptive_new`) |
-| Candidates | Non-WK content words only. Tag `shadowing-candidate` does **not** seed core priority. Prefer studying the WK cloze when both exist (e.g. 敬語 / 使う, not a glued `敬語使`). |
+| Candidates | Non-WK content words only. Tag `shadowing-candidate` does **not** seed core priority. Prefer studying the WK cloze when both exist (e.g. 敬語 / 使う, not a glued `敬語使`). Auto (legacy) candidates are **vetoed/enriched via JMDict**: kanji/hiragana lemmas need a dictionary hit (gloss → `HintGlossary`); katakana names and curated compounds (`中怖い`) are kept without one. Curated Glossbook selections are enriched when possible but never dropped for a missing dict entry. |
 
 Auto-caption sentences import by default (`shadowing-auto-caption`). Pass `--skip-auto-caption` to omit them.
 
@@ -226,6 +226,8 @@ Legacy single-key `immersion_tag` still works if `immersion_tags` is omitted.
 | WK cloze shows no blank/highlight | `push_satori_template_ankiconnect.py --cloze-only --model "WK Shadowing Immersion"` |
 | Still no blank/highlight after that | The lemma is not in the sentence at all — a bad WK match (担ぐ/任す pulled out of 担任, 息/音 out of a sentence with neither). Delete the note; it is not a cloze bug |
 | Answer belongs to a different word than the sentence (`え、同い年じゃないですか?` answered `２０１１年`) | Legacy kanji-stem mis-match. Audit and remove: `python3 scripts/audit_shadowing_wk_matches_ankiconnect.py` (add `--delete`), then live-add corrected notes: `python3 scripts/live_import_shadowing_ankiconnect.py ~/shadowing/cli/projects/VIDEO_ID` (or rebuild `.apkg` and import without updating existing notes) |
+| `バイト中怖い` card is 中/なか | Colloquial **中怖い** (`ちゅうこわい`). Matcher now keeps that compound atomic; delete old 中/怖い notes and keep/fix the Candidate |
+| Front is empty / only BGM, answer is 音楽 | Caption cue `[音楽]` — not spoken. Imports skip bracket-only lines now; delete legacy notes |
 | Core new queue ignores shadowing vocab | Confirm `shadowing-mining` tag + **WK Adjust New Limits**; check `immersion_tags` in adaptive-new config |
 | `fugashi ok` fails | Use `~/shadowing/cli/.venv/bin/python`, or `pip install fugashi unidic-lite` into the env you run imports with |
 

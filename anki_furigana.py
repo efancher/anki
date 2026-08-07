@@ -78,6 +78,11 @@ def anki_furigana_brackets(surface: str, reading: str) -> str:
             ruby = reading[j:reading_end]
             if not ruby:
                 return ""
+            # Anki's {{furigana:}} word boundary is space/> — without a gap,
+            # preceding kana/punct is glued into the ruby base
+            # (ひし先生[せんせい] → reading spreads over ひし先生).
+            if out and not out[-1].endswith((" ", ">")):
+                out.append(" ")
             out.append(f"{kanji_run}[{ruby}]")
             j = reading_end
             continue

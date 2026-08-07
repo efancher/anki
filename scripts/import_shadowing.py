@@ -13,7 +13,9 @@ Works from any clone of this repo:
   python3 scripts/import_shadowing.py /path/to/project -o out/
   python3 scripts/import_shadowing.py /path/to/project --skip-auto-caption
 
-Requires out/wk_mining_vocab_index.json (or --wk-index) for WK matching.
+Requires `out/wk_mining_vocab_index.json` (or `--wk-index`) for WK matching.
+Candidate enrichment uses the offline JMDict gloss cache
+(`out/jmdict-eng.json` / `out/jmdict_gloss_index.json`, built on first import).
 Optional: install fugashi + unidic-lite for better morphology / candidate POS
 filtering on legacy directory imports. Prefer the shadowing CLI venv:
 

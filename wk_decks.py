@@ -293,7 +293,7 @@ MODEL_TEMPLATE_VERSIONS = {
     "vocab_sentence_reading": "v1",
     "satori": "v19",
     "shadowing": "v10",
-    "shadowing_candidate": "v12",
+    "shadowing_candidate": "v13",
 }
 ITEM_MODEL_TEMPLATE_VERSION = MODEL_TEMPLATE_VERSIONS["item"]
 

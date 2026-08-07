@@ -275,6 +275,79 @@ _SMALL_KANA = frozenset("ゃゅょぁぃぅぇぉャュョァィゥェォ")
 # Preceding mora ends in these → following ウ/オ are interchangeable long vowels.
 _O_COLUMN_ENDS = frozenset("おこそとのほもよろごぞどぼぽオコソトノホモヨロゴゾドボポ")
 _E_COLUMN_ENDS = frozenset("えけせてねへめれげぜでべペエケセテネヘメレゲゼデベペ")
+# あ-row (VOICEVOX turns kana …かう into …カー / ツカア instead of ツカウ).
+_A_COLUMN_ENDS = frozenset(
+    "あかさたなはまやらわがざだばぱアカサタナハマヤラワガザダバパ"
+)
+_KANJI_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def text_has_kanji(text: str) -> bool:
+    return bool(_KANJI_CHAR_RE.search(text or ""))
+
+
+def voicevox_reading_tts_text(expression: str, reading: str) -> str:
+    """Prefer kanji Expression for dictionary Reading TTS.
+
+    VOICEVOX's analyzer maps some hiragana godan endings to long vowels
+    (``つかう`` → ツカア) while the same lemma in kanji keeps ウ (``使う`` → ツカウ).
+    """
+    expr = (expression or "").strip()
+    read = (reading or "").strip()
+    if expr and text_has_kanji(expr):
+        return expr
+    return read or expr
+
+
+def repair_voicevox_hiragana_au_long_vowel(audio_query: dict, text: str) -> dict:
+    """Restore orthographic ウ when kana input was folded to ア (つかう → ツカア).
+
+    Only touches hiragana/katakana-only inputs that end in う/ウ. Kanji input is
+    left alone (VOICEVOX usually tokenizes those correctly).
+    """
+    plain = sentence_plain_text(text)
+    if not plain or text_has_kanji(plain):
+        return audio_query
+    folded = katakana_to_hiragana(plain).rstrip("。．.!！?？")
+    if not folded.endswith("う"):
+        return audio_query
+    phrases = audio_query.get("accent_phrases")
+    if not isinstance(phrases, list) or not phrases:
+        return audio_query
+    updated = dict(audio_query)
+    new_phrases: List[dict] = []
+    repaired = False
+    for phrase in phrases:
+        if not isinstance(phrase, dict):
+            new_phrases.append(phrase)
+            continue
+        moras = phrase.get("moras")
+        if not isinstance(moras, list) or len(moras) < 2:
+            new_phrases.append(phrase)
+            continue
+        last = moras[-1]
+        prev = moras[-2]
+        if not isinstance(last, dict) or not isinstance(prev, dict):
+            new_phrases.append(phrase)
+            continue
+        last_text = str(last.get("text") or "")
+        prev_text = str(prev.get("text") or "")
+        prev_tail = prev_text[-1] if prev_text else ""
+        if last_text == "ア" and prev_tail in _A_COLUMN_ENDS:
+            phrase_copy = dict(phrase)
+            mora_copy = dict(last)
+            mora_copy["text"] = "ウ"
+            new_moras = list(moras)
+            new_moras[-1] = mora_copy
+            phrase_copy["moras"] = new_moras
+            new_phrases.append(phrase_copy)
+            repaired = True
+        else:
+            new_phrases.append(phrase)
+    if not repaired:
+        return audio_query
+    updated["accent_phrases"] = new_phrases
+    return updated
 
 
 def hiragana_to_katakana(text: str) -> str:
@@ -582,6 +655,7 @@ def synthesize_voicevox_with_phrases(
                 volume_scale=volume_scale,
                 speed_scale=speed_scale,
             )
+            audio_query = repair_voicevox_hiragana_au_long_vowel(audio_query, text)
             audio_query = apply_voicevox_accent_phrases(
                 audio_query,
                 pitch_accent=pitch_accent,

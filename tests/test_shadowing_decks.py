@@ -237,6 +237,19 @@ class ShadowingBuildTests(unittest.TestCase):
                 out,
                 wk_index=index,
                 include_auto_caption=True,
+                jmdict_gloss_index={
+                    "by_key": {},
+                    "by_expression": {
+                        "新幹線": [
+                            {
+                                "g": "Shinkansen",
+                                "r": "しんかんせん",
+                                "p": "n",
+                                "c": 1,
+                            }
+                        ]
+                    },
+                },
             )
             self.assertTrue(wk_path.is_file())
             self.assertTrue(cand_path.is_file())
@@ -262,6 +275,7 @@ class ShadowingBuildTests(unittest.TestCase):
                 root / "out",
                 wk_index=index,
                 include_auto_caption=False,
+                jmdict_gloss_index={"by_key": {}, "by_expression": {}},
             )
             self.assertEqual(stats.skipped_auto_caption, 1)
 
@@ -357,7 +371,11 @@ class ShadowingBuildTests(unittest.TestCase):
 
             out = root / "out"
             _, _, stats = build_shadowing_decks(
-                project, out, wk_index=index, include_auto_caption=True
+                project,
+                out,
+                wk_index=index,
+                include_auto_caption=True,
+                jmdict_gloss_index={"by_key": {}, "by_expression": {}},
             )
             # する is WK; 世話 is not in index → candidate
             self.assertEqual(stats.curated_selections, 2)

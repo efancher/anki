@@ -47,7 +47,10 @@ from shadowing_decks import (  # noqa: E402
     validate_selected_vocabulary,
 )
 from satori_decks import should_skip_copula_cloze  # noqa: E402
-from shadowing_match import match_wk_vocab_in_sentence  # noqa: E402
+from shadowing_match import (  # noqa: E402
+    has_spoken_japanese,
+    match_wk_vocab_in_sentence,
+)
 
 DEFAULT_ANKI_CONNECT = "http://127.0.0.1:8765"
 ANKI_CONNECT_TIMEOUT_SECONDS = 180
@@ -134,6 +137,8 @@ def iter_wk_note_payloads(
     )
     for sentence in project.sentences:
         if not include_auto_caption and sentence.transcript_status == "auto-caption":
+            continue
+        if not has_spoken_japanese(sentence.japanese):
             continue
         audio_name, media_path = stage_clip_media(project, sentence, media_dir)
 
