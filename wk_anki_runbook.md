@@ -387,6 +387,8 @@ python3 scripts/synthesize_immersion_sentence_audio.py \
 
 Backups → `Google Drive/My Drive/anki/backups/`. See script headers for logs and retention.
 
+**Server-side (headless) access to your real collection**, for Claude-assisted fixes and maintenance without needing the Mac awake: [docs/anki_headless_sync.md](docs/anki_headless_sync.md). Syncs via AnkiWeb, never touches the Mac directly.
+
 ---
 
 

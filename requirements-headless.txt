@@ -1,0 +1,12 @@
+# Headless Anki/AnkiWeb sync tooling (anki_headless/, scripts/anki_*).
+# Install into a dedicated venv, kept separate from requirements.txt (the
+# deck generator) since this pulls in the full Anki backend (~11MB wheel).
+#
+#   python3 -m venv .venv-headless
+#   .venv-headless/bin/pip install -r requirements-headless.txt
+#
+# Pinned to the exact Anki version in use (Anki 25.09.05, 217701ba) — do not
+# bump without confirming the desktop/mobile Anki version first (see
+# docs/anki_headless_sync.md, "Anki version alignment").
+anki==25.9.5
+pytest>=7.0.0

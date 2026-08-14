@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run WK add-on maintenance passes headlessly (no desktop Anki needed).
+#
+# These mirror the Tools-menu add-ons that normally run on the Mac:
+#   apply-deck-options  — Tools -> WK Apply Deck Options
+#   unlock-pass         — Tools -> WK Run Unlock Pass
+#   adjust-new-limits   — Tools -> WK Adjust New Limits
+#   health-check        — Tools -> WK Health Check
+#
+# By default: pulls fresh from AnkiWeb first, runs against profile/ (backed
+# up first), then syncs the result back up to AnkiWeb. Use --no-sync-before
+# / --no-sync-after / --target working to change that.
+#
+# Usage:
+#   scripts/anki_run health-check
+#   scripts/anki_run unlock-pass adjust-new-limits
+#   scripts/anki_run all
+#   scripts/anki_run health-check --target working --no-sync-after   # preview only
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PYTHON="${ANKI_HEADLESS_PYTHON:-${REPO_ROOT}/.venv-headless/bin/python3}"
+cd "${REPO_ROOT}"
+exec "${PYTHON}" -m anki_headless.cli run "$@"

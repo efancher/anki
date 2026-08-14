@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Sync AnkiWeb -> ~/anki-data/profile/, then refresh ~/anki-data/working/.
+#
+# Incremental only by default — refuses and exits nonzero if AnkiWeb reports
+# the collections have diverged enough to need a full upload/download
+# (see docs/anki_headless_sync.md). Never contacts the desktop Mac.
+#
+# Usage:
+#   scripts/anki_sync_pull                # collection only (fast)
+#   scripts/anki_sync_pull --media         # also sync media (slow, first run especially)
+#   scripts/anki_sync_pull --allow-full-sync download   # only after reading the runbook
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PYTHON="${ANKI_HEADLESS_PYTHON:-${REPO_ROOT}/.venv-headless/bin/python3}"
+cd "${REPO_ROOT}"
+exec "${PYTHON}" -m anki_headless.cli pull "$@"

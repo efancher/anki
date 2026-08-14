@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Sync ~/anki-data/profile/ (or a promoted working/ candidate) up to AnkiWeb.
+#
+# Always backs up profile/ first (~/anki-data/backups/), always runs a
+# read-only SQLite integrity check before pushing, and refuses full
+# uploads/downloads unless you pass --allow-full-sync explicitly.
+#
+# Usage:
+#   scripts/anki_sync_push --dry-run                  # validate + backup only, no network
+#   scripts/anki_sync_push                             # push profile/ as-is
+#   scripts/anki_sync_push --promote-working            # replace profile/ with working/ first, then push
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PYTHON="${ANKI_HEADLESS_PYTHON:-${REPO_ROOT}/.venv-headless/bin/python3}"
+cd "${REPO_ROOT}"
+exec "${PYTHON}" -m anki_headless.cli push "$@"
